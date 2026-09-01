@@ -2,7 +2,7 @@ package `in`.odograph.tracker.ui.theme
 
 import androidx.compose.ui.graphics.Color
 
-enum class Direction { ION, CHRONO, VECTOR }
+enum class Direction { ION, CHRONO, VECTOR, AUDI }
 
 data class Palette(
     val ground: Color,
@@ -37,6 +37,10 @@ fun paletteFor(direction: Direction, night: Boolean): Palette {
         Direction.VECTOR ->
             if (night) Color(0xFFFF5A1F) to Color(0xFF8A2E0C)
             else Color(0xFFDE3F06) to Color(0xFF7A2A08)
+        // Needle red plus a cool machined silver for the bezel and graduations.
+        Direction.AUDI ->
+            if (night) Color(0xFFE8112D) to Color(0xFFC2C8D0)
+            else Color(0xFFB3000F) to Color(0xFF5A616B)
     }
     return Palette(
         ground = if (night) NIGHT_GROUND else DAY_GROUND,

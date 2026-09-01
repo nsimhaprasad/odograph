@@ -64,6 +64,20 @@ android {
     }
 }
 
+// Screenshot rendering is a build tool, not a unit test: it asserts nothing about correctness and
+// it needs Robolectric's native graphics runtime, which loads once per JVM and only if no
+// legacy-graphics test got there first. Keeping it out of the default suite stops a tooling
+// constraint from producing false failures.
+//
+//   ./gradlew :app:testDebugUnitTest -Pscreenshots --tests '*ScreenshotTest*'
+tasks.withType<Test>().configureEach {
+    if (!project.hasProperty("screenshots")) {
+        filter { excludeTestsMatching("*ScreenshotTest*") }
+    } else {
+        setForkEvery(1)
+    }
+}
+
 dependencies {
     val composeBom = platform("androidx.compose:compose-bom:2024.06.00")
     implementation(composeBom)

@@ -101,6 +101,36 @@ class ScreenshotTest {
 
     @Test
     @Config(qualifiers = "w640dp-h360dp-land")
+    fun `driver audi night`() {
+        compose.setContent {
+            DriverScreen(live, 88.6f, Direction.AUDI, paletteFor(Direction.AUDI, night = true))
+        }
+        shoot("03b-driver-audi-night")
+    }
+
+    @Test
+    @Config(qualifiers = "w640dp-h360dp-land")
+    fun `driver audi day`() {
+        compose.setContent {
+            DriverScreen(live, 88.6f, Direction.AUDI, paletteFor(Direction.AUDI, night = false))
+        }
+        shoot("04b-driver-audi-day")
+    }
+
+    @Test
+    @Config(qualifiers = "w640dp-h360dp-land")
+    fun `driver audi overspeeding`() {
+        compose.setContent {
+            DriverScreen(
+                live.copy(overLimit = true, speedLimitKmh = 80, speedMps = 29.4f),
+                104f, Direction.AUDI, paletteFor(Direction.AUDI, night = true)
+            )
+        }
+        shoot("05b-driver-audi-overspeed")
+    }
+
+    @Test
+    @Config(qualifiers = "w640dp-h360dp-land")
     fun `driver ion day`() {
         compose.setContent {
             DriverScreen(live, 88.6f, Direction.ION, paletteFor(Direction.ION, night = false))

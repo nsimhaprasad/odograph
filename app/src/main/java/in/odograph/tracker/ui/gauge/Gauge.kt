@@ -44,6 +44,18 @@ fun Gauge(
             Direction.ION -> drawIon(c, r, t, p)
             Direction.CHRONO -> drawChrono(c, r, t, p)
             Direction.VECTOR -> drawVector(c, r, t, p)
+            Direction.AUDI -> drawAudi(c, r, t, p)
+        }
+        // The overspeed signal has to be structural, not chromatic. Recolouring the accent says
+        // nothing on a theme whose accent is already red, so an extra ring is drawn instead: a
+        // shape that was not there before reads unambiguously under any palette.
+        if (overLimit) {
+            drawCircle(
+                color = palette.warn,
+                radius = r * 1.16f,
+                center = c,
+                style = Stroke(width = r * 0.035f)
+            )
         }
         drawReadout(c, r, speedKmh, hasFix, p, direction)
     }
@@ -187,6 +199,70 @@ private fun DrawScope.drawVector(c: Offset, r: Float, t: Float, palette: Palette
     }
 }
 
+/**
+ * Virtual-cockpit dial: fine dense graduations, a machined bezel, tight sans numerals and a very
+ * thin red needle. The restraint is the point — everything is hairline except the needle.
+ */
+private fun DrawScope.drawAudi(c: Offset, r: Float, t: Float, palette: Palette) {
+    val start = 150.0
+    val sweep = 240.0
+
+    drawCircle(palette.trackSoft, r * 1.04f, c)
+    // Machined bezel.
+    drawCircle(palette.accent2.copy(alpha = 0.55f), r * 1.04f, c, style = Stroke(width = r * 0.018f))
+    drawCircle(palette.track, r * 0.60f, c, style = Stroke(width = r * 0.006f))
+
+    val numeral = android.graphics.Paint().apply {
+        isAntiAlias = true
+        textAlign = android.graphics.Paint.Align.CENTER
+        color = palette.numeral.toArgb()
+        textSize = r * 0.115f
+        typeface = android.graphics.Typeface.create(
+            android.graphics.Typeface.SANS_SERIF, android.graphics.Typeface.NORMAL
+        )
+    }
+
+    var kmh = 0
+    while (kmh <= GAUGE_MAX_KMH.toInt()) {
+        val f = kmh / GAUGE_MAX_KMH
+        val a = Math.toRadians(start + sweep * f)
+        val major = kmh % 20 == 0
+        val medium = kmh % 10 == 0
+        val ri = r * when {
+            major -> 0.80f
+            medium -> 0.86f
+            else -> 0.90f
+        }
+        drawLine(
+            color = if (major) palette.accent2 else palette.accent2.copy(alpha = 0.45f),
+            start = Offset(c.x + (cos(a) * ri).toFloat(), c.y + (sin(a) * ri).toFloat()),
+            end = Offset(c.x + (cos(a) * r * 0.96f).toFloat(), c.y + (sin(a) * r * 0.96f).toFloat()),
+            strokeWidth = if (major) r * 0.016f else r * 0.006f
+        )
+        if (major) {
+            val rn = r * 0.68f
+            drawContext.canvas.nativeCanvas.drawText(
+                kmh.toString(),
+                c.x + (cos(a) * rn).toFloat(),
+                c.y + (sin(a) * rn).toFloat() + r * 0.040f,
+                numeral
+            )
+        }
+        kmh += 2
+    }
+
+    // Hairline needle: long, tapering, with a short counterbalance.
+    val at = Math.toRadians(start + sweep * t)
+    val tip = Offset(c.x + (cos(at) * r * 0.92f).toFloat(), c.y + (sin(at) * r * 0.92f).toFloat())
+    val tail = Offset(c.x - (cos(at) * r * 0.14f).toFloat(), c.y - (sin(at) * r * 0.14f).toFloat())
+    if (palette.glow > 0f) {
+        drawLine(palette.accent.copy(alpha = 0.22f), tail, tip, strokeWidth = r * 0.055f)
+    }
+    drawLine(palette.accent, tail, tip, strokeWidth = r * 0.016f)
+    drawCircle(palette.accent, r * 0.045f, c)
+    drawCircle(palette.trackSoft, r * 0.022f, c)
+}
+
 private fun DrawScope.drawReadout(
     c: Offset, r: Float, speedKmh: Float, hasFix: Boolean,
     palette: Palette, direction: Direction
@@ -199,7 +275,11 @@ private fun DrawScope.drawReadout(
             typeface = android.graphics.Typeface.create(
                 android.graphics.Typeface.SANS_SERIF, android.graphics.Typeface.BOLD
             )
-            textSize = r * if (direction == Direction.CHRONO) 0.34f else 0.70f
+            textSize = r * when (direction) {
+                Direction.CHRONO -> 0.34f
+                Direction.AUDI -> 0.30f
+                else -> 0.70f
+            }
         }
         val label = android.graphics.Paint().apply {
             isAntiAlias = true
@@ -208,7 +288,10 @@ private fun DrawScope.drawReadout(
             textSize = r * 0.115f
             letterSpacing = 0.28f
         }
-        val yOffset = if (direction == Direction.CHRONO) r * 0.52f else r * 0.22f
+        val yOffset = when (direction) {
+            Direction.CHRONO, Direction.AUDI -> r * 0.52f
+            else -> r * 0.22f
+        }
         drawText(if (hasFix) speedKmh.toInt().toString() else "--", c.x, c.y + yOffset, numeral)
         // Never "0 km/h" before a fix: a zero is a measurement claim, and an instrument that
         // fakes confidence stops being believable.
