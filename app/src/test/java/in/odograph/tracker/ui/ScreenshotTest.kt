@@ -1,0 +1,189 @@
+package `in`.odograph.tracker.ui
+
+import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.view.View
+import androidx.activity.ComponentActivity
+import androidx.compose.ui.test.junit4.createAndroidComposeRule
+import `in`.odograph.tracker.record.TripRecorderService
+import `in`.odograph.tracker.ui.theme.Direction
+import `in`.odograph.tracker.ui.theme.ThemeMode
+import `in`.odograph.tracker.ui.theme.paletteFor
+import org.assertj.core.api.Assertions.assertThat
+import org.junit.Rule
+import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
+import org.robolectric.annotation.GraphicsMode
+import java.io.File
+
+/**
+ * Renders the real composables to PNGs so the UI can be reviewed without a device.
+ *
+ * Robolectric stubs graphics by default, which is why a bounds-based layout check can pass while
+ * the pixels are nonsense. NATIVE graphics mode swaps in a real Skia backend, so what comes out
+ * here is the shipping Gauge.kt drawing, not an approximation of it.
+ */
+@RunWith(RobolectricTestRunner::class)
+@GraphicsMode(GraphicsMode.Mode.NATIVE)
+class ScreenshotTest {
+
+    @get:Rule
+    val compose = createAndroidComposeRule<ComponentActivity>()
+
+    private val outDir = File("build/screenshots").apply { mkdirs() }
+
+    private val live = TripRecorderService.LiveState(
+        hasFix = true, speedMps = 24.6f, distanceM = 18_432.0,
+        elapsedS = 1_484, maxSpeedMps = 31.9f, movingS = 1_219, tripId = 1
+    )
+
+    private val route = List(140) { i ->
+        val t = i / 18.0
+        (12.9716 + t * 0.010 + kotlin.math.sin(t * 2.1) * 0.004) to
+            (77.5946 + t * 0.016 + kotlin.math.cos(t * 1.6) * 0.005)
+    }
+
+    /**
+     * captureToImage() goes through PixelCopy, which needs a real window Robolectric does not
+     * have. Drawing the decor view into a software canvas sidesteps that and still exercises the
+     * genuine Compose draw path.
+     */
+    private fun shoot(name: String) {
+        compose.waitForIdle()
+        val view: View = compose.activity.window.decorView
+        val metrics = compose.activity.resources.displayMetrics
+        val w = metrics.widthPixels
+        val h = metrics.heightPixels
+        view.measure(
+            View.MeasureSpec.makeMeasureSpec(w, View.MeasureSpec.EXACTLY),
+            View.MeasureSpec.makeMeasureSpec(h, View.MeasureSpec.EXACTLY)
+        )
+        view.layout(0, 0, w, h)
+        compose.waitForIdle()
+
+        val bitmap = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+        view.draw(Canvas(bitmap))
+
+        val f = File(outDir, "$name.png")
+        f.outputStream().use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
+        assertThat(f.length()).`as`("$name.png should not be empty").isGreaterThan(1_000L)
+        println("SHOT ${f.absolutePath} ${w}x$h ${f.length()}b")
+    }
+
+    @Test
+    @Config(qualifiers = "w640dp-h360dp-land")
+    fun `driver ion night`() {
+        compose.setContent {
+            DriverScreen(live, 88.6f, Direction.ION, paletteFor(Direction.ION, night = true))
+        }
+        shoot("01-driver-ion-night")
+    }
+
+    @Test
+    @Config(qualifiers = "w640dp-h360dp-land")
+    fun `driver chrono night`() {
+        compose.setContent {
+            DriverScreen(live, 88.6f, Direction.CHRONO, paletteFor(Direction.CHRONO, night = true))
+        }
+        shoot("02-driver-chrono-night")
+    }
+
+    @Test
+    @Config(qualifiers = "w640dp-h360dp-land")
+    fun `driver vector night`() {
+        compose.setContent {
+            DriverScreen(live, 88.6f, Direction.VECTOR, paletteFor(Direction.VECTOR, night = true))
+        }
+        shoot("03-driver-vector-night")
+    }
+
+    @Test
+    @Config(qualifiers = "w640dp-h360dp-land")
+    fun `driver ion day`() {
+        compose.setContent {
+            DriverScreen(live, 88.6f, Direction.ION, paletteFor(Direction.ION, night = false))
+        }
+        shoot("04-driver-ion-day")
+    }
+
+    @Test
+    @Config(qualifiers = "w640dp-h360dp-land")
+    fun `driver overspeeding`() {
+        compose.setContent {
+            DriverScreen(
+                live.copy(overLimit = true, speedLimitKmh = 80, speedMps = 29.4f),
+                104f, Direction.ION, paletteFor(Direction.ION, night = true)
+            )
+        }
+        shoot("05-driver-overspeed")
+    }
+
+    @Test
+    @Config(qualifiers = "w640dp-h360dp-land")
+    fun `driver acquiring gps`() {
+        compose.setContent {
+            DriverScreen(
+                TripRecorderService.LiveState(hasFix = false),
+                0f, Direction.ION, paletteFor(Direction.ION, night = true)
+            )
+        }
+        shoot("06-driver-acquiring")
+    }
+
+    @Test
+    @Config(qualifiers = "w640dp-h360dp-land")
+    fun `detailed with route`() {
+        compose.setContent {
+            DetailScreen(
+                live = live, smoothedKmh = 88.6f, route = route, showTiles = false,
+                direction = Direction.ION, palette = paletteFor(Direction.ION, night = true)
+            )
+        }
+        shoot("07-detailed-ion-night")
+    }
+
+    @Test
+    @Config(qualifiers = "w640dp-h360dp-land")
+    fun `detailed vector day`() {
+        compose.setContent {
+            DetailScreen(
+                live = live, smoothedKmh = 88.6f, route = route, showTiles = false,
+                direction = Direction.VECTOR, palette = paletteFor(Direction.VECTOR, night = false)
+            )
+        }
+        shoot("08-detailed-vector-day")
+    }
+
+    @Test
+    @Config(qualifiers = "w533dp-h300dp-land")
+    fun `driver on the small 800x480 viewport`() {
+        compose.setContent {
+            DriverScreen(live, 88.6f, Direction.ION, paletteFor(Direction.ION, night = true))
+        }
+        shoot("09-driver-small-800x480")
+    }
+
+    @Test
+    @Config(qualifiers = "w960dp-h360dp-land")
+    fun `driver on a wide short head unit`() {
+        compose.setContent {
+            DriverScreen(live, 88.6f, Direction.CHRONO, paletteFor(Direction.CHRONO, night = true))
+        }
+        shoot("10-driver-wide-1920x720")
+    }
+
+    @Test
+    @Config(qualifiers = "w640dp-h360dp-land")
+    fun `setup screen`() {
+        compose.setContent {
+            SetupScreen(
+                direction = Direction.ION, themeMode = ThemeMode.AUTO, showTiles = true,
+                palette = paletteFor(Direction.ION, night = true),
+                onDirection = {}, onThemeMode = {}, onTiles = {}
+            )
+        }
+        shoot("11-setup")
+    }
+}

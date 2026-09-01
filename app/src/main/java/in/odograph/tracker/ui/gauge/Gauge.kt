@@ -112,18 +112,38 @@ private fun DrawScope.drawChrono(c: Offset, r: Float, t: Float, palette: Palette
             center = c, style = Stroke(width = 1f)
         )
     }
+    val dialNumeral = android.graphics.Paint().apply {
+        isAntiAlias = true
+        textAlign = android.graphics.Paint.Align.CENTER
+        color = palette.accent.toArgb()
+        alpha = 200
+        textSize = r * 0.135f
+        typeface = android.graphics.Typeface.create(
+            android.graphics.Typeface.SERIF, android.graphics.Typeface.NORMAL
+        )
+    }
     var kmh = 0
     while (kmh <= GAUGE_MAX_KMH.toInt()) {
         val f = kmh / GAUGE_MAX_KMH
         val a = Math.toRadians(start + sweep * f)
         val major = kmh % 20 == 0
-        val ri = r * if (major) 0.74f else 0.84f
+        val ri = r * if (major) 0.76f else 0.86f
         drawLine(
             color = if (major) palette.accent else palette.dim,
             start = Offset(c.x + (cos(a) * ri).toFloat(), c.y + (sin(a) * ri).toFloat()),
             end = Offset(c.x + (cos(a) * r * 0.94f).toFloat(), c.y + (sin(a) * r * 0.94f).toFloat()),
             strokeWidth = if (major) r * 0.020f else r * 0.008f
         )
+        // Numerals are what make a dial read as an instrument rather than a progress ring.
+        if (major) {
+            val rn = r * 0.62f
+            drawContext.canvas.nativeCanvas.drawText(
+                kmh.toString(),
+                c.x + (cos(a) * rn).toFloat(),
+                c.y + (sin(a) * rn).toFloat() + r * 0.048f,
+                dialNumeral
+            )
+        }
         kmh += 5
     }
     val at = Math.toRadians(start + sweep * t)
