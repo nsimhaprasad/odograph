@@ -29,19 +29,23 @@ fun Gauge(
     hasFix: Boolean,
     direction: Direction,
     palette: Palette,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    overLimit: Boolean = false
 ) {
+    // Recolouring the whole instrument costs the driver no attention, which is why this channel
+    // fires the instant the limit is crossed while the audible one waits out the sustain window.
+    val p = if (overLimit) palette.copy(accent = palette.warn, accent2 = palette.warn) else palette
     Canvas(modifier) {
         val r = min(size.width, size.height) * 0.40f
         val c = Offset(size.width / 2f, size.height / 2f)
         val t = (speedKmh / GAUGE_MAX_KMH).coerceIn(0f, 1f)
 
         when (direction) {
-            Direction.ION -> drawIon(c, r, t, palette)
-            Direction.CHRONO -> drawChrono(c, r, t, palette)
-            Direction.VECTOR -> drawVector(c, r, t, palette)
+            Direction.ION -> drawIon(c, r, t, p)
+            Direction.CHRONO -> drawChrono(c, r, t, p)
+            Direction.VECTOR -> drawVector(c, r, t, p)
         }
-        drawReadout(c, r, speedKmh, hasFix, palette, direction)
+        drawReadout(c, r, speedKmh, hasFix, p, direction)
     }
 }
 

@@ -38,6 +38,28 @@ class PaletteTest {
     }
 
     @Test
+    fun `the warning colour is distinct from every direction's own accent`() {
+        Direction.entries.forEach { d ->
+            listOf(true, false).forEach { night ->
+                val p = paletteFor(d, night)
+                assertThat(p.warn).isNotEqualTo(p.accent)
+                assertThat(p.warn).isNotEqualTo(p.accent2)
+            }
+        }
+    }
+
+    @Test
+    fun `the warning colour reads against its own ground`() {
+        Direction.entries.forEach { d ->
+            listOf(true, false).forEach { night ->
+                val p = paletteFor(d, night)
+                val delta = kotlin.math.abs(p.warn.luminance() - p.ground.luminance())
+                assertThat(delta).`as`("warn vs ground for $d night=$night").isGreaterThan(0.05f)
+            }
+        }
+    }
+
+    @Test
     fun `auto theme treats evening and early morning as night`() {
         assertThat(isNight(ThemeMode.AUTO, 22)).isTrue()
         assertThat(isNight(ThemeMode.AUTO, 3)).isTrue()

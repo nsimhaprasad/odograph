@@ -35,7 +35,8 @@ fun DriverScreen(
                 hasFix = live.hasFix,
                 direction = direction,
                 palette = palette,
-                modifier = Modifier.weight(1f).fillMaxHeight()
+                modifier = Modifier.weight(1f).fillMaxHeight(),
+                overLimit = live.overLimit
             )
             Column(
                 modifier = Modifier.weight(1f).fillMaxHeight(),
@@ -51,6 +52,9 @@ fun DriverScreen(
                 ) {
                     SmallStat("${mpsToKmh(live.maxSpeedMps).toInt()}", "MAX", palette, m)
                     SmallStat(formatHhMm(live.movingS), "MOVING", palette, m)
+                    if (live.speedLimitKmh > 0) {
+                        SmallStat("${live.speedLimitKmh}", "LIMIT", palette, m)
+                    }
                 }
             }
         }

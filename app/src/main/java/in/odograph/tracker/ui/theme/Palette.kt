@@ -13,6 +13,8 @@ data class Palette(
     val dim: Color,
     val accent: Color,
     val accent2: Color,
+    /** Overspeed. Deliberately outside the direction's own palette so it cannot be mistaken. */
+    val warn: Color,
     /** Blur radius multiplier. Zero on a light ground, where glow only muddies. */
     val glow: Float
 )
@@ -45,6 +47,7 @@ fun paletteFor(direction: Direction, night: Boolean): Palette {
         dim = if (night) Color(0xFF8B96A5) else Color(0xFF4A5462),
         accent = accents.first,
         accent2 = accents.second,
+        warn = if (night) Color(0xFFFF4D4F) else Color(0xFFC81E14),
         glow = if (night) 1f else 0f
     )
 }

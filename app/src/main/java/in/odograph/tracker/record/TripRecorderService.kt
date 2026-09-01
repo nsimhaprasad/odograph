@@ -9,6 +9,9 @@ import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
+import `in`.odograph.tracker.alert.AlertConfig
+import `in`.odograph.tracker.alert.AlertSound
+import `in`.odograph.tracker.alert.SpeedAlert
 import `in`.odograph.tracker.core.Fix
 import `in`.odograph.tracker.core.Geo
 import `in`.odograph.tracker.data.OdographDb
@@ -33,7 +36,9 @@ class TripRecorderService : Service() {
         val elapsedS: Long = 0,
         val maxSpeedMps: Float = 0f,
         val movingS: Long = 0,
-        val tripId: Long = -1
+        val tripId: Long = -1,
+        val overLimit: Boolean = false,
+        val speedLimitKmh: Int = 0
     )
 
     companion object {
@@ -51,11 +56,18 @@ class TripRecorderService : Service() {
     private var tripId: Long = -1
     private var lastFix: Fix? = null
     private var startedAt: Long? = null
+    private lateinit var settings: Settings
+    private lateinit var alertSound: AlertSound
+    private var speedAlert = SpeedAlert(AlertConfig(limitKmh = 0f))
+    private var configuredLimit = -1
 
     override fun onCreate() {
         super.onCreate()
         startInForeground()
         source = GnssLocationSource(this)
+        settings = Settings(this)
+        alertSound = AlertSound(this)
+        runCatching { alertSound.prepare(settings.alertMode) }
 
         io.launch {
             val dao = OdographDb.get(this@TripRecorderService).dao()
@@ -102,6 +114,15 @@ class TripRecorderService : Service() {
             prev.accuracyM <= ACCURACY_LIMIT_M && fix.accuracyM <= ACCURACY_LIMIT_M
         ) Geo.haversineMetres(prev.lat, prev.lon, fix.lat, fix.lon) else 0.0
 
+        val speedKmh = fix.speedMps * 3.6f
+        val limit = settings.speedLimitKmh
+        if (limit != configuredLimit) {
+            configuredLimit = limit
+            speedAlert.reconfigure(AlertConfig(limitKmh = limit.toFloat()))
+        }
+        val alert = speedAlert.update(speedKmh, fix.t)
+        if (alert.sound) runCatching { alertSound.play(settings.alertMode) }
+
         val cur = _state.value
         _state.value = cur.copy(
             hasFix = true,
@@ -111,7 +132,9 @@ class TripRecorderService : Service() {
             maxSpeedMps = if (fix.accuracyM <= SPEED_ACCURACY_LIMIT_M)
                 maxOf(cur.maxSpeedMps, fix.speedMps) else cur.maxSpeedMps,
             movingS = cur.movingS + if (fix.speedMps > 0.5f) 1 else 0,
-            tripId = tripId
+            tripId = tripId,
+            overLimit = alert.overLimit,
+            speedLimitKmh = limit
         )
         lastFix = fix
     }
@@ -147,6 +170,7 @@ class TripRecorderService : Service() {
 
     override fun onDestroy() {
         runCatching { DashboardServer.stop() }
+        if (this::alertSound.isInitialized) runCatching { alertSound.release() }
         if (this::source.isInitialized) source.stop()
         io.cancel()
         super.onDestroy()

@@ -157,6 +157,16 @@ the loss of one in-flight row, not a trip.
 | Wrong clock at boot | D2 — GNSS time |
 | Web dashboard unreachable | D9 — two other export paths that need no network |
 
+**D11 — Overspeed alerting is two channels on two clocks.** `SpeedAlert` is a pure, clock-injected
+state machine. A naive `speed > limit` chimes every second while cruising at the limit, because
+GNSS speed jitters 2-3 km/h, so three mechanisms guard it: a +/-3 km/h hysteresis band stops
+flapping, a 3 s sustain window ignores a brief overtake, and a 25 s repeat interval turns nagging
+into reminding. The visual channel (the gauge recolours to `palette.warn`) fires immediately
+because it costs no attention; the audible channel waits out the sustain, so it only fires when
+the cheap channel was not acted on. Audio requests transient-may-duck focus so music ducks rather
+than stops. Limit is user-set (road speed-limit data for Indian roads is not reliable enough to
+depend on) and zero disables the feature.
+
 **D10 — Place names come from cluster centroids, not trips.** Reverse geocoding runs against a
 *place* the first time it is created, never per trip, so a hundred commutes to the same office
 cost one lookup that is then cached forever. Android's built-in `Geocoder` has no backend without

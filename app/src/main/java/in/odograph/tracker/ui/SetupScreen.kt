@@ -22,6 +22,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.sp
+import `in`.odograph.tracker.alert.AlertMode
 import `in`.odograph.tracker.data.OdographDb
 import `in`.odograph.tracker.export.Exporters
 import `in`.odograph.tracker.export.shareFile
@@ -30,6 +31,7 @@ import `in`.odograph.tracker.probe.DeviceProbe
 import `in`.odograph.tracker.server.DashboardServer
 import `in`.odograph.tracker.ui.theme.Direction
 import `in`.odograph.tracker.ui.theme.Palette
+import `in`.odograph.tracker.ui.theme.Settings
 import `in`.odograph.tracker.ui.theme.ThemeMode
 
 @OptIn(ExperimentalLayoutApi::class)
@@ -44,8 +46,11 @@ fun SetupScreen(
     onTiles: (Boolean) -> Unit
 ) {
     val ctx = LocalContext.current
+    val settings = remember { Settings(ctx) }
     var probe by remember { mutableStateOf("") }
     var note by remember { mutableStateOf("") }
+    var limit by remember { mutableStateOf(settings.speedLimitKmh) }
+    var alertMode by remember { mutableStateOf(settings.alertMode) }
 
     LaunchedEffect(Unit) {
         probe = runCatching { DeviceProbe.collect(ctx).asText() }
@@ -72,6 +77,49 @@ fun SetupScreen(
                         Chip(t.name, t == themeMode, palette, m) { onThemeMode(t) }
                     }
                 }
+            }
+
+            Section("SPEED ALERT", palette, m) {
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(m.gap / 2)) {
+                    listOf(0, 50, 60, 80, 100, 120).forEach { kmh ->
+                        Chip(
+                            text = if (kmh == 0) "OFF" else "$kmh",
+                            selected = kmh == limit,
+                            palette = palette,
+                            m = m
+                        ) { limit = kmh; settings.speedLimitKmh = kmh }
+                    }
+                }
+                if (limit > 0) {
+                    FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(m.gap / 2),
+                        modifier = Modifier.padding(top = m.gap / 2)
+                    ) {
+                        AlertMode.entries.forEach { mode ->
+                            Chip(
+                                text = when (mode) {
+                                    AlertMode.VISUAL_ONLY -> "SILENT"
+                                    AlertMode.CHIME -> "CHIME"
+                                    AlertMode.VOICE -> "VOICE"
+                                },
+                                selected = mode == alertMode,
+                                palette = palette,
+                                m = m
+                            ) { alertMode = mode; settings.alertMode = mode }
+                        }
+                    }
+                }
+                Text(
+                    if (limit == 0) {
+                        "Off. No overspeed warning of any kind."
+                    } else {
+                        "The gauge turns red the moment you pass $limit km/h. The sound waits " +
+                            "3 seconds, so a brief overtake stays silent, and repeats at most " +
+                            "once every 25 seconds."
+                    },
+                    color = palette.dim, fontSize = m.body,
+                    modifier = Modifier.padding(top = m.gap / 2)
+                )
             }
 
             Section("MAP", palette, m) {

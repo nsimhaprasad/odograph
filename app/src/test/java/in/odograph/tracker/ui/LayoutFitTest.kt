@@ -158,6 +158,30 @@ class LayoutFitTest {
 
     @Test
     @Config(qualifiers = "w533dp-h300dp-land")
+    fun `driver view fits while overspeeding with a limit badge shown`() {
+        compose.setContent {
+            DriverScreen(
+                live.copy(overLimit = true, speedLimitKmh = 80),
+                104f, Direction.ION, paletteFor(Direction.ION, night = true)
+            )
+        }
+        assertNothingOverflows()
+    }
+
+    @Test
+    @Config(qualifiers = "w427dp-h240dp-land")
+    fun `driver view fits the limit badge on the smallest viewport`() {
+        compose.setContent {
+            DriverScreen(
+                live.copy(overLimit = true, speedLimitKmh = 120),
+                131f, Direction.VECTOR, paletteFor(Direction.VECTOR, night = false)
+            )
+        }
+        assertNothingOverflows()
+    }
+
+    @Test
+    @Config(qualifiers = "w533dp-h300dp-land")
     fun `detailed view fits with no route recorded yet`() {
         compose.setContent {
             DetailScreen(

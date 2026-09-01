@@ -44,7 +44,8 @@ fun DetailScreen(
                     hasFix = live.hasFix,
                     direction = direction,
                     palette = palette,
-                    modifier = Modifier.weight(1f).fillMaxHeight()
+                    modifier = Modifier.weight(1f).fillMaxHeight(),
+                    overLimit = live.overLimit
                 )
                 if (showTiles) {
                     RouteMap(route, palette, Modifier.weight(2f).fillMaxHeight())

@@ -26,5 +26,9 @@ adb install -r odograph-0.1.0.apk
 2. Allow notifications (the recorder runs as a foreground service).
 3. Settings → Battery → Odograph → **don't optimise**.
 
+4. Optional: SETUP → **SPEED ALERT** → pick a limit. The gauge turns red the instant you pass
+   it; the chime waits 3 seconds so a brief overtake stays silent, and repeats at most every
+   25 seconds. Choose SILENT, CHIME or VOICE.
+
 Full detail, including what to do if it does not auto-start after ignition, is in
 `docs/INSTALL.md`.

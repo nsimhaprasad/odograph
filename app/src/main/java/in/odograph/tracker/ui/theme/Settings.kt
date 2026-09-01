@@ -1,6 +1,7 @@
 package `in`.odograph.tracker.ui.theme
 
 import android.content.Context
+import `in`.odograph.tracker.alert.AlertMode
 import java.util.Calendar
 
 enum class ThemeMode { AUTO, DAY, NIGHT }
@@ -36,7 +37,19 @@ class Settings(ctx: Context) {
         get() = prefs.getString(KEY_DEVICE, "").orEmpty().ifBlank { "windsor" }
         set(value) = prefs.edit().putString(KEY_DEVICE, value.trim()).apply()
 
+    /** Kilometres per hour. Zero disables overspeed alerting entirely. */
+    var speedLimitKmh: Int
+        get() = prefs.getInt(KEY_LIMIT, 0)
+        set(value) = prefs.edit().putInt(KEY_LIMIT, value.coerceIn(0, 200)).apply()
+
+    var alertMode: AlertMode
+        get() = runCatching { AlertMode.valueOf(prefs.getString(KEY_ALERT, null) ?: "") }
+            .getOrDefault(AlertMode.CHIME)
+        set(value) = prefs.edit().putString(KEY_ALERT, value.name).apply()
+
     private companion object {
+        const val KEY_LIMIT = "speed_limit_kmh"
+        const val KEY_ALERT = "alert_mode"
         const val KEY_DIRECTION = "direction"
         const val KEY_THEME = "theme_mode"
         const val KEY_WEBHOOK = "webhook_url"
