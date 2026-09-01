@@ -55,6 +55,12 @@ interface OdographDao {
     @Query("UPDATE trips SET clusterId = :clusterId WHERE id = :id")
     fun setCluster(id: Long, clusterId: Long)
 
+    @Query("SELECT * FROM trips WHERE endedAt IS NOT NULL AND syncedAt IS NULL ORDER BY startedAt")
+    fun unsyncedTrips(): List<TripEntity>
+
+    @Query("UPDATE trips SET syncedAt = :at WHERE id = :id")
+    fun markSynced(id: Long, at: Long)
+
     @Query("DELETE FROM trips WHERE id = :id")
     fun deleteTrip(id: Long)
 }

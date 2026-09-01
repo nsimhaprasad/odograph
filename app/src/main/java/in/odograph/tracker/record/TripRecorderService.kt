@@ -13,6 +13,9 @@ import `in`.odograph.tracker.core.Fix
 import `in`.odograph.tracker.core.Geo
 import `in`.odograph.tracker.data.OdographDb
 import `in`.odograph.tracker.data.PointEntity
+import `in`.odograph.tracker.server.DashboardServer
+import `in`.odograph.tracker.sync.Outbound
+import `in`.odograph.tracker.ui.theme.Settings
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -60,6 +63,19 @@ class TripRecorderService : Service() {
             tripId = TripRecovery.recoverAndStart(dao, nowFromGnss = null)
             _state.value = LiveState(tripId = tripId)
             source.start { fix -> io.launch { record(fix) } }
+
+            // Everything below is best-effort and entirely optional. The hotspot is usually up,
+            // but recording must behave identically when it is not, so both are wrapped and
+            // neither is on the capture path.
+            runCatching { DashboardServer.start(this@TripRecorderService) }
+            runCatching {
+                val settings = Settings(this@TripRecorderService)
+                if (settings.webhookUrl.isNotBlank()) {
+                    Outbound.syncPending(
+                        this@TripRecorderService, settings.webhookUrl, settings.deviceId
+                    )
+                }
+            }
         }
     }
 
@@ -130,6 +146,7 @@ class TripRecorderService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onDestroy() {
+        runCatching { DashboardServer.stop() }
         if (this::source.isInitialized) source.stop()
         io.cancel()
         super.onDestroy()

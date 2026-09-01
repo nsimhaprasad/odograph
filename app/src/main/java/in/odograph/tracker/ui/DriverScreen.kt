@@ -2,18 +2,16 @@ package `in`.odograph.tracker.ui
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.unit.dp
 import `in`.odograph.tracker.record.TripRecorderService
 import `in`.odograph.tracker.ui.gauge.Gauge
 import `in`.odograph.tracker.ui.theme.Direction
@@ -26,31 +24,34 @@ fun DriverScreen(
     direction: Direction,
     palette: Palette
 ) {
-    Row(
-        modifier = Modifier.fillMaxSize().background(palette.ground).padding(20.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Gauge(
-            speedKmh = smoothedKmh,
-            hasFix = live.hasFix,
-            direction = direction,
-            palette = palette,
-            modifier = Modifier.weight(1.1f).fillMaxHeight()
-        )
-        Column(
-            modifier = Modifier.weight(1f).fillMaxHeight(),
-            verticalArrangement = Arrangement.Center
+    BoxWithConstraints(Modifier.fillMaxSize().background(palette.ground)) {
+        val m = rememberMetrics(maxWidth, maxHeight)
+        Row(
+            modifier = Modifier.fillMaxSize().padding(m.pad),
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            Stat(formatKm(live.distanceM), "KM   DISTANCE", palette)
-            Spacer(Modifier.height(34.dp))
-            Stat(formatHhMm(live.elapsedS), "H:MM   TIME", palette)
-            Spacer(Modifier.height(34.dp))
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(22.dp)
+            Gauge(
+                speedKmh = smoothedKmh,
+                hasFix = live.hasFix,
+                direction = direction,
+                palette = palette,
+                modifier = Modifier.weight(1f).fillMaxHeight()
+            )
+            Column(
+                modifier = Modifier.weight(1f).fillMaxHeight(),
+                verticalArrangement = Arrangement.Center
             ) {
-                SmallStat("${mpsToKmh(live.maxSpeedMps).toInt()} km/h", "MAX", palette)
-                SmallStat(formatHhMm(live.movingS), "MOVING", palette)
+                Stat(formatKm(live.distanceM), "KM   DISTANCE", palette, m)
+                Column(Modifier.padding(top = m.gap)) {
+                    Stat(formatHhMm(live.elapsedS), "H:MM   TIME", palette, m)
+                }
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(top = m.gap),
+                    horizontalArrangement = Arrangement.spacedBy(m.gap)
+                ) {
+                    SmallStat("${mpsToKmh(live.maxSpeedMps).toInt()}", "MAX", palette, m)
+                    SmallStat(formatHhMm(live.movingS), "MOVING", palette, m)
+                }
             }
         }
     }

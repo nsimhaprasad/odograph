@@ -2,6 +2,7 @@ package `in`.odograph.tracker.ui
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -11,7 +12,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.unit.dp
 import `in`.odograph.tracker.record.TripRecorderService
 import `in`.odograph.tracker.ui.gauge.Gauge
 import `in`.odograph.tracker.ui.map.BareRouteTrace
@@ -32,30 +32,38 @@ fun DetailScreen(
     direction: Direction,
     palette: Palette
 ) {
-    Column(Modifier.fillMaxSize().background(palette.ground).padding(14.dp)) {
-        Row(Modifier.fillMaxWidth().weight(1f), verticalAlignment = Alignment.CenterVertically) {
-            Gauge(
-                speedKmh = smoothedKmh,
-                hasFix = live.hasFix,
-                direction = direction,
-                palette = palette,
-                modifier = Modifier.weight(0.9f).fillMaxHeight()
-            )
-            if (showTiles) {
-                RouteMap(route, palette, Modifier.weight(2f).fillMaxHeight())
-            } else {
-                BareRouteTrace(route, palette, Modifier.weight(2f).fillMaxHeight())
+    BoxWithConstraints(Modifier.fillMaxSize().background(palette.ground)) {
+        val m = rememberMetrics(maxWidth, maxHeight)
+        Column(Modifier.fillMaxSize().padding(m.pad)) {
+            Row(
+                modifier = Modifier.fillMaxWidth().weight(1f),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Gauge(
+                    speedKmh = smoothedKmh,
+                    hasFix = live.hasFix,
+                    direction = direction,
+                    palette = palette,
+                    modifier = Modifier.weight(1f).fillMaxHeight()
+                )
+                if (showTiles) {
+                    RouteMap(route, palette, Modifier.weight(2f).fillMaxHeight())
+                } else {
+                    BareRouteTrace(route, palette, Modifier.weight(2f).fillMaxHeight())
+                }
             }
-        }
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(top = 14.dp),
-            horizontalArrangement = Arrangement.SpaceBetween
-        ) {
-            Stat(formatKm(live.distanceM), "KM   DISTANCE", palette, size = 34)
-            Stat(formatHhMm(live.elapsedS), "H:MM   ELAPSED", palette, size = 34)
-            Stat(formatHhMm(live.movingS), "H:MM   MOVING", palette, size = 34)
-            Stat("${mpsToKmh(live.maxSpeedMps).toInt()}", "KM/H   MAX", palette, size = 34)
-            Stat("${route.size}", "FIXES   LOGGED", palette, size = 34)
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(top = m.gap),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Stat(formatKm(live.distanceM), "KM   DIST", palette, m, size = m.stat)
+                Stat(formatHhMm(live.elapsedS), "ELAPSED", palette, m, size = m.stat)
+                Stat(formatHhMm(live.movingS), "MOVING", palette, m, size = m.stat)
+                Stat("${mpsToKmh(live.maxSpeedMps).toInt()}", "KM/H MAX", palette, m, size = m.stat)
+                if (!m.veryCompact) {
+                    Stat("${route.size}", "FIXES", palette, m, size = m.stat)
+                }
+            }
         }
     }
 }

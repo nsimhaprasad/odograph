@@ -3,6 +3,7 @@ package `in`.odograph.tracker.ui
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -54,21 +55,23 @@ fun TripListScreen(showTiles: Boolean, palette: Palette) {
         }
     }
 
-    Row(Modifier.fillMaxSize().background(palette.ground)) {
+    BoxWithConstraints(Modifier.fillMaxSize().background(palette.ground)) {
+    val m = rememberMetrics(maxWidth, maxHeight)
+    Row(Modifier.fillMaxSize()) {
         Column(Modifier.weight(0.34f).fillMaxHeight()) {
             Text(
                 text = "DRIVES  ·  ${trips.size}",
                 color = palette.label,
-                fontSize = 11.sp,
+                fontSize = m.label,
                 letterSpacing = 2.sp,
-                modifier = Modifier.padding(start = 18.dp, top = 16.dp, bottom = 8.dp)
+                modifier = Modifier.padding(start = m.pad, top = m.pad, bottom = m.gap / 2)
             )
             if (trips.isEmpty()) {
                 Text(
                     text = "No drives recorded yet.\nStart the car and go somewhere.",
                     color = palette.dim,
-                    fontSize = 14.sp,
-                    modifier = Modifier.padding(18.dp)
+                    fontSize = m.body,
+                    modifier = Modifier.padding(m.pad)
                 )
             }
             LazyColumn {
@@ -79,20 +82,20 @@ fun TripListScreen(showTiles: Boolean, palette: Palette) {
                             .fillMaxWidth()
                             .background(if (active) palette.trackSoft else palette.ground)
                             .clickable { selected = trip }
-                            .padding(horizontal = 18.dp, vertical = 14.dp)
+                            .padding(horizontal = m.pad, vertical = m.gap / 2)
                     ) {
                         Text(
                             text = fmt.format(Date(trip.startedAt)),
                             color = if (active) palette.accent else palette.numeral,
-                            fontSize = 17.sp,
+                            fontSize = m.stat,
                             fontWeight = FontWeight.Medium
                         )
                         Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-                            Text("${formatKm(trip.distanceM)} km", color = palette.dim, fontSize = 13.sp)
-                            Text(formatHhMm(trip.durationS), color = palette.dim, fontSize = 13.sp)
+                            Text("${formatKm(trip.distanceM)} km", color = palette.dim, fontSize = m.body)
+                            Text(formatHhMm(trip.durationS), color = palette.dim, fontSize = m.body)
                             Text(
                                 "${mpsToKmh(trip.maxSpeedMps).toInt()} max",
-                                color = palette.dim, fontSize = 13.sp
+                                color = palette.dim, fontSize = m.body
                             )
                         }
                     }
@@ -104,8 +107,8 @@ fun TripListScreen(showTiles: Boolean, palette: Palette) {
                 Text(
                     text = "Select a drive",
                     color = palette.label,
-                    fontSize = 14.sp,
-                    modifier = Modifier.padding(24.dp),
+                    fontSize = m.body,
+                    modifier = Modifier.padding(m.pad),
                     textAlign = androidx.compose.ui.text.style.TextAlign.Center
                 )
             } else if (showTiles) {
@@ -114,5 +117,6 @@ fun TripListScreen(showTiles: Boolean, palette: Palette) {
                 BareRouteTrace(route, palette, Modifier.fillMaxSize())
             }
         }
+    }
     }
 }

@@ -2,6 +2,7 @@ package `in`.odograph.tracker.ui
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -82,23 +83,29 @@ fun OdographApp() {
         }
     }
 
-    Column(Modifier.fillMaxSize().background(palette.ground)) {
+    BoxWithConstraints(Modifier.fillMaxSize().background(palette.ground)) {
+      val m = rememberMetrics(maxWidth, maxHeight)
+      Column(Modifier.fillMaxSize()) {
         Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 10.dp),
-            horizontalArrangement = Arrangement.spacedBy(10.dp)
+            modifier = Modifier.fillMaxWidth().padding(horizontal = m.pad, vertical = m.gap / 2),
+            horizontalArrangement = Arrangement.spacedBy(m.gap / 2),
+            verticalAlignment = androidx.compose.ui.Alignment.CenterVertically
         ) {
-            Chip("DRIVE", tab == Tab.DRIVE, palette) { tab = Tab.DRIVE }
-            Chip("TRIPS", tab == Tab.TRIPS, palette) { tab = Tab.TRIPS }
-            Chip("SETUP", tab == Tab.SETUP, palette) { tab = Tab.SETUP }
+            Chip("DRIVE", tab == Tab.DRIVE, palette, m) { tab = Tab.DRIVE }
+            Chip("TRIPS", tab == Tab.TRIPS, palette, m) { tab = Tab.TRIPS }
+            Chip("SETUP", tab == Tab.SETUP, palette, m) { tab = Tab.SETUP }
             if (tab == Tab.DRIVE) {
-                Chip(if (detailed) "DETAILED" else "DRIVER", true, palette) { detailed = !detailed }
+                Chip(if (detailed) "DETAILED" else "DRIVER", true, palette, m) {
+                    detailed = !detailed
+                }
             }
             Text(
                 text = if (live.hasFix) "REC" else "ACQUIRING",
                 color = if (live.hasFix) palette.accent else palette.label,
-                fontSize = 12.sp,
-                letterSpacing = 2.sp,
-                modifier = Modifier.padding(start = 8.dp, top = 16.dp)
+                fontSize = m.label,
+                letterSpacing = 1.8.sp,
+                maxLines = 1,
+                modifier = Modifier.padding(start = m.gap / 2)
             )
         }
 
@@ -121,4 +128,5 @@ fun OdographApp() {
             )
         }
     }
+  }
 }

@@ -23,9 +23,24 @@ class Settings(ctx: Context) {
             .getOrDefault(ThemeMode.AUTO)
         set(value) = prefs.edit().putString(KEY_THEME, value.name).apply()
 
+    /**
+     * A capability token, not a credential. Typically a Google Apps Script web app URL that
+     * appends to a spreadsheet the owner controls; revoking it is one click and it grants
+     * nothing else. Blank means off-device delivery is entirely disabled.
+     */
+    var webhookUrl: String
+        get() = prefs.getString(KEY_WEBHOOK, "").orEmpty()
+        set(value) = prefs.edit().putString(KEY_WEBHOOK, value.trim()).apply()
+
+    var deviceId: String
+        get() = prefs.getString(KEY_DEVICE, "").orEmpty().ifBlank { "windsor" }
+        set(value) = prefs.edit().putString(KEY_DEVICE, value.trim()).apply()
+
     private companion object {
         const val KEY_DIRECTION = "direction"
         const val KEY_THEME = "theme_mode"
+        const val KEY_WEBHOOK = "webhook_url"
+        const val KEY_DEVICE = "device_id"
     }
 }
 

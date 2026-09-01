@@ -2,8 +2,10 @@ package `in`.odograph.tracker.ui
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -19,19 +21,18 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
-import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import `in`.odograph.tracker.data.OdographDb
 import `in`.odograph.tracker.export.Exporters
 import `in`.odograph.tracker.export.shareFile
 import `in`.odograph.tracker.export.writeExport
 import `in`.odograph.tracker.probe.DeviceProbe
+import `in`.odograph.tracker.server.DashboardServer
 import `in`.odograph.tracker.ui.theme.Direction
 import `in`.odograph.tracker.ui.theme.Palette
 import `in`.odograph.tracker.ui.theme.ThemeMode
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun SetupScreen(
     direction: Direction,
@@ -44,103 +45,115 @@ fun SetupScreen(
 ) {
     val ctx = LocalContext.current
     var probe by remember { mutableStateOf("") }
-    var exportNote by remember { mutableStateOf("") }
+    var note by remember { mutableStateOf("") }
 
     LaunchedEffect(Unit) {
         probe = runCatching { DeviceProbe.collect(ctx).asText() }
             .getOrElse { "Probe unavailable: ${it.message}" }
     }
 
-    Column(
-        Modifier.fillMaxSize().background(palette.ground)
-            .verticalScroll(rememberScrollState()).padding(22.dp),
-        verticalArrangement = Arrangement.spacedBy(20.dp)
-    ) {
-        Section("CLUSTER", palette) {
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                Direction.entries.forEach { d ->
-                    Chip(d.name, d == direction, palette) { onDirection(d) }
+    BoxWithConstraints(Modifier.fillMaxSize().background(palette.ground)) {
+        val m = rememberMetrics(maxWidth, maxHeight)
+        Column(
+            Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(m.pad),
+            verticalArrangement = Arrangement.spacedBy(m.gap)
+        ) {
+            Section("CLUSTER", palette, m) {
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(m.gap / 2)) {
+                    Direction.entries.forEach { d ->
+                        Chip(d.name, d == direction, palette, m) { onDirection(d) }
+                    }
                 }
             }
-        }
 
-        Section("THEME", palette) {
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                ThemeMode.entries.forEach { m ->
-                    Chip(m.name, m == themeMode, palette) { onThemeMode(m) }
+            Section("THEME", palette, m) {
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(m.gap / 2)) {
+                    ThemeMode.entries.forEach { t ->
+                        Chip(t.name, t == themeMode, palette, m) { onThemeMode(t) }
+                    }
                 }
             }
-        }
 
-        Section("MAP", palette) {
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                Chip("TILES", showTiles, palette) { onTiles(true) }
-                Chip("TRACE ONLY", !showTiles, palette) { onTiles(false) }
+            Section("MAP", palette, m) {
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(m.gap / 2)) {
+                    Chip("TILES", showTiles, palette, m) { onTiles(true) }
+                    Chip("TRACE ONLY", !showTiles, palette, m) { onTiles(false) }
+                }
+                Text(
+                    "Tiles download over your hotspot and cache permanently. Trace only never " +
+                        "touches the network.",
+                    color = palette.dim, fontSize = m.body,
+                    modifier = Modifier.padding(top = m.gap / 2)
+                )
             }
-            Text(
-                "Tiles download over your hotspot and are cached permanently. Trace only never " +
-                    "touches the network.",
-                color = palette.dim, fontSize = 12.sp,
-                modifier = Modifier.padding(top = 8.dp)
-            )
-        }
 
-        Section("EXPORT", palette) {
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                Chip("SHARE TRIPS CSV", false, palette) {
-                    val dao = OdographDb.get(ctx).dao()
-                    Thread {
-                        val csv = Exporters.tripsCsv(dao.allTrips())
-                        val f = writeExport(ctx, "odograph-trips.csv", csv)
-                        shareFile(ctx, f, "text/csv")
-                    }.start()
-                    exportNote = "Chooser opening — Bluetooth to your Mac is in the list."
+            Section("EXPORT", palette, m) {
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(m.gap / 2)) {
+                    Chip("SHARE CSV", false, palette, m) {
+                        Thread {
+                            val dao = OdographDb.get(ctx).dao()
+                            val f = writeExport(
+                                ctx, "odograph-trips.csv", Exporters.tripsCsv(dao.allTrips())
+                            )
+                            shareFile(ctx, f, "text/csv")
+                        }.start()
+                        note = "Chooser opening. Bluetooth to your Mac is in the list."
+                    }
+                    Chip("SHARE GPX", false, palette, m) {
+                        Thread {
+                            val dao = OdographDb.get(ctx).dao()
+                            val latest = dao.allTrips().firstOrNull()
+                            val gpx = latest?.let {
+                                Exporters.gpx("Trip ${it.id}", dao.pointsFor(it.id))
+                            } ?: "<gpx/>"
+                            shareFile(ctx, writeExport(ctx, "odograph-latest.gpx", gpx),
+                                "application/gpx+xml")
+                        }.start()
+                        note = "Latest drive exported as GPX."
+                    }
+                    Chip("SHARE PROBE", false, palette, m) {
+                        shareFile(ctx, writeExport(ctx, "odograph-probe.txt", probe), "text/plain")
+                    }
                 }
-                Chip("SHARE ALL GPX", false, palette) {
-                    val dao = OdographDb.get(ctx).dao()
-                    Thread {
-                        val trips = dao.allTrips()
-                        val gpx = trips.firstOrNull()?.let {
-                            Exporters.gpx("Trip ${it.id}", dao.pointsFor(it.id))
-                        } ?: "<gpx/>"
-                        val f = writeExport(ctx, "odograph-latest.gpx", gpx)
-                        shareFile(ctx, f, "application/gpx+xml")
-                    }.start()
-                    exportNote = "Latest drive exported as GPX."
+                Text(
+                    "Dashboard: http://<this device>:${DashboardServer.PORT}/  " +
+                        "· paste the optional webhook URL at /config from your Mac.",
+                    color = palette.dim, fontSize = m.body,
+                    modifier = Modifier.padding(top = m.gap / 2)
+                )
+                if (note.isNotEmpty()) {
+                    Text(note, color = palette.accent, fontSize = m.body,
+                        modifier = Modifier.padding(top = m.gap / 3))
                 }
             }
-            if (exportNote.isNotEmpty()) {
-                Text(exportNote, color = palette.accent, fontSize = 12.sp,
-                    modifier = Modifier.padding(top = 8.dp))
-            }
-        }
 
-        Section("DEVICE", palette) {
-            Text(
-                text = probe,
-                color = palette.dim,
-                fontSize = 12.sp,
-                fontFamily = FontFamily.Monospace
-            )
-            Row(Modifier.padding(top = 10.dp)) {
-                Chip("SHARE PROBE", false, palette) {
-                    val f = writeExport(ctx, "odograph-probe.txt", probe)
-                    shareFile(ctx, f, "text/plain")
-                }
+            Section("DEVICE", palette, m) {
+                Text(
+                    text = probe,
+                    color = palette.dim,
+                    fontSize = m.body,
+                    lineHeight = m.body * 1.5f,
+                    fontFamily = FontFamily.Monospace
+                )
             }
         }
     }
 }
 
 @Composable
-private fun Section(title: String, palette: Palette, content: @Composable () -> Unit) {
+private fun Section(
+    title: String,
+    palette: Palette,
+    m: Metrics,
+    content: @Composable () -> Unit
+) {
     Column(Modifier.fillMaxWidth()) {
         Text(
             text = title,
             color = palette.label,
-            fontSize = 11.sp,
-            letterSpacing = 2.5.sp,
-            modifier = Modifier.padding(bottom = 10.dp)
+            fontSize = m.label,
+            letterSpacing = 2.2.sp,
+            modifier = Modifier.padding(bottom = m.gap / 2)
         )
         content()
     }

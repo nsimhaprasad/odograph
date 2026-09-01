@@ -20,6 +20,8 @@ data class TripEntity(
     val endLat: Double? = null,
     val endLon: Double? = null,
     val clusterId: Long? = null,
+    /** When this trip was accepted by the optional webhook. Null means never sent. */
+    val syncedAt: Long? = null,
     // Reserved for v2 (OBD-II). Always null in v1 — a nullable column costs nothing today
     // and saves a migration later.
     val socStart: Double? = null,
