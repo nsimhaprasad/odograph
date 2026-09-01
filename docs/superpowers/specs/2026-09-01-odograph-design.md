@@ -20,7 +20,7 @@ history analysable later on a Mac.
 | C1 | The box is powered by the car. Ignition off = **unannounced power cut**. | No `onDestroy`, no "save trip" moment. Must write incrementally and recover on next boot. |
 | C2 | The app renders into a **projected** CarPlay/AA session at an unknown negotiated resolution. | Fully resolution-independent UI. No bitmaps, no hardcoded `dp`. |
 | C3 | Touch returns over the projection link: single-touch, imprecise, laggy. | Large targets, tap-only, no gestures, no drag. |
-| C4 | **No SIM.** No mobile data on the box. | No A-GPS (slow cold fix), no map tiles, no reverse geocoding, **no NTP clock sync**. |
+| C4 | **No SIM**, but a phone hotspot is up ~99% of the time. | Treat network as *usually present, never guaranteed*. Every feature degrades to an offline path; nothing hard-requires connectivity. A-GPS, NTP, map tiles and reverse geocoding all work in the common case. |
 | C5 | No access to the vehicle bus. | No speed/SoC/range from the car. GNSS is the only motion source. OBD is out of scope (v2). |
 | C6 | Play Services presence is **unverified** on this box. | Use `LocationManager`, not `FusedLocationProviderClient`. Zero GMS dependency. |
 | C7 | Sideload path is **unverified** (unknown-sources, developer options, ADB). | Must be probed before any real build effort. |
@@ -62,17 +62,19 @@ boot ─► BootReceiver ─► TripRecorderService  (foreground, type=location)
 `trips.ended_at IS NULL` at startup means the power was cut mid-trip. Totals are computed
 during recovery from the points table, never held in memory.
 
-**D2 — GNSS time, not system time.** With no SIM there is no NTP, so the box's clock may be
-wrong at boot. `Location.getTime()` carries GNSS-derived UTC, which is authoritative and needs
-no network. All trip timestamps come from the fix, not `System.currentTimeMillis()`.
+**D2 — GNSS time, not system time.** The hotspot usually supplies NTP, but "usually" is not a
+guarantee and a wrong clock silently corrupts every timestamp it touches. `Location.getTime()`
+carries GNSS-derived UTC, is authoritative, and needs no network. Keeping it costs nothing, so
+we do not trade a guarantee for an assumption. All trip timestamps come from the fix.
 
 **D3 — `LocationManager`, not Fused.** Removes the Play Services dependency (C6) and gives raw
 1 Hz GNSS, which is what we actually want. `Location.getSpeed()` is Doppler-derived and more
 accurate than differentiating positions.
 
-**D4 — Origin backfill.** Cold fix takes 30–60 s without A-GPS (C4), losing the start of every
-trip. Trip N's origin is seeded from trip N−1's final point and flagged `interpolated = 1`.
-Honest about which points were measured.
+**D4 — Origin backfill.** With A-GPS the first fix normally arrives in seconds, but the hotspot
+may not have associated yet at ignition, and a cold fix without it takes 30–60 s. Trip N's origin
+is seeded from trip N−1's final point and flagged `interpolated = 1`. Cheap insurance; honest
+about which points were measured.
 
 **D5 — `ACQUIRING` never `0 km/h`.** Before first fix the cluster states that it has no fix.
 A zero is a measurement claim.
@@ -154,6 +156,12 @@ the loss of one in-flight row, not a trip.
 | Unknown resolution breaks layout | Resolution-independent canvas; probe reports actual metrics |
 | Wrong clock at boot | D2 — GNSS time |
 | Web dashboard unreachable | D9 — two other export paths that need no network |
+
+**D10 — Place names come from cluster centroids, not trips.** Reverse geocoding runs against a
+*place* the first time it is created, never per trip, so a hundred commutes to the same office
+cost one lookup that is then cached forever. Android's built-in `Geocoder` has no backend without
+Play Services (C6), so lookups go to OSM Nominatim with a proper User-Agent. A trip with no name
+displays its coordinates; naming never blocks recording.
 
 ## 9. Phasing
 

@@ -1,0 +1,124 @@
+package `in`.odograph.tracker.ui
+
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import `in`.odograph.tracker.data.OdographDb
+import `in`.odograph.tracker.record.TripRecorderService
+import `in`.odograph.tracker.ui.gauge.SpeedSpring
+import `in`.odograph.tracker.ui.theme.Settings
+import `in`.odograph.tracker.ui.theme.ThemeMode
+import `in`.odograph.tracker.ui.theme.currentHour
+import `in`.odograph.tracker.ui.theme.isNight
+import `in`.odograph.tracker.ui.theme.paletteFor
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
+
+private enum class Tab { DRIVE, TRIPS, SETUP }
+
+@Composable
+fun OdographApp() {
+    val ctx = LocalContext.current
+    val settings = remember { Settings(ctx) }
+
+    var tab by remember { mutableStateOf(Tab.DRIVE) }
+    var detailed by remember { mutableStateOf(false) }
+    var direction by remember { mutableStateOf(settings.direction) }
+    var themeMode by remember { mutableStateOf(settings.themeMode) }
+    var showTiles by remember { mutableStateOf(true) }
+    var hour by remember { mutableStateOf(currentHour()) }
+
+    val live by TripRecorderService.state.collectAsState()
+    val spring = remember { SpeedSpring() }
+    var smoothed by remember { mutableFloatStateOf(0f) }
+    var route by remember { mutableStateOf<List<Pair<Double, Double>>>(emptyList()) }
+
+    val night = isNight(themeMode, hour)
+    val palette = paletteFor(direction, night)
+
+    // One frame-paced loop drives the needle. The spring both gives it mass and filters the
+    // 2-3 km/h of GNSS jitter that would otherwise make the readout twitch.
+    LaunchedEffect(Unit) {
+        var last = 0L
+        while (true) {
+            withFrameNanos { now ->
+                val dt = if (last == 0L) 0.016f else ((now - last) / 1_000_000_000f).coerceIn(0f, 0.1f)
+                last = now
+                smoothed = spring.update(mpsToKmh(live.speedMps), dt)
+            }
+        }
+    }
+
+    LaunchedEffect(Unit) {
+        while (true) {
+            hour = currentHour()
+            val id = TripRecorderService.state.value.tripId
+            if (id > 0) {
+                route = withContext(Dispatchers.IO) {
+                    runCatching { OdographDb.get(ctx).dao().pointsFor(id).map { it.lat to it.lon } }
+                        .getOrDefault(emptyList())
+                }
+            }
+            delay(5_000)
+        }
+    }
+
+    Column(Modifier.fillMaxSize().background(palette.ground)) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 10.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Chip("DRIVE", tab == Tab.DRIVE, palette) { tab = Tab.DRIVE }
+            Chip("TRIPS", tab == Tab.TRIPS, palette) { tab = Tab.TRIPS }
+            Chip("SETUP", tab == Tab.SETUP, palette) { tab = Tab.SETUP }
+            if (tab == Tab.DRIVE) {
+                Chip(if (detailed) "DETAILED" else "DRIVER", true, palette) { detailed = !detailed }
+            }
+            Text(
+                text = if (live.hasFix) "REC" else "ACQUIRING",
+                color = if (live.hasFix) palette.accent else palette.label,
+                fontSize = 12.sp,
+                letterSpacing = 2.sp,
+                modifier = Modifier.padding(start = 8.dp, top = 16.dp)
+            )
+        }
+
+        when (tab) {
+            Tab.DRIVE ->
+                if (detailed) {
+                    DetailScreen(live, smoothed, route, showTiles, direction, palette)
+                } else {
+                    DriverScreen(live, smoothed, direction, palette)
+                }
+            Tab.TRIPS -> TripListScreen(showTiles, palette)
+            Tab.SETUP -> SetupScreen(
+                direction = direction,
+                themeMode = themeMode,
+                showTiles = showTiles,
+                palette = palette,
+                onDirection = { direction = it; settings.direction = it },
+                onThemeMode = { themeMode = it; settings.themeMode = it },
+                onTiles = { showTiles = it }
+            )
+        }
+    }
+}
