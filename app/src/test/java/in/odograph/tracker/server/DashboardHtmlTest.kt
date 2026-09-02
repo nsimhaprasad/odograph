@@ -1,5 +1,6 @@
 package `in`.odograph.tracker.server
 
+import `in`.odograph.tracker.data.MonthTotal
 import `in`.odograph.tracker.data.PlaceEntity
 import `in`.odograph.tracker.data.RouteSummary
 import `in`.odograph.tracker.data.TripEntity
@@ -100,5 +101,25 @@ class DashboardHtmlTest {
         val html = DashboardHtml.placesPage(emptyList(), emptyList())
         assertThat(html).contains("No places yet")
         assertThat(html).contains("ends when the ignition does")
+    }
+
+    @Test
+    fun `monthly totals render as their own table`() {
+        val html = DashboardHtml.render(
+            listOf(trip), emptyMap(), months = listOf(
+                MonthTotal("2026-09", 41, 764_320.0, 51_400),
+                MonthTotal("2026-08", 38, 701_110.0, 47_900)
+            )
+        )
+        assertThat(html).contains("2026-09")
+        assertThat(html).contains("764.3")
+        assertThat(html).contains("By month")
+    }
+
+    @Test
+    fun `an empty month list still renders the section`() {
+        val html = DashboardHtml.render(emptyList(), emptyMap())
+        assertThat(html).contains("By month")
+        assertThat(html).contains("No completed drives yet")
     }
 }

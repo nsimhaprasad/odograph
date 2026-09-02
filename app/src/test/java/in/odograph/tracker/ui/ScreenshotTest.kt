@@ -231,20 +231,23 @@ class ScreenshotTest {
             )
             fun seed(from: Long, to: Long, times: Int, metres: Double, seconds: Long) {
                 repeat(times) { n ->
-                    val id = dao.startTrip(n * 1_000_000L + from * 7)
+                    val startedAt = System.currentTimeMillis() - (n + 1) * 3_600_000L
+                    val id = dao.startTrip(startedAt)
                     dao.finishTrip(
-                        id, n * 1_000_000L + seconds * 1000, metres, seconds,
+                        id, startedAt + seconds * 1000, metres, seconds,
                         (seconds * 0.82).toLong(), 27.5f, metres / seconds, 3.4
                     )
                     dao.setTripPlaces(id, from, to)
                 }
             }
+            // Stamp them inside the current calendar month so the default MONTH filter shows them.
             seed(home, office, 47, 18_432.0, 1_484)
             seed(office, home, 44, 19_010.0, 1_702)
             seed(home, airport, 6, 41_200.0, 2_940)
         }
         seeder.start()
         seeder.join()
+
 
         compose.setContent { RoutesScreen(paletteFor(Direction.ION, night = true)) }
         repeat(40) {

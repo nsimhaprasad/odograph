@@ -36,12 +36,25 @@ abstract class OdographDb : RoomDatabase() {
             }
         }
 
+        private const val NAME = "odograph.db"
+
         @Volatile
         private var instance: OdographDb? = null
 
+        /**
+         * Drops the singleton and the file behind it. Tests share one JVM, so without this a
+         * previous test's rows leak into the next one and assertions quietly become meaningless.
+         */
+        @androidx.annotation.VisibleForTesting
+        fun resetForTests(ctx: Context) = synchronized(this) {
+            instance?.close()
+            instance = null
+            ctx.applicationContext.deleteDatabase(NAME)
+        }
+
         fun get(ctx: Context): OdographDb = instance ?: synchronized(this) {
             instance ?: Room.databaseBuilder(
-                ctx.applicationContext, OdographDb::class.java, "odograph.db"
+                ctx.applicationContext, OdographDb::class.java, NAME
             )
                 // The car cuts power without warning. Write-ahead logging means a torn write
                 // costs one in-flight row, never the database.

@@ -167,6 +167,17 @@ the cheap channel was not acted on. Audio requests transient-may-duck focus so m
 than stops. Limit is user-set (road speed-limit data for Indian roads is not reliable enough to
 depend on) and zero disables the feature.
 
+**D13 — Traffic is obtainable, but only as a whole vendor.** OpenStreetMap has no traffic data at
+all, and Google's cannot legally be painted onto an OSM basemap (caching, export and attribution
+restrictions). TomTom and HERE both sell traffic with free developer tiers large enough for one
+person's commute, but you take their traffic *on their basemap*. Deferred: turn-by-turn is a
+multi-week build, and the app is meanwhile accumulating something better for a repeated commute —
+per-route historical durations from the driver's own history.
+
+**D14 — Periods are calendar-aligned, not rolling windows.** "This month" means the calendar
+month, so a total agrees with the odometer when compared at month end. Ranges are pure and
+clock-injected so the boundaries are testable.
+
 **D12 — Google Maps labels cannot be read, so the app learns them instead.** There is no public
 API for a user's saved or labelled places; Takeout is the only export path, and one app cannot
 host another's UI, so in-app Google navigation is impossible. Instead the app clusters the places

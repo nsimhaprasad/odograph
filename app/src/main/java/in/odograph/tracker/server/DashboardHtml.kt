@@ -1,5 +1,6 @@
 package `in`.odograph.tracker.server
 
+import `in`.odograph.tracker.data.MonthTotal
 import `in`.odograph.tracker.data.PlaceEntity
 import `in`.odograph.tracker.data.PointEntity
 import `in`.odograph.tracker.data.RouteSummary
@@ -15,8 +16,22 @@ object DashboardHtml {
     fun render(
         trips: List<TripEntity>,
         pointsByTrip: Map<Long, List<PointEntity>>,
-        webhookConfigured: Boolean = false
+        webhookConfigured: Boolean = false,
+        months: List<MonthTotal> = emptyList()
     ): String {
+        val monthRows = buildString {
+            months.forEach { mth ->
+                append("<tr><td>").append(mth.month).append("</td>")
+                append("<td class=\"num\">").append(mth.drives).append("</td>")
+                append("<td class=\"num\">").append("%.1f".format(mth.distanceM / 1000)).append("</td>")
+                append("<td class=\"num\">")
+                append("%d:%02d".format(mth.durationS / 3600, (mth.durationS % 3600) / 60))
+                append("</td></tr>")
+            }
+            if (months.isEmpty()) {
+                append("<tr><td colspan=\"4\" style=\"color:#5C6877\">No completed drives yet.</td></tr>")
+            }
+        }
         val tripsJson = trips.joinToString(",", "[", "]") { t ->
             """{"id":${t.id},"startedAt":${t.startedAt},"endedAt":${t.endedAt ?: 0},""" +
                 """"distanceM":${t.distanceM},"durationS":${t.durationS},""" +
@@ -75,6 +90,12 @@ svg{display:block;width:100%;height:290px;background:#050609}
       </tr></thead><tbody></tbody></table>
     </div>
     <div class="panel">
+      <h2>By month</h2>
+      <table><thead><tr>
+        <th>Month</th><th class="num">Drives</th><th class="num">km</th><th class="num">Time</th>
+      </tr></thead><tbody>$monthRows</tbody></table>
+    </div>
+    <div class="panel" style="margin-top:22px">
       <h2>Route</h2>
       <svg id="map" viewBox="0 0 300 290" preserveAspectRatio="xMidYMid meet"></svg>
       <div class="note" id="mapnote">select a drive</div>

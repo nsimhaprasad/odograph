@@ -49,7 +49,9 @@ object DashboardServer {
                         val trips = dao.allTrips()
                         val routes = trips.associate { it.id to dao.pointsFor(it.id) }
                         call.respondText(
-                            DashboardHtml.render(trips, routes, settings.webhookUrl.isNotBlank()),
+                            DashboardHtml.render(
+                                trips, routes, settings.webhookUrl.isNotBlank(), dao.monthlyTotals()
+                            ),
                             ContentType.Text.Html
                         )
                     }
@@ -58,7 +60,9 @@ object DashboardServer {
                         val trips = dao.allTrips()
                         val routes = trips.associate { it.id to dao.pointsFor(it.id) }
                         call.respondText(
-                            DashboardHtml.render(trips, routes, settings.webhookUrl.isNotBlank()),
+                            DashboardHtml.render(
+                                trips, routes, settings.webhookUrl.isNotBlank(), dao.monthlyTotals()
+                            ),
                             ContentType.Text.Html
                         )
                     }

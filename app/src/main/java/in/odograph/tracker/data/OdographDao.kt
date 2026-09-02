@@ -102,6 +102,43 @@ interface OdographDao {
            ORDER BY drives DESC, totalDistanceM DESC"""
     )
     fun routeSummaries(): List<RouteSummary>
+
+    @Query(
+        """SELECT startPlaceId AS startId, endPlaceId AS endId, COUNT(*) AS drives,
+                  AVG(distanceM) AS avgDistanceM, AVG(durationS) AS avgDurationS,
+                  AVG(movingS) AS avgMovingS, MAX(maxSpeedMps) AS bestMaxSpeedMps,
+                  SUM(distanceM) AS totalDistanceM
+           FROM trips
+           WHERE endedAt IS NOT NULL AND startPlaceId IS NOT NULL AND endPlaceId IS NOT NULL
+             AND startedAt >= :fromMs AND startedAt < :toMs
+           GROUP BY startPlaceId, endPlaceId
+           ORDER BY drives DESC, totalDistanceM DESC"""
+    )
+    fun routeSummariesBetween(fromMs: Long, toMs: Long): List<RouteSummary>
+
+    @Query(
+        """SELECT COUNT(*) AS drives,
+                  COALESCE(SUM(distanceM), 0) AS distanceM,
+                  COALESCE(SUM(durationS), 0) AS durationS,
+                  COALESCE(SUM(movingS), 0) AS movingS,
+                  COALESCE(MAX(maxSpeedMps), 0) AS bestMaxSpeedMps
+           FROM trips
+           WHERE endedAt IS NOT NULL AND startedAt >= :fromMs AND startedAt < :toMs"""
+    )
+    fun periodTotals(fromMs: Long, toMs: Long): PeriodTotals
+
+    /** Calendar months in the device's own timezone, newest first. */
+    @Query(
+        """SELECT strftime('%Y-%m', startedAt / 1000, 'unixepoch', 'localtime') AS month,
+                  COUNT(*) AS drives,
+                  COALESCE(SUM(distanceM), 0) AS distanceM,
+                  COALESCE(SUM(durationS), 0) AS durationS
+           FROM trips
+           WHERE endedAt IS NOT NULL
+           GROUP BY month
+           ORDER BY month DESC"""
+    )
+    fun monthlyTotals(): List<MonthTotal>
 }
 
 data class RouteSummary(
@@ -113,4 +150,19 @@ data class RouteSummary(
     val avgMovingS: Double,
     val bestMaxSpeedMps: Float,
     val totalDistanceM: Double
+)
+
+data class PeriodTotals(
+    val drives: Int,
+    val distanceM: Double,
+    val durationS: Long,
+    val movingS: Long,
+    val bestMaxSpeedMps: Float
+)
+
+data class MonthTotal(
+    val month: String,
+    val drives: Int,
+    val distanceM: Double,
+    val durationS: Long
 )
