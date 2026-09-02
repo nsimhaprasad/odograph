@@ -6,7 +6,9 @@ data class Fix(
     val lon: Double,
     val speedMps: Float,
     val accuracyM: Float,
-    val interpolated: Boolean = false
+    val interpolated: Boolean = false,
+    /** Metres above the WGS84 ellipsoid. Null when the provider has no altitude, as network does. */
+    val altitudeM: Double? = null
 )
 
 data class Stats(
@@ -23,6 +25,9 @@ object TripStats {
     private const val SPEED_ACCURACY_LIMIT_M = 15f
     private const val MOVING_THRESHOLD_MPS = 0.5f
 
+    /** Displacement must exceed the fix uncertainty by this much before it counts as movement. */
+    private const val NOISE_FACTOR = 1.5f
+
     fun compute(fixes: List<Fix>): Stats {
         if (fixes.size < 2) return Stats(0.0, 0, 0, 0f, 0.0, 0.0)
         val sorted = fixes.sortedBy { it.t }
@@ -30,12 +35,31 @@ object TripStats {
         // Drop inaccurate fixes first, then measure between consecutive survivors. Rejecting a
         // whole segment because one endpoint was bad would destroy the two legs either side of a
         // single glitch and silently under-report distance; bridging over it keeps the real total.
+        // Distance is measured from an anchor rather than between consecutive fixes.
+        //
+        // A fix is only a position plus an uncertainty, and comparing two consecutive ones
+        // measures noise as often as movement: a network fix is accurate to about 20 m, while a
+        // car at 50 km/h covers only 14 m in a second. Per-sample differencing therefore invents
+        // distance while parked and cannot see real movement while driving.
+        //
+        // Holding an anchor and only counting once displacement clearly exceeds the uncertainty
+        // solves both: noise never clears the bar, and real movement clears it within a second or
+        // two and is then counted in full.
         val usable = sorted.filter { it.accuracyM <= ACCURACY_LIMIT_M }
         var distance = 0.0
-        for (i in 1 until usable.size) {
-            val a = usable[i - 1]
-            val b = usable[i]
-            distance += Geo.haversineMetres(a.lat, a.lon, b.lat, b.lon)
+        var anchor: Fix? = null
+        for (fix in usable) {
+            val from = anchor
+            if (from == null) {
+                anchor = fix
+                continue
+            }
+            val moved = Geo.haversineMetres(from.lat, from.lon, fix.lat, fix.lon)
+            val noiseFloor = maxOf(from.accuracyM, fix.accuracyM) * NOISE_FACTOR
+            if (moved > noiseFloor) {
+                distance += moved
+                anchor = fix
+            }
         }
 
         var movingMs = 0L

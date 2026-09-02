@@ -14,6 +14,7 @@ import `in`.odograph.tracker.alert.AlertSound
 import `in`.odograph.tracker.alert.SpeedAlert
 import `in`.odograph.tracker.core.Fix
 import `in`.odograph.tracker.core.Geo
+import `in`.odograph.tracker.core.LiveTrack
 import `in`.odograph.tracker.data.OdographDb
 import `in`.odograph.tracker.diag.Diagnostics
 import `in`.odograph.tracker.geocode.PlaceNamer
@@ -58,6 +59,7 @@ class TripRecorderService : Service() {
     private var tripId: Long = -1
     private var lastFix: Fix? = null
     private var startedAt: Long? = null
+    private var track = LiveTrack()
     private lateinit var settings: Settings
     private lateinit var alertSound: AlertSound
     private var speedAlert = SpeedAlert(AlertConfig(limitKmh = 0f))
@@ -78,6 +80,7 @@ class TripRecorderService : Service() {
             val dao = OdographDb.get(this@TripRecorderService).dao()
             // startedAt is patched by the first real fix; GNSS time is the authority.
             Diagnostics.crumb("db opened")
+            track = LiveTrack()
             tripId = TripRecovery.recoverAndStart(dao, nowFromGnss = null)
             Diagnostics.crumb("recovery done trip=$tripId")
             _state.value = LiveState(tripId = tripId)
@@ -111,7 +114,7 @@ class TripRecorderService : Service() {
         dao.appendPoint(
             PointEntity(
                 tripId = tripId, t = fix.t, lat = fix.lat, lon = fix.lon,
-                speedMps = fix.speedMps, bearingDeg = null, altitudeM = null,
+                speedMps = fix.speedMps, bearingDeg = null, altitudeM = fix.altitudeM,
                 accuracyM = fix.accuracyM, interpolated = fix.interpolated
             )
         )
@@ -124,12 +127,13 @@ class TripRecorderService : Service() {
             if (dao.tripById(tripId)?.startLat == null) dao.setOrigin(tripId, fix.lat, fix.lon)
         }
 
-        val prev = lastFix
-        val added = if (prev != null &&
-            prev.accuracyM <= ACCURACY_LIMIT_M && fix.accuracyM <= ACCURACY_LIMIT_M
-        ) Geo.haversineMetres(prev.lat, prev.lon, fix.lat, fix.lon) else 0.0
+        // Anchor-based distance and derived speed, shared with the stored-trip maths so the live
+        // readout and the saved totals cannot disagree. The network provider supplies no speed at
+        // all, so without derivation the gauge sits at zero for an entire drive.
+        track.add(fix)
+        val effectiveSpeedMps = track.speedMps
 
-        val speedKmh = fix.speedMps * 3.6f
+        val speedKmh = effectiveSpeedMps * 3.6f
         val limit = settings.speedLimitKmh
         if (limit != configuredLimit) {
             configuredLimit = limit
@@ -141,12 +145,11 @@ class TripRecorderService : Service() {
         val cur = _state.value
         _state.value = cur.copy(
             hasFix = true,
-            speedMps = fix.speedMps,
-            distanceM = cur.distanceM + added,
+            speedMps = effectiveSpeedMps,
+            distanceM = track.distanceM,
             elapsedS = (fix.t - (startedAt ?: fix.t)) / 1000,
-            maxSpeedMps = if (fix.accuracyM <= SPEED_ACCURACY_LIMIT_M)
-                maxOf(cur.maxSpeedMps, fix.speedMps) else cur.maxSpeedMps,
-            movingS = cur.movingS + if (fix.speedMps > 0.5f) 1 else 0,
+            maxSpeedMps = maxOf(cur.maxSpeedMps, effectiveSpeedMps),
+            movingS = cur.movingS + if (effectiveSpeedMps > 0.5f) 1 else 0,
             tripId = tripId,
             overLimit = alert.overLimit,
             speedLimitKmh = limit

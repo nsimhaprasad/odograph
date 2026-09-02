@@ -13,6 +13,10 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -24,6 +28,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.sp
 import `in`.odograph.tracker.core.Period
 import `in`.odograph.tracker.core.Periods
@@ -37,8 +42,11 @@ import kotlinx.coroutines.withContext
 private data class RoutesUi(
     val totals: PeriodTotals = PeriodTotals(0, 0.0, 0, 0, 0f),
     val rows: List<RouteRow> = emptyList(),
+    val places: List<PlaceRow> = emptyList(),
     val loaded: Boolean = false
 )
+
+data class PlaceRow(val id: Long, val name: String, val visits: Int, val named: Boolean)
 
 data class RouteRow(
     val from: String,
@@ -61,8 +69,11 @@ fun RoutesScreen(palette: Palette) {
     val ctx = LocalContext.current
     var period by remember { mutableStateOf(Period.MONTH) }
     var ui by remember { mutableStateOf(RoutesUi()) }
+    var editingId by remember { mutableStateOf<Long?>(null) }
+    var draft by remember { mutableStateOf("") }
+    var reloadToken by remember { mutableStateOf(0) }
 
-    LaunchedEffect(period) {
+    LaunchedEffect(period, reloadToken) {
         val range = Periods.rangeFor(period, System.currentTimeMillis(), Settings(ctx).zone)
         val next = withContext(Dispatchers.IO) {
             runCatching {
@@ -80,6 +91,9 @@ fun RoutesScreen(palette: Palette) {
                             totalDistanceM = s.totalDistanceM
                         )
                     },
+                    places = places.values
+                        .sortedByDescending { it.visits }
+                        .map { PlaceRow(it.id, it.displayName, it.visits, it.label != null) },
                     loaded = true
                 )
             }.getOrElse { RoutesUi(loaded = true) }
@@ -181,7 +195,97 @@ fun RoutesScreen(palette: Palette) {
                         }
                     }
                 }
+
+                item {
+                    Text(
+                        text = "PLACES  ·  TAP TO NAME",
+                        color = palette.label,
+                        fontSize = m.label,
+                        letterSpacing = 2.2.sp,
+                        modifier = Modifier.padding(top = m.gap, bottom = m.gap / 2)
+                    )
+                    if (ui.places.isEmpty() && loaded) {
+                        Text(
+                            "Places appear once a drive has finished.",
+                            color = palette.dim, fontSize = m.body
+                        )
+                    }
+                }
+
+                items(ui.places, key = { it.id }) { place ->
+                    if (editingId == place.id) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth().padding(vertical = m.gap / 3),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            OutlinedTextField(
+                                value = draft,
+                                onValueChange = { draft = it },
+                                singleLine = true,
+                                placeholder = { Text("Home, Office, Farm...", fontSize = m.body) },
+                                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                                keyboardActions = KeyboardActions(onDone = {
+                                    savePlaceLabel(ctx, place.id, draft)
+                                    editingId = null
+                                    reloadToken++
+                                }),
+                                modifier = Modifier.weight(1f)
+                            )
+                            Chip("SAVE", true, palette, m) {
+                                savePlaceLabel(ctx, place.id, draft)
+                                editingId = null
+                                reloadToken++
+                            }
+                        }
+                    } else {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    editingId = place.id
+                                    draft = if (place.named) place.name else ""
+                                }
+                                .padding(vertical = m.gap / 3),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(Modifier.weight(1f)) {
+                                Text(
+                                    text = place.name,
+                                    color = if (place.named) palette.numeral else palette.dim,
+                                    fontSize = m.stat,
+                                    fontWeight = FontWeight.Medium,
+                                    maxLines = 1
+                                )
+                                Text(
+                                    text = if (place.named) "tap to rename" else "tap to name this place",
+                                    color = palette.label,
+                                    fontSize = m.body
+                                )
+                            }
+                            Column(Modifier.width(countWidth), horizontalAlignment = Alignment.End) {
+                                Text(
+                                    text = "${place.visits}",
+                                    color = palette.accent2,
+                                    fontSize = m.stat,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                                Text(
+                                    text = "VISITS",
+                                    color = palette.label,
+                                    fontSize = m.label,
+                                    letterSpacing = 1.4.sp
+                                )
+                            }
+                        }
+                    }
+                }
             }
         }
     }
+}
+
+/** Room refuses main-thread writes, and this is called straight from a tap. */
+private fun savePlaceLabel(ctx: android.content.Context, id: Long, label: String) {
+    val cleaned = label.trim().takeIf { it.isNotBlank() }
+    Thread { runCatching { OdographDb.get(ctx).dao().setPlaceLabel(id, cleaned) } }.start()
 }

@@ -12,6 +12,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import `in`.odograph.tracker.core.ElevationProfile
+import `in`.odograph.tracker.core.EnergyEstimate
 import `in`.odograph.tracker.record.TripRecorderService
 import `in`.odograph.tracker.ui.gauge.Gauge
 import `in`.odograph.tracker.ui.map.BareRouteTrace
@@ -29,6 +31,9 @@ fun DetailScreen(
     smoothedKmh: Float,
     route: List<Pair<Double, Double>>,
     slowestKmMps: Double,
+    elevation: ElevationProfile,
+    energy: EnergyEstimate,
+    showEvMetrics: Boolean,
     showTiles: Boolean,
     direction: Direction,
     palette: Palette
@@ -66,7 +71,33 @@ fun DetailScreen(
                 // the worst rolling kilometre of the drive.
                 Stat(
                     if (slowestKmMps > 0) "${mpsToKmh(slowestKmMps.toFloat()).toInt()}" else "—",
-                    "KM/H SLOWEST KM", palette, m, size = m.stat
+                    "KM/H SLOWEST", palette, m, size = m.stat
+                )
+            }
+            // Elevation and the energy it implies. Altitude comes only from GNSS, so these stay
+            // blank while the box is on network positioning alone. Optional, because in a short
+            // split-screen window this is the first row worth giving up.
+            if (showEvMetrics) Row(
+                modifier = Modifier.fillMaxWidth().padding(top = m.gap / 2),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Stat(
+                    elevation.currentM?.let { "${it.toInt()}" } ?: "—",
+                    "M   ALTITUDE", palette, m, size = m.stat
+                )
+                Stat("+${elevation.gainM.toInt()}", "M   CLIMBED", palette, m, size = m.stat)
+                Stat("-${elevation.lossM.toInt()}", "M   DESCENDED", palette, m, size = m.stat)
+                Stat(
+                    "%.1f".format(elevation.gradePercent), "%   GRADE", palette, m, size = m.stat
+                )
+                Stat("%.2f".format(energy.netKwh), "KWH   EST USED", palette, m, size = m.stat)
+                Stat(
+                    if (energy.regeneratedKwh > 0) "%.2f".format(energy.regeneratedKwh) else "—",
+                    "KWH   REGEN", palette, m, size = m.stat
+                )
+                Stat(
+                    if (energy.kmPerKwh > 0) "%.1f".format(energy.kmPerKwh) else "—",
+                    "KM/KWH   EST", palette, m, size = m.stat
                 )
             }
         }

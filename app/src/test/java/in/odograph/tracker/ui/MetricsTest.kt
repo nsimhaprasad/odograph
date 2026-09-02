@@ -10,13 +10,21 @@ import org.junit.Test
 class MetricsTest {
 
     /** width x height in dp, spanning tiny 800x480 units through wide 1920x720 ones. */
+    // The box runs 1920x1080 at 238 dpi, so its full window is 1291 x 726 dp. Its split-screen
+    // divider can sit anywhere, which is where the punishing sizes come from.
     private val viewports = listOf(
         "extreme small" to (427f to 240f),
         "small 800x480" to (533f to 300f),
         "common 1280x720" to (640f to 360f),
         "wide short" to (960f to 360f),
         "large" to (800f to 480f),
-        "very large" to (1280f to 800f)
+        "very large" to (1280f to 800f),
+        "box full" to (1291f to 726f),
+        "box split half" to (1291f to 363f),
+        "box split third" to (1291f to 242f),
+        "box split quarter" to (1291f to 181f),
+        "box split vertical" to (645f to 726f),
+        "box split narrow" to (430f to 726f)
     )
 
     @Test

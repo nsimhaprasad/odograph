@@ -69,7 +69,10 @@ class LayoutFitTest {
     private fun renderDetail(direction: Direction) {
         compose.setContent {
             DetailScreen(
-                live = live, smoothedKmh = 88.6f, route = route, slowestKmMps = 3.4, showTiles = false,
+                live = live, smoothedKmh = 88.6f, route = route, slowestKmMps = 3.4,
+                elevation = `in`.odograph.tracker.core.ElevationProfile(918.0, 214.0, 186.0, 890.0, 1004.0, 3.4),
+                energy = `in`.odograph.tracker.core.EnergyEstimate(3.21, 0.74, 18_432.0, 214.0, 186.0),
+                showEvMetrics = true, showTiles = false,
                 direction = direction, palette = paletteFor(direction, night = true)
             )
         }
@@ -186,7 +189,10 @@ class LayoutFitTest {
         compose.setContent {
             DetailScreen(
                 live = TripRecorderService.LiveState(hasFix = false),
-                smoothedKmh = 0f, route = emptyList(), slowestKmMps = 0.0, showTiles = false,
+                smoothedKmh = 0f, route = emptyList(), slowestKmMps = 0.0,
+                elevation = `in`.odograph.tracker.core.ElevationProfile(null, 0.0, 0.0, null, null, 0.0),
+                energy = `in`.odograph.tracker.core.EnergyEstimate(0.0, 0.0, 0.0, 0.0, 0.0),
+                showEvMetrics = true, showTiles = false,
                 direction = Direction.ION, palette = paletteFor(Direction.ION, night = true)
             )
         }

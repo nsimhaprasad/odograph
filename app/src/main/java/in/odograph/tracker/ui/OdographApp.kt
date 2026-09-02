@@ -22,6 +22,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import `in`.odograph.tracker.core.Elevation
+import `in`.odograph.tracker.core.ElevationProfile
+import `in`.odograph.tracker.core.EnergyEstimate
+import `in`.odograph.tracker.core.EnergyModel
 import `in`.odograph.tracker.core.Fix
 import `in`.odograph.tracker.core.TripStats
 import `in`.odograph.tracker.data.OdographDb
@@ -48,6 +52,7 @@ fun OdographApp() {
     var direction by remember { mutableStateOf(settings.direction) }
     var themeMode by remember { mutableStateOf(settings.themeMode) }
     var showTiles by remember { mutableStateOf(true) }
+    var showEv by remember { mutableStateOf(settings.showEvMetrics) }
     var hour by remember { mutableStateOf(currentHour(settings.zone)) }
 
     val live by TripRecorderService.state.collectAsState()
@@ -55,6 +60,8 @@ fun OdographApp() {
     var smoothed by remember { mutableFloatStateOf(0f) }
     var route by remember { mutableStateOf<List<Pair<Double, Double>>>(emptyList()) }
     var slowestKmMps by remember { mutableStateOf(0.0) }
+    var elevation by remember { mutableStateOf(ElevationProfile(null, 0.0, 0.0, null, null, 0.0)) }
+    var energy by remember { mutableStateOf(EnergyEstimate(0.0, 0.0, 0.0, 0.0, 0.0)) }
 
     val night = isNight(themeMode, hour)
     val palette = paletteFor(direction, night)
@@ -81,11 +88,15 @@ fun OdographApp() {
                     runCatching {
                         val points = OdographDb.get(ctx).dao().pointsFor(id)
                         route = points.map { it.lat to it.lon }
-                        slowestKmMps = TripStats.compute(
-                            points.map {
-                                Fix(it.t, it.lat, it.lon, it.speedMps, it.accuracyM, it.interpolated)
-                            }
-                        ).slowestKmSpeedMps
+                        val fixes = points.map {
+                            Fix(
+                                it.t, it.lat, it.lon, it.speedMps, it.accuracyM,
+                                it.interpolated, it.altitudeM
+                            )
+                        }
+                        slowestKmMps = TripStats.compute(fixes).slowestKmSpeedMps
+                        elevation = Elevation.profile(fixes)
+                        energy = EnergyModel.estimate(fixes)
                     }
                 }
             }
@@ -109,6 +120,12 @@ fun OdographApp() {
                 Chip(if (detailed) "DETAILED" else "DRIVER", true, palette, m) {
                     detailed = !detailed
                 }
+                if (detailed) {
+                    Chip(if (showEv) "EV ON" else "EV OFF", showEv, palette, m) {
+                        showEv = !showEv
+                        settings.showEvMetrics = showEv
+                    }
+                }
             }
             Text(
                 text = if (live.hasFix) "REC" else "ACQUIRING",
@@ -123,7 +140,10 @@ fun OdographApp() {
         when (tab) {
             Tab.DRIVE ->
                 if (detailed) {
-                    DetailScreen(live, smoothed, route, slowestKmMps, showTiles, direction, palette)
+                    DetailScreen(
+                        live, smoothed, route, slowestKmMps, elevation, energy,
+                        showEv, showTiles, direction, palette
+                    )
                 } else {
                     DriverScreen(live, smoothed, direction, palette)
                 }

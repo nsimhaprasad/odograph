@@ -167,7 +167,10 @@ class ScreenshotTest {
     fun `detailed with route`() {
         compose.setContent {
             DetailScreen(
-                live = live, smoothedKmh = 88.6f, route = route, slowestKmMps = 3.4, showTiles = false,
+                live = live, smoothedKmh = 88.6f, route = route, slowestKmMps = 3.4,
+                elevation = `in`.odograph.tracker.core.ElevationProfile(918.0, 214.0, 186.0, 890.0, 1004.0, 3.4),
+                energy = `in`.odograph.tracker.core.EnergyEstimate(3.21, 0.74, 18_432.0, 214.0, 186.0),
+                showEvMetrics = true, showTiles = false,
                 direction = Direction.ION, palette = paletteFor(Direction.ION, night = true)
             )
         }
@@ -176,10 +179,28 @@ class ScreenshotTest {
 
     @Test
     @Config(qualifiers = "w640dp-h360dp-land")
+    fun `detailed simple without ev metrics`() {
+        compose.setContent {
+            DetailScreen(
+                live = live, smoothedKmh = 88.6f, route = route, slowestKmMps = 3.4,
+                elevation = `in`.odograph.tracker.core.ElevationProfile(918.0, 214.0, 186.0, 890.0, 1004.0, 3.4),
+                energy = `in`.odograph.tracker.core.EnergyEstimate(3.21, 0.74, 18_432.0, 214.0, 186.0),
+                showEvMetrics = false, showTiles = false, direction = Direction.ION,
+                palette = paletteFor(Direction.ION, night = true)
+            )
+        }
+        shoot("07b-detailed-simple")
+    }
+
+    @Test
+    @Config(qualifiers = "w640dp-h360dp-land")
     fun `detailed vector day`() {
         compose.setContent {
             DetailScreen(
-                live = live, smoothedKmh = 88.6f, route = route, slowestKmMps = 3.4, showTiles = false,
+                live = live, smoothedKmh = 88.6f, route = route, slowestKmMps = 3.4,
+                elevation = `in`.odograph.tracker.core.ElevationProfile(918.0, 214.0, 186.0, 890.0, 1004.0, 3.4),
+                energy = `in`.odograph.tracker.core.EnergyEstimate(3.21, 0.74, 18_432.0, 214.0, 186.0),
+                showEvMetrics = true, showTiles = false,
                 direction = Direction.VECTOR, palette = paletteFor(Direction.VECTOR, night = false)
             )
         }
@@ -255,6 +276,68 @@ class ScreenshotTest {
             Thread.sleep(25)
         }
         shoot("12-routes")
+    }
+
+    // The box is 1920x1080 at 238 dpi, so its full window is 1291 x 726 dp and its split-screen
+    // divider can put Odograph in anything down to a quarter of that height.
+    @Test
+    @Config(qualifiers = "w1291dp-h726dp-land")
+    fun `box full window`() {
+        compose.setContent {
+            DriverScreen(live, 88.6f, Direction.AUDI, paletteFor(Direction.AUDI, night = true))
+        }
+        shoot("20-box-full-1291x726")
+    }
+
+    @Test
+    @Config(qualifiers = "w1291dp-h363dp-land")
+    fun `box split half height`() {
+        compose.setContent {
+            DriverScreen(live, 88.6f, Direction.ION, paletteFor(Direction.ION, night = true))
+        }
+        shoot("21-box-split-half")
+    }
+
+    @Test
+    @Config(qualifiers = "w1291dp-h242dp-land")
+    fun `box split third height`() {
+        compose.setContent {
+            DriverScreen(live, 88.6f, Direction.ION, paletteFor(Direction.ION, night = true))
+        }
+        shoot("22-box-split-third")
+    }
+
+    @Test
+    @Config(qualifiers = "w1291dp-h181dp-land")
+    fun `box split quarter height`() {
+        compose.setContent {
+            DriverScreen(live, 88.6f, Direction.ION, paletteFor(Direction.ION, night = true))
+        }
+        shoot("23-box-split-quarter")
+    }
+
+    @Test
+    @Config(qualifiers = "w645dp-h726dp")
+    fun `box split vertical`() {
+        compose.setContent {
+            DriverScreen(live, 88.6f, Direction.ION, paletteFor(Direction.ION, night = true))
+        }
+        shoot("24-box-split-vertical")
+    }
+
+    @Test
+    @Config(qualifiers = "w1291dp-h242dp-land")
+    fun `box split third detailed`() {
+        compose.setContent {
+            DetailScreen(
+                live = live, smoothedKmh = 88.6f, route = route, slowestKmMps = 3.4,
+                elevation = `in`.odograph.tracker.core.ElevationProfile(918.0, 214.0, 186.0, 890.0, 1004.0, 3.4),
+                energy = `in`.odograph.tracker.core.EnergyEstimate(3.21, 0.74, 18_432.0, 214.0, 186.0),
+                showEvMetrics = true, showTiles = false, direction = Direction.ION,
+                palette = paletteFor(Direction.ION, night = true)
+            )
+        }
+        shoot("25-box-split-third-detailed")
     }
 
     @Test

@@ -17,6 +17,17 @@ import `in`.odograph.tracker.ui.gauge.Gauge
 import `in`.odograph.tracker.ui.theme.Direction
 import `in`.odograph.tracker.ui.theme.Palette
 
+/**
+ * The window this draws into is not fixed. The box supports split screen with a divider the
+ * driver can put anywhere, so the same 1920x1080 panel yields anything from 1291x726 dp down to
+ * 1291x181 dp, or a narrow 645x726 dp column when split the other way.
+ *
+ * Scaling every dimension from the viewport keeps text and padding sane, but it cannot fix a
+ * layout whose *structure* is wrong for the shape: a gauge beside a stats column is right at 2:1,
+ * stranded either side of a void at 7:1, and worse than a vertical stack at 0.9:1. So the
+ * arrangement branches on aspect ratio, and only the arrangement does — every size still comes
+ * from the same metrics.
+ */
 @Composable
 fun DriverScreen(
     live: TripRecorderService.LiveState,
@@ -26,35 +37,119 @@ fun DriverScreen(
 ) {
     BoxWithConstraints(Modifier.fillMaxSize().background(palette.ground)) {
         val m = rememberMetrics(maxWidth, maxHeight)
-        Row(
-            modifier = Modifier.fillMaxSize().padding(m.pad),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
+        val aspect = maxWidth.value / maxHeight.value.coerceAtLeast(1f)
+
+        val gauge: @Composable (Modifier) -> Unit = { mod ->
             Gauge(
                 speedKmh = smoothedKmh,
                 hasFix = live.hasFix,
                 direction = direction,
                 palette = palette,
-                modifier = Modifier.weight(1f).fillMaxHeight(),
+                modifier = mod,
                 overLimit = live.overLimit
             )
-            Column(
-                modifier = Modifier.weight(1f).fillMaxHeight(),
-                verticalArrangement = Arrangement.Center
+        }
+
+        when {
+            aspect < 1.2f -> TallLayout(live, palette, m, gauge)
+            aspect > 3.0f -> WideLayout(live, palette, m, gauge)
+            else -> BalancedLayout(live, palette, m, gauge)
+        }
+    }
+}
+
+/** Narrow column: stack the instrument above the numbers rather than squeezing them side by side. */
+@Composable
+private fun TallLayout(
+    live: TripRecorderService.LiveState,
+    palette: Palette,
+    m: Metrics,
+    gauge: @Composable (Modifier) -> Unit
+) {
+    Column(
+        modifier = Modifier.fillMaxSize().padding(m.pad),
+        verticalArrangement = Arrangement.SpaceEvenly,
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        gauge(Modifier.fillMaxWidth().weight(1.4f))
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceEvenly
+        ) {
+            Stat(formatKm(live.distanceM), "KM   DISTANCE", palette, m, size = m.stat)
+            Stat(formatHhMm(live.elapsedS), "H:MM   TIME", palette, m, size = m.stat)
+        }
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceEvenly
+        ) {
+            SmallStat("${mpsToKmh(live.maxSpeedMps).toInt()}", "MAX", palette, m)
+            SmallStat(formatHhMm(live.movingS), "MOVING", palette, m)
+            if (live.speedLimitKmh > 0) {
+                SmallStat("${live.speedLimitKmh}", "LIMIT", palette, m)
+            }
+        }
+    }
+}
+
+/** A thin band across the top or bottom of the screen: spread the numbers along the width. */
+@Composable
+private fun WideLayout(
+    live: TripRecorderService.LiveState,
+    palette: Palette,
+    m: Metrics,
+    gauge: @Composable (Modifier) -> Unit
+) {
+    Row(
+        modifier = Modifier.fillMaxSize().padding(m.pad),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(m.gap)
+    ) {
+        gauge(Modifier.fillMaxHeight().weight(0.9f))
+        Stat(formatKm(live.distanceM), "KM   DISTANCE", palette, m, size = m.stat,
+            modifier = Modifier.weight(1f))
+        Stat(formatHhMm(live.elapsedS), "H:MM   TIME", palette, m, size = m.stat,
+            modifier = Modifier.weight(1f))
+        Stat("${mpsToKmh(live.maxSpeedMps).toInt()}", "KM/H   MAX", palette, m, size = m.stat,
+            modifier = Modifier.weight(1f))
+        Stat(formatHhMm(live.movingS), "H:MM   MOVING", palette, m, size = m.stat,
+            modifier = Modifier.weight(1f))
+        if (live.speedLimitKmh > 0) {
+            Stat("${live.speedLimitKmh}", "KM/H   LIMIT", palette, m, size = m.stat,
+                modifier = Modifier.weight(1f))
+        }
+    }
+}
+
+/** The ordinary case: instrument on the left, the two numbers that matter stacked on the right. */
+@Composable
+private fun BalancedLayout(
+    live: TripRecorderService.LiveState,
+    palette: Palette,
+    m: Metrics,
+    gauge: @Composable (Modifier) -> Unit
+) {
+    Row(
+        modifier = Modifier.fillMaxSize().padding(m.pad),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        gauge(Modifier.weight(1f).fillMaxHeight())
+        Column(
+            modifier = Modifier.weight(1f).fillMaxHeight(),
+            verticalArrangement = Arrangement.Center
+        ) {
+            Stat(formatKm(live.distanceM), "KM   DISTANCE", palette, m)
+            Column(Modifier.padding(top = m.gap)) {
+                Stat(formatHhMm(live.elapsedS), "H:MM   TIME", palette, m)
+            }
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(top = m.gap),
+                horizontalArrangement = Arrangement.spacedBy(m.gap)
             ) {
-                Stat(formatKm(live.distanceM), "KM   DISTANCE", palette, m)
-                Column(Modifier.padding(top = m.gap)) {
-                    Stat(formatHhMm(live.elapsedS), "H:MM   TIME", palette, m)
-                }
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(top = m.gap),
-                    horizontalArrangement = Arrangement.spacedBy(m.gap)
-                ) {
-                    SmallStat("${mpsToKmh(live.maxSpeedMps).toInt()}", "MAX", palette, m)
-                    SmallStat(formatHhMm(live.movingS), "MOVING", palette, m)
-                    if (live.speedLimitKmh > 0) {
-                        SmallStat("${live.speedLimitKmh}", "LIMIT", palette, m)
-                    }
+                SmallStat("${mpsToKmh(live.maxSpeedMps).toInt()}", "MAX", palette, m)
+                SmallStat(formatHhMm(live.movingS), "MOVING", palette, m)
+                if (live.speedLimitKmh > 0) {
+                    SmallStat("${live.speedLimitKmh}", "LIMIT", palette, m)
                 }
             }
         }

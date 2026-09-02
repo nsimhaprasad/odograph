@@ -19,7 +19,9 @@ fun Location.toFix(): Fix = Fix(
     lon = longitude,
     speedMps = if (hasSpeed()) speed else 0f,
     accuracyM = if (hasAccuracy()) accuracy else Float.MAX_VALUE,
-    interpolated = false
+    interpolated = false,
+    // Network positions carry no altitude; only GNSS does.
+    altitudeM = if (hasAltitude()) altitude else null
 )
 
 interface LocationSource {

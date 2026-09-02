@@ -1,0 +1,4 @@
+ODOGRAPH EXIT REASONS
+device: QUALCOMM Bengal for arm64 sdk=33
+
+no recorded process exits

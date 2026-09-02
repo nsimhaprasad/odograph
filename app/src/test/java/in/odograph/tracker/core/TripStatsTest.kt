@@ -82,4 +82,39 @@ class TripStatsTest {
         assertThat(TripStats.compute(shuffled).distanceM)
             .isCloseTo(TripStats.compute(ordered).distanceM, within(0.01))
     }
+
+    @Test
+    fun `a stationary vehicle accrues no distance from position noise`() {
+        // A network fix wanders a few metres per sample even when nothing moves. At 1 Hz that
+        // would otherwise invent kilometres over an hour parked with the ignition on.
+        val jitter = listOf(0.0, 0.00003, -0.00002, 0.00004, -0.00003, 0.00002)
+        val fixes = jitter.mapIndexed { i, d ->
+            Fix(i * 1000L, 12.9716 + d, 77.5946 - d, speedMps = 0f, accuracyM = 16f)
+        }
+        assertThat(TripStats.compute(fixes).distanceM)
+            .`as`("parked with a wandering network fix")
+            .isEqualTo(0.0)
+    }
+
+    @Test
+    fun `distance still accrues once the vehicle is actually moving`() {
+        val fixes = listOf(
+            Fix(0, 12.9700, 77.5900, speedMps = 12f, accuracyM = 8f),
+            Fix(1000, 12.9710, 77.5900, speedMps = 12f, accuracyM = 8f),
+            Fix(2000, 12.9720, 77.5900, speedMps = 12f, accuracyM = 8f)
+        )
+        assertThat(TripStats.compute(fixes).distanceM).isCloseTo(222.0, within(20.0))
+    }
+
+    @Test
+    fun `a stop in the middle of a drive does not lose the distance either side`() {
+        val fixes = listOf(
+            Fix(0, 12.9700, 77.5900, speedMps = 12f, accuracyM = 8f),
+            Fix(1000, 12.9710, 77.5900, speedMps = 0f, accuracyM = 8f),   // red light
+            Fix(2000, 12.9710, 77.5900, speedMps = 0f, accuracyM = 8f),
+            Fix(3000, 12.9720, 77.5900, speedMps = 12f, accuracyM = 8f)
+        )
+        // Both moving legs count; the stationary pair contributes nothing.
+        assertThat(TripStats.compute(fixes).distanceM).isCloseTo(222.0, within(25.0))
+    }
 }

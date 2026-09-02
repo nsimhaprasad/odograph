@@ -63,7 +63,13 @@ class Settings(ctx: Context) {
             ?.let { id -> runCatching { TimeZone.getTimeZone(id) }.getOrNull() }
             ?: TimeZone.getDefault()
 
+    /** Whether the detailed view shows the elevation and energy row. */
+    var showEvMetrics: Boolean
+        get() = prefs.getBoolean(KEY_EV, true)
+        set(value) = prefs.edit().putBoolean(KEY_EV, value).apply()
+
     private companion object {
+        const val KEY_EV = "show_ev_metrics"
         const val KEY_TZ = "time_zone_id"
         const val KEY_LIMIT = "speed_limit_kmh"
         const val KEY_ALERT = "alert_mode"

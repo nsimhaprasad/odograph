@@ -51,6 +51,7 @@ fun SetupScreen(
     var note by remember { mutableStateOf("") }
     var limit by remember { mutableStateOf(settings.speedLimitKmh) }
     var zoneId by remember { mutableStateOf(settings.timeZoneId) }
+    var showEv by remember { mutableStateOf(settings.showEvMetrics) }
     var alertMode by remember { mutableStateOf(settings.alertMode) }
 
     LaunchedEffect(Unit) {
@@ -118,6 +119,24 @@ fun SetupScreen(
                             "3 seconds, so a brief overtake stays silent, and repeats at most " +
                             "once every 25 seconds."
                     },
+                    color = palette.dim, fontSize = m.body,
+                    modifier = Modifier.padding(top = m.gap / 2)
+                )
+            }
+
+            Section("DETAILED VIEW", palette, m) {
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(m.gap / 2)) {
+                    Chip("EV METRICS", showEv, palette, m) {
+                        showEv = true; settings.showEvMetrics = true
+                    }
+                    Chip("SIMPLE", !showEv, palette, m) {
+                        showEv = false; settings.showEvMetrics = false
+                    }
+                }
+                Text(
+                    "EV metrics add altitude, climb, descent, grade and an estimated energy " +
+                        "figure. Altitude comes only from GNSS, so they stay blank while the box " +
+                        "is positioning from WiFi alone. Also toggled from the DRIVE tab.",
                     color = palette.dim, fontSize = m.body,
                     modifier = Modifier.padding(top = m.gap / 2)
                 )

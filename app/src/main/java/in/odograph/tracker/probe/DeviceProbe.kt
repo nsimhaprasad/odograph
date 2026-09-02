@@ -1,6 +1,8 @@
 package `in`.odograph.tracker.probe
 
+import android.Manifest
 import android.content.Context
+import android.content.pm.PackageManager
 import android.location.LocationManager
 import android.os.Build
 import android.os.PowerManager
@@ -28,7 +30,13 @@ data class ProbeReport(
     val systemTimeMs: Long,
     val bootElapsedMs: Long,
     val batteryOptimisationIgnored: Boolean,
-    val externalDirs: List<String>
+    val externalDirs: List<String>,
+    val fineLocationGranted: Boolean,
+    val coarseLocationGranted: Boolean,
+    val backgroundLocationGranted: Boolean,
+    val notificationsGranted: Boolean,
+    val locationServicesEnabled: Boolean,
+    val lastKnownByProvider: Map<String, String>
 ) {
     fun asText(): String = buildString {
         appendLine("ODOGRAPH DEVICE PROBE")
@@ -42,10 +50,21 @@ data class ProbeReport(
         appendLine("UPTIME MS     : $bootElapsedMs")
         appendLine("BATTERY OPT   : ignored=$batteryOptimisationIgnored")
         appendLine("EXT DIRS      : ${externalDirs.joinToString()}")
+        appendLine("LOC SERVICES  : master switch enabled=$locationServicesEnabled")
+        appendLine("PERM fine     : $fineLocationGranted")
+        appendLine("PERM coarse   : $coarseLocationGranted")
+        appendLine("PERM backgnd  : $backgroundLocationGranted   <-- needed for auto-start on ignition")
+        appendLine("PERM notify   : $notificationsGranted")
+        appendLine("LAST KNOWN    :")
+        lastKnownByProvider.forEach { (p, v) -> appendLine("   $p = $v") }
     }
 }
 
 object DeviceProbe {
+
+    private fun granted(ctx: Context, permission: String) =
+        ctx.checkSelfPermission(permission) == PackageManager.PERMISSION_GRANTED
+
 
     @Suppress("DEPRECATION")
     fun collect(ctx: Context): ProbeReport {
@@ -75,7 +94,27 @@ object DeviceProbe {
             systemTimeMs = System.currentTimeMillis(),
             bootElapsedMs = SystemClock.elapsedRealtime(),
             batteryOptimisationIgnored = pm.isIgnoringBatteryOptimizations(ctx.packageName),
-            externalDirs = ctx.getExternalFilesDirs(null).filterNotNull().map { it.absolutePath }
+            externalDirs = ctx.getExternalFilesDirs(null).filterNotNull().map { it.absolutePath },
+            fineLocationGranted = granted(ctx, Manifest.permission.ACCESS_FINE_LOCATION),
+            coarseLocationGranted = granted(ctx, Manifest.permission.ACCESS_COARSE_LOCATION),
+            backgroundLocationGranted =
+                granted(ctx, Manifest.permission.ACCESS_BACKGROUND_LOCATION),
+            notificationsGranted =
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                    granted(ctx, Manifest.permission.POST_NOTIFICATIONS)
+                } else true,
+            locationServicesEnabled = runCatching {
+                lm.isProviderEnabled(LocationManager.GPS_PROVIDER) ||
+                    lm.isProviderEnabled(LocationManager.NETWORK_PROVIDER)
+            }.getOrDefault(false),
+            lastKnownByProvider = lm.allProviders.associateWith { p ->
+                runCatching {
+                    @Suppress("MissingPermission")
+                    lm.getLastKnownLocation(p)
+                        ?.let { "lat=${it.latitude} lon=${it.longitude} acc=${it.accuracy} t=${it.time}" }
+                        ?: "none"
+                }.getOrElse { "error: ${it::class.java.simpleName}: ${it.message}" }
+            }
         )
     }
 }
