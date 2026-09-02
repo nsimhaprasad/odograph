@@ -22,6 +22,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import `in`.odograph.tracker.core.Fix
+import `in`.odograph.tracker.core.TripStats
 import `in`.odograph.tracker.data.OdographDb
 import `in`.odograph.tracker.record.TripRecorderService
 import `in`.odograph.tracker.ui.gauge.SpeedSpring
@@ -34,7 +36,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 
-private enum class Tab { DRIVE, TRIPS, SETUP }
+private enum class Tab { DRIVE, TRIPS, ROUTES, SETUP }
 
 @Composable
 fun OdographApp() {
@@ -52,6 +54,7 @@ fun OdographApp() {
     val spring = remember { SpeedSpring() }
     var smoothed by remember { mutableFloatStateOf(0f) }
     var route by remember { mutableStateOf<List<Pair<Double, Double>>>(emptyList()) }
+    var slowestKmMps by remember { mutableStateOf(0.0) }
 
     val night = isNight(themeMode, hour)
     val palette = paletteFor(direction, night)
@@ -74,9 +77,16 @@ fun OdographApp() {
             hour = currentHour()
             val id = TripRecorderService.state.value.tripId
             if (id > 0) {
-                route = withContext(Dispatchers.IO) {
-                    runCatching { OdographDb.get(ctx).dao().pointsFor(id).map { it.lat to it.lon } }
-                        .getOrDefault(emptyList())
+                withContext(Dispatchers.IO) {
+                    runCatching {
+                        val points = OdographDb.get(ctx).dao().pointsFor(id)
+                        route = points.map { it.lat to it.lon }
+                        slowestKmMps = TripStats.compute(
+                            points.map {
+                                Fix(it.t, it.lat, it.lon, it.speedMps, it.accuracyM, it.interpolated)
+                            }
+                        ).slowestKmSpeedMps
+                    }
                 }
             }
             delay(5_000)
@@ -93,6 +103,7 @@ fun OdographApp() {
         ) {
             Chip("DRIVE", tab == Tab.DRIVE, palette, m) { tab = Tab.DRIVE }
             Chip("TRIPS", tab == Tab.TRIPS, palette, m) { tab = Tab.TRIPS }
+            Chip("ROUTES", tab == Tab.ROUTES, palette, m) { tab = Tab.ROUTES }
             Chip("SETUP", tab == Tab.SETUP, palette, m) { tab = Tab.SETUP }
             if (tab == Tab.DRIVE) {
                 Chip(if (detailed) "DETAILED" else "DRIVER", true, palette, m) {
@@ -112,11 +123,12 @@ fun OdographApp() {
         when (tab) {
             Tab.DRIVE ->
                 if (detailed) {
-                    DetailScreen(live, smoothed, route, showTiles, direction, palette)
+                    DetailScreen(live, smoothed, route, slowestKmMps, showTiles, direction, palette)
                 } else {
                     DriverScreen(live, smoothed, direction, palette)
                 }
             Tab.TRIPS -> TripListScreen(showTiles, palette)
+            Tab.ROUTES -> RoutesScreen(palette)
             Tab.SETUP -> SetupScreen(
                 direction = direction,
                 themeMode = themeMode,

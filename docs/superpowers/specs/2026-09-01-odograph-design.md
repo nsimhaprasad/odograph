@@ -167,6 +167,12 @@ the cheap channel was not acted on. Audio requests transient-may-duck focus so m
 than stops. Limit is user-set (road speed-limit data for Indian roads is not reliable enough to
 depend on) and zero disables the feature.
 
+**D12 — Google Maps labels cannot be read, so the app learns them instead.** There is no public
+API for a user's saved or labelled places; Takeout is the only export path, and one app cannot
+host another's UI, so in-app Google navigation is impossible. Instead the app clusters the places
+you actually go, reverse-geocodes each once for a default name, and lets you type your own label
+from the dashboard on a real keyboard. Your label always wins.
+
 **D10 — Place names come from cluster centroids, not trips.** Reverse geocoding runs against a
 *place* the first time it is created, never per trip, so a hundred commutes to the same office
 cost one lookup that is then cached forever. Android's built-in `Geocoder` has no backend without

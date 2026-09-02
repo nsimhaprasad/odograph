@@ -14,6 +14,7 @@ object TripRecovery {
      * @return the id of the freshly started trip.
      */
     fun recoverAndStart(dao: OdographDao, nowFromGnss: Long?): Long {
+        val places = PlaceResolver(dao)
         var seedLat: Double? = null
         var seedLon: Double? = null
 
@@ -34,6 +35,18 @@ object TripRecovery {
                 )
                 if (orphan.startLat == null) dao.setOrigin(orphan.id, first.lat, first.lon)
                 dao.setDestination(orphan.id, last.lat, last.lon)
+
+                // Now that the trip has real endpoints, attach it to the places it ran between.
+                // This is what makes "most visited route" answerable with a GROUP BY.
+                val fresh = dao.tripById(orphan.id)
+                val originLat = fresh?.startLat ?: first.lat
+                val originLon = fresh?.startLon ?: first.lon
+                dao.setTripPlaces(
+                    id = orphan.id,
+                    startId = places.resolve(originLat, originLon),
+                    endId = places.resolve(last.lat, last.lon)
+                )
+
                 seedLat = last.lat
                 seedLon = last.lon
             }

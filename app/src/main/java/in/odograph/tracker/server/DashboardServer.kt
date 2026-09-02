@@ -68,6 +68,26 @@ object DashboardServer {
                             ContentType.Text.CSV
                         )
                     }
+                    get("/places") {
+                        val dao = OdographDb.get(app).dao()
+                        call.respondText(
+                            DashboardHtml.placesPage(dao.allPlaces(), dao.routeSummaries()),
+                            ContentType.Text.Html
+                        )
+                    }
+                    post("/places") {
+                        val params = call.receiveParameters()
+                        val id = params["id"]?.toLongOrNull()
+                        val label = params["label"]?.trim()
+                        val dao = OdographDb.get(app).dao()
+                        if (id != null) dao.setPlaceLabel(id, label?.takeIf { it.isNotBlank() })
+                        call.respondText(
+                            DashboardHtml.placesPage(
+                                dao.allPlaces(), dao.routeSummaries(), "Saved."
+                            ),
+                            ContentType.Text.Html
+                        )
+                    }
                     get("/config") {
                         call.respondText(
                             DashboardHtml.configPage(settings.webhookUrl, settings.deviceId),

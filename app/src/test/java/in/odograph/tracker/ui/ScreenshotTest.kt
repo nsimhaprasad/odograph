@@ -167,7 +167,7 @@ class ScreenshotTest {
     fun `detailed with route`() {
         compose.setContent {
             DetailScreen(
-                live = live, smoothedKmh = 88.6f, route = route, showTiles = false,
+                live = live, smoothedKmh = 88.6f, route = route, slowestKmMps = 3.4, showTiles = false,
                 direction = Direction.ION, palette = paletteFor(Direction.ION, night = true)
             )
         }
@@ -179,7 +179,7 @@ class ScreenshotTest {
     fun `detailed vector day`() {
         compose.setContent {
             DetailScreen(
-                live = live, smoothedKmh = 88.6f, route = route, showTiles = false,
+                live = live, smoothedKmh = 88.6f, route = route, slowestKmMps = 3.4, showTiles = false,
                 direction = Direction.VECTOR, palette = paletteFor(Direction.VECTOR, night = false)
             )
         }
@@ -202,6 +202,56 @@ class ScreenshotTest {
             DriverScreen(live, 88.6f, Direction.CHRONO, paletteFor(Direction.CHRONO, night = true))
         }
         shoot("10-driver-wide-1920x720")
+    }
+
+    @Test
+    @Config(qualifiers = "w640dp-h360dp-land")
+    fun `routes screen`() {
+        val ctx = androidx.test.core.app.ApplicationProvider
+            .getApplicationContext<android.content.Context>()
+
+        // Room refuses main-thread access, and the screen loads on Dispatchers.IO, so seeding
+        // and waiting both have to happen off the test thread.
+        val seeder = Thread {
+            val dao = `in`.odograph.tracker.data.OdographDb.get(ctx).dao()
+            val home = dao.insertPlace(
+                `in`.odograph.tracker.data.PlaceEntity(
+                    lat = 12.9716, lon = 77.5946, visits = 47, label = "Home"
+                )
+            )
+            val office = dao.insertPlace(
+                `in`.odograph.tracker.data.PlaceEntity(
+                    lat = 12.9698, lon = 77.7500, visits = 44, label = "Office"
+                )
+            )
+            val airport = dao.insertPlace(
+                `in`.odograph.tracker.data.PlaceEntity(
+                    lat = 13.1986, lon = 77.7066, visits = 6, autoName = "Devanahalli"
+                )
+            )
+            fun seed(from: Long, to: Long, times: Int, metres: Double, seconds: Long) {
+                repeat(times) { n ->
+                    val id = dao.startTrip(n * 1_000_000L + from * 7)
+                    dao.finishTrip(
+                        id, n * 1_000_000L + seconds * 1000, metres, seconds,
+                        (seconds * 0.82).toLong(), 27.5f, metres / seconds, 3.4
+                    )
+                    dao.setTripPlaces(id, from, to)
+                }
+            }
+            seed(home, office, 47, 18_432.0, 1_484)
+            seed(office, home, 44, 19_010.0, 1_702)
+            seed(home, airport, 6, 41_200.0, 2_940)
+        }
+        seeder.start()
+        seeder.join()
+
+        compose.setContent { RoutesScreen(paletteFor(Direction.ION, night = true)) }
+        repeat(40) {
+            compose.waitForIdle()
+            Thread.sleep(25)
+        }
+        shoot("12-routes")
     }
 
     @Test

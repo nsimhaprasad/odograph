@@ -20,6 +20,10 @@ data class TripEntity(
     val endLat: Double? = null,
     val endLon: Double? = null,
     val clusterId: Long? = null,
+    /** Resolved place this trip started from. Null until recovery assigns it. */
+    val startPlaceId: Long? = null,
+    /** Resolved place this trip ended at. */
+    val endPlaceId: Long? = null,
     /** When this trip was accepted by the optional webhook. Null means never sent. */
     val syncedAt: Long? = null,
     // Reserved for v2 (OBD-II). Always null in v1 — a nullable column costs nothing today
@@ -42,3 +46,25 @@ data class PointEntity(
     val accuracyM: Float,
     val interpolated: Boolean
 )
+
+/**
+ * A place the car repeatedly starts from or ends at.
+ *
+ * Clustering finds these; naming them is a separate, human step. A user [label] always wins over
+ * the reverse-geocoded [autoName], because "Office" is more useful than "Koramangala 5th Block".
+ */
+@Entity(tableName = "places")
+data class PlaceEntity(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val lat: Double,
+    val lon: Double,
+    val visits: Int = 0,
+    val label: String? = null,
+    val autoName: String? = null,
+    val geocodedAt: Long? = null
+) {
+    val displayName: String
+        get() = label?.takeIf { it.isNotBlank() }
+            ?: autoName?.takeIf { it.isNotBlank() }
+            ?: "%.4f, %.4f".format(lat, lon)
+}

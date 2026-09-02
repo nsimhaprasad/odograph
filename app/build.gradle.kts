@@ -64,6 +64,12 @@ android {
     }
 }
 
+// Exported schemas let the 1 -> 2 migration be tested against the real DDL rather than trusting
+// that hand-written ALTER statements match what Room expects.
+ksp { arg("room.schemaLocation", "$projectDir/schemas") }
+
+android { sourceSets["test"].assets.srcDir("$projectDir/schemas") }
+
 // Screenshot rendering is a build tool, not a unit test: it asserts nothing about correctness and
 // it needs Robolectric's native graphics runtime, which loads once per JVM and only if no
 // legacy-graphics test got there first. Keeping it out of the default suite stops a tooling
@@ -107,5 +113,6 @@ dependencies {
     testImplementation("androidx.test:core:1.6.1")
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.8.1")
     testImplementation("androidx.compose.ui:ui-test-junit4")
+    testImplementation("androidx.room:room-testing:2.6.1")
     debugImplementation("androidx.compose.ui:ui-test-manifest")
 }

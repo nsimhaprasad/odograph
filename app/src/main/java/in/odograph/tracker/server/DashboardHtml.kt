@@ -1,6 +1,8 @@
 package `in`.odograph.tracker.server
 
+import `in`.odograph.tracker.data.PlaceEntity
 import `in`.odograph.tracker.data.PointEntity
+import `in`.odograph.tracker.data.RouteSummary
 import `in`.odograph.tracker.data.TripEntity
 
 object DashboardHtml {
@@ -133,6 +135,108 @@ if (TRIPS.length) { const first = tbody.querySelector('tr[data-id]'); if (first)
 </script>"""
     }
 
+    private fun esc(s: String) = s.replace("&", "&amp;").replace("<", "&lt;").replace("\"", "&quot;")
+
+    /**
+     * Naming places is a keyboard job, so it lives here rather than on a car touchscreen.
+     * A typed label always beats the reverse-geocoded suggestion shown beside it.
+     */
+    fun placesPage(
+        places: List<PlaceEntity>,
+        routes: List<RouteSummary>,
+        message: String? = null
+    ): String {
+        val placeRows = buildString {
+            places.sortedByDescending { it.visits }.forEach { p ->
+                append("<tr><td><form method=\"post\" action=\"/places\" class=\"inline\">")
+                append("<input type=\"hidden\" name=\"id\" value=\"").append(p.id).append("\">")
+                append("<input name=\"label\" value=\"").append(esc(p.label ?: "")).append("\" ")
+                append("placeholder=\"").append(esc(p.autoName ?: "name this place")).append("\">")
+                append("<button type=\"submit\">Save</button></form></td>")
+                append("<td class=\"dim\">").append(esc(p.autoName ?: "\u2014")).append("</td>")
+                append("<td class=\"num\">").append(p.visits).append("</td>")
+                append("<td class=\"dim mono\">")
+                append("%.4f, %.4f".format(p.lat, p.lon)).append("</td></tr>")
+            }
+            if (places.isEmpty()) {
+                append("<tr><td colspan=\"4\" class=\"dim\">")
+                append("No places yet. They appear once a drive has finished.</td></tr>")
+            }
+        }
+
+        val byId = places.associateBy { it.id }
+        val routeRows = buildString {
+            routes.forEach { r ->
+                append("<tr><td>").append(esc(byId[r.startId]?.displayName ?: "Unknown"))
+                append(" &rarr; ").append(esc(byId[r.endId]?.displayName ?: "Unknown")).append("</td>")
+                append("<td class=\"num\">").append(r.drives).append("</td>")
+                append("<td class=\"num\">").append("%.1f".format(r.avgDistanceM / 1000)).append("</td>")
+                append("<td class=\"num\">").append((r.avgDurationS / 60).toInt()).append(" min</td>")
+                append("<td class=\"num\">").append("%.1f".format(r.totalDistanceM / 1000)).append("</td></tr>")
+            }
+            if (routes.isEmpty()) {
+                append("<tr><td colspan=\"5\" class=\"dim\">")
+                append("No completed drives grouped yet. A trip is grouped once it ends, ")
+                append("and it ends when the ignition does.</td></tr>")
+            }
+        }
+
+        val banner = message?.let { "<div class=\"msg\">" + esc(it) + "</div>" } ?: ""
+
+        return PLACES_SHELL
+            .replace("{{BANNER}}", banner)
+            .replace("{{ROUTES}}", routeRows)
+            .replace("{{PLACES}}", placeRows)
+    }
+
+    private val PLACES_SHELL = """<!doctype html>
+<title>Odograph Places</title>
+<style>
+:root{color-scheme:dark}
+body{margin:0;background:#08090C;color:#EAEEF4;padding:44px 28px;
+ font:14px/1.6 ui-sans-serif,system-ui,sans-serif}
+.wrap{max-width:940px;margin:0 auto}
+h1{font-size:24px;margin:0 0 6px}
+h2{font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:#5C6877;
+ margin:34px 0 12px;font-weight:500}
+p.sub{color:#8B96A5;margin:0 0 8px;max-width:70ch}
+table{border-collapse:collapse;width:100%}
+th,td{text-align:left;padding:9px 12px;border-bottom:1px solid #1E2530;font-size:13px}
+th{color:#5C6877;font-weight:500;font-size:10px;letter-spacing:.1em;text-transform:uppercase}
+td.num,th.num{text-align:right;font-variant-numeric:tabular-nums}
+.dim{color:#8B96A5}.mono{font-family:ui-monospace,monospace;font-size:12px}
+form.inline{display:flex;gap:8px;margin:0}
+input{flex:1;padding:7px 10px;background:#0D1015;color:#EAEEF4;border:1px solid #1E2530;
+ border-radius:3px;font:13px ui-sans-serif,system-ui,sans-serif;min-width:130px}
+input:focus{outline:2px solid #3DE1FF;outline-offset:-1px}
+button{padding:7px 14px;background:#3DE1FF;color:#06080B;border:0;border-radius:3px;
+ font:500 11px/1 ui-monospace,monospace;letter-spacing:.1em;text-transform:uppercase;cursor:pointer}
+.msg{margin:16px 0;padding:11px 14px;border:1px solid #1E2530;border-radius:3px;
+ background:#0D1015;color:#3DE1FF;font-size:13px}
+a{color:#3DE1FF}
+</style>
+<div class="wrap">
+  <h1>Places and routes</h1>
+  <p class="sub">Name a place once and every route through it reads properly &mdash;
+  Home, Office, the gym. Your label always beats the suggested name beside it.</p>
+  {{BANNER}}
+
+  <h2>Most visited routes</h2>
+  <table><thead><tr>
+    <th>Route</th><th class="num">Drives</th><th class="num">Avg km</th>
+    <th class="num">Avg time</th><th class="num">Total km</th>
+  </tr></thead><tbody>{{ROUTES}}</tbody></table>
+
+  <h2>Places</h2>
+  <table><thead><tr>
+    <th>Your label</th><th>Suggested</th><th class="num">Visits</th><th>Coordinates</th>
+  </tr></thead><tbody>{{PLACES}}</tbody></table>
+
+  <p style="margin-top:32px"><a href="/">Dashboard</a> &middot;
+     <a href="/config">Setup</a> &middot;
+     <a href="/archive.html">Offline archive</a></p>
+</div>"""
+
     fun configPage(webhookUrl: String, deviceId: String, message: String? = null): String =
         """<!doctype html>
 <title>Odograph Setup</title>
@@ -170,7 +274,7 @@ a{color:#3DE1FF}
     <button type="submit">Save</button>
   </form>
   <p class="hint" style="margin-top:30px">
-    <a href="/">Dashboard</a> &middot; <a href="/archive.html">Download offline archive</a>
+    <a href="/">Dashboard</a> &middot; <a href="/places">Places &amp; routes</a> &middot; <a href="/archive.html">Offline archive</a>
     &middot; <a href="/trips.csv">trips.csv</a> &middot; <a href="/sync">Sync now</a>
   </p>
 </div>"""

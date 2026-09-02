@@ -15,6 +15,7 @@ import `in`.odograph.tracker.alert.SpeedAlert
 import `in`.odograph.tracker.core.Fix
 import `in`.odograph.tracker.core.Geo
 import `in`.odograph.tracker.data.OdographDb
+import `in`.odograph.tracker.geocode.PlaceNamer
 import `in`.odograph.tracker.data.PointEntity
 import `in`.odograph.tracker.server.DashboardServer
 import `in`.odograph.tracker.sync.Outbound
@@ -80,6 +81,10 @@ class TripRecorderService : Service() {
             // but recording must behave identically when it is not, so both are wrapped and
             // neither is on the capture path.
             runCatching { DashboardServer.start(this@TripRecorderService) }
+            // Give any new places a readable default name. Best-effort, rate-limited, and a
+            // user's own label always wins over whatever comes back.
+            runCatching { PlaceNamer.nameMissing(dao) }
+
             runCatching {
                 val settings = Settings(this@TripRecorderService)
                 if (settings.webhookUrl.isNotBlank()) {

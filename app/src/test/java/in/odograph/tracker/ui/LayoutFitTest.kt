@@ -69,7 +69,7 @@ class LayoutFitTest {
     private fun renderDetail(direction: Direction) {
         compose.setContent {
             DetailScreen(
-                live = live, smoothedKmh = 88.6f, route = route, showTiles = false,
+                live = live, smoothedKmh = 88.6f, route = route, slowestKmMps = 3.4, showTiles = false,
                 direction = direction, palette = paletteFor(direction, night = true)
             )
         }
@@ -186,7 +186,7 @@ class LayoutFitTest {
         compose.setContent {
             DetailScreen(
                 live = TripRecorderService.LiveState(hasFix = false),
-                smoothedKmh = 0f, route = emptyList(), showTiles = false,
+                smoothedKmh = 0f, route = emptyList(), slowestKmMps = 0.0, showTiles = false,
                 direction = Direction.ION, palette = paletteFor(Direction.ION, night = true)
             )
         }

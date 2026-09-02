@@ -63,4 +63,54 @@ interface OdographDao {
 
     @Query("DELETE FROM trips WHERE id = :id")
     fun deleteTrip(id: Long)
+
+    // ---- places ----
+
+    @Insert
+    fun insertPlace(place: PlaceEntity): Long
+
+    @Query("SELECT * FROM places")
+    fun allPlaces(): List<PlaceEntity>
+
+    @Query("SELECT * FROM places WHERE id = :id")
+    fun placeById(id: Long): PlaceEntity?
+
+    @Query("SELECT * FROM places WHERE autoName IS NULL AND label IS NULL")
+    fun placesNeedingNames(): List<PlaceEntity>
+
+    @Query("UPDATE places SET lat = :lat, lon = :lon, visits = :visits WHERE id = :id")
+    fun updatePlacePosition(id: Long, lat: Double, lon: Double, visits: Int)
+
+    @Query("UPDATE places SET label = :label WHERE id = :id")
+    fun setPlaceLabel(id: Long, label: String?)
+
+    @Query("UPDATE places SET autoName = :autoName, geocodedAt = :at WHERE id = :id")
+    fun setPlaceAutoName(id: Long, autoName: String?, at: Long)
+
+    @Query("UPDATE trips SET startPlaceId = :startId, endPlaceId = :endId WHERE id = :id")
+    fun setTripPlaces(id: Long, startId: Long?, endId: Long?)
+
+    /** Most repeated origin-to-destination pairs. Direction matters: the return leg is its own route. */
+    @Query(
+        """SELECT startPlaceId AS startId, endPlaceId AS endId, COUNT(*) AS drives,
+                  AVG(distanceM) AS avgDistanceM, AVG(durationS) AS avgDurationS,
+                  AVG(movingS) AS avgMovingS, MAX(maxSpeedMps) AS bestMaxSpeedMps,
+                  SUM(distanceM) AS totalDistanceM
+           FROM trips
+           WHERE endedAt IS NOT NULL AND startPlaceId IS NOT NULL AND endPlaceId IS NOT NULL
+           GROUP BY startPlaceId, endPlaceId
+           ORDER BY drives DESC, totalDistanceM DESC"""
+    )
+    fun routeSummaries(): List<RouteSummary>
 }
+
+data class RouteSummary(
+    val startId: Long,
+    val endId: Long,
+    val drives: Int,
+    val avgDistanceM: Double,
+    val avgDurationS: Double,
+    val avgMovingS: Double,
+    val bestMaxSpeedMps: Float,
+    val totalDistanceM: Double
+)

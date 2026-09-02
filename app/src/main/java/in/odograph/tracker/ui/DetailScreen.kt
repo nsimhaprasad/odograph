@@ -28,6 +28,7 @@ fun DetailScreen(
     live: TripRecorderService.LiveState,
     smoothedKmh: Float,
     route: List<Pair<Double, Double>>,
+    slowestKmMps: Double,
     showTiles: Boolean,
     direction: Direction,
     palette: Palette
@@ -61,9 +62,12 @@ fun DetailScreen(
                 Stat(formatHhMm(live.elapsedS), "ELAPSED", palette, m, size = m.stat)
                 Stat(formatHhMm(live.movingS), "MOVING", palette, m, size = m.stat)
                 Stat("${mpsToKmh(live.maxSpeedMps).toInt()}", "KM/H MAX", palette, m, size = m.stat)
-                if (!m.veryCompact) {
-                    Stat("${route.size}", "FIXES", palette, m, size = m.stat)
-                }
+                // The honest replacement for "lowest speed", which is always zero at a signal:
+                // the worst rolling kilometre of the drive.
+                Stat(
+                    if (slowestKmMps > 0) "${mpsToKmh(slowestKmMps.toFloat()).toInt()}" else "—",
+                    "KM/H SLOWEST KM", palette, m, size = m.stat
+                )
             }
         }
     }
