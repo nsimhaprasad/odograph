@@ -30,6 +30,7 @@ import `in`.odograph.tracker.data.TripEntity
 import `in`.odograph.tracker.ui.map.BareRouteTrace
 import `in`.odograph.tracker.ui.map.RouteMap
 import `in`.odograph.tracker.ui.theme.Palette
+import `in`.odograph.tracker.ui.theme.Settings
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
@@ -42,7 +43,12 @@ fun TripListScreen(showTiles: Boolean, palette: Palette) {
     var trips by remember { mutableStateOf<List<TripEntity>>(emptyList()) }
     var selected by remember { mutableStateOf<TripEntity?>(null) }
     var route by remember { mutableStateOf<List<Pair<Double, Double>>>(emptyList()) }
-    val fmt = remember { SimpleDateFormat("d MMM, HH:mm", Locale.getDefault()) }
+    // The box has no SIM and therefore no NITZ, so its own timezone may be UTC. Render against
+    // the configured zone rather than trusting the device.
+    val fmt = remember {
+        SimpleDateFormat("d MMM, HH:mm", Locale.getDefault())
+            .apply { timeZone = Settings(ctx).zone }
+    }
 
     LaunchedEffect(Unit) {
         trips = withContext(Dispatchers.IO) { OdographDb.get(ctx).dao().allTrips() }

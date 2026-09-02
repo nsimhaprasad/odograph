@@ -3,6 +3,7 @@ package `in`.odograph.tracker.ui.theme
 import android.content.Context
 import `in`.odograph.tracker.alert.AlertMode
 import java.util.Calendar
+import java.util.TimeZone
 
 enum class ThemeMode { AUTO, DAY, NIGHT }
 
@@ -47,7 +48,23 @@ class Settings(ctx: Context) {
             .getOrDefault(AlertMode.CHIME)
         set(value) = prefs.edit().putString(KEY_ALERT, value.name).apply()
 
+    /**
+     * Display timezone. Blank means follow the device.
+     *
+     * A box with no SIM receives no NITZ, so it can learn correct UTC from NTP but never learns
+     * its offset and sits at UTC. Carrying our own setting keeps timestamps readable regardless.
+     */
+    var timeZoneId: String
+        get() = prefs.getString(KEY_TZ, "").orEmpty()
+        set(value) = prefs.edit().putString(KEY_TZ, value).apply()
+
+    val zone: TimeZone
+        get() = timeZoneId.takeIf { it.isNotBlank() }
+            ?.let { id -> runCatching { TimeZone.getTimeZone(id) }.getOrNull() }
+            ?: TimeZone.getDefault()
+
     private companion object {
+        const val KEY_TZ = "time_zone_id"
         const val KEY_LIMIT = "speed_limit_kmh"
         const val KEY_ALERT = "alert_mode"
         const val KEY_DIRECTION = "direction"
@@ -67,4 +84,5 @@ fun isNight(mode: ThemeMode, hourOfDay: Int): Boolean = when (mode) {
     ThemeMode.AUTO -> hourOfDay < 6 || hourOfDay >= 18
 }
 
-fun currentHour(): Int = Calendar.getInstance().get(Calendar.HOUR_OF_DAY)
+fun currentHour(zone: TimeZone = TimeZone.getDefault()): Int =
+    Calendar.getInstance(zone).get(Calendar.HOUR_OF_DAY)

@@ -41,4 +41,50 @@ class GnssLooperTest {
             .`as`("registering location updates off a Looper thread must not throw")
             .isNull()
     }
+
+    @Test
+    fun `it subscribes to the network provider as well, so a fix is possible indoors`() {
+        val ctx = ApplicationProvider.getApplicationContext<android.content.Context>()
+        val lm = ctx.getSystemService(android.content.Context.LOCATION_SERVICE)
+            as android.location.LocationManager
+        val shadow = org.robolectric.Shadows.shadowOf(lm)
+        shadow.setProviderEnabled(android.location.LocationManager.GPS_PROVIDER, true)
+        shadow.setProviderEnabled(android.location.LocationManager.NETWORK_PROVIDER, true)
+
+        GnssLocationSource(ctx).start { }
+
+        assertThat(shadow.getRequestLocationUpdateListeners())
+            .`as`("one listener per enabled provider")
+            .hasSizeGreaterThanOrEqualTo(2)
+    }
+
+    @Test
+    fun `a disabled provider is skipped rather than throwing`() {
+        val ctx = ApplicationProvider.getApplicationContext<android.content.Context>()
+        val lm = ctx.getSystemService(android.content.Context.LOCATION_SERVICE)
+            as android.location.LocationManager
+        val shadow = org.robolectric.Shadows.shadowOf(lm)
+        shadow.setProviderEnabled(android.location.LocationManager.GPS_PROVIDER, false)
+        shadow.setProviderEnabled(android.location.LocationManager.NETWORK_PROVIDER, true)
+
+        GnssLocationSource(ctx).start { }
+
+        assertThat(shadow.getRequestLocationUpdateListeners()).hasSize(1)
+    }
+
+    @Test
+    fun `stopping removes every listener it registered`() {
+        val ctx = ApplicationProvider.getApplicationContext<android.content.Context>()
+        val lm = ctx.getSystemService(android.content.Context.LOCATION_SERVICE)
+            as android.location.LocationManager
+        val shadow = org.robolectric.Shadows.shadowOf(lm)
+        shadow.setProviderEnabled(android.location.LocationManager.GPS_PROVIDER, true)
+        shadow.setProviderEnabled(android.location.LocationManager.NETWORK_PROVIDER, true)
+
+        val source = GnssLocationSource(ctx)
+        source.start { }
+        source.stop()
+
+        assertThat(shadow.getRequestLocationUpdateListeners()).isEmpty()
+    }
 }

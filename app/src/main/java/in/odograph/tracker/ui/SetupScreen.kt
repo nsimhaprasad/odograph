@@ -50,6 +50,7 @@ fun SetupScreen(
     var probe by remember { mutableStateOf("") }
     var note by remember { mutableStateOf("") }
     var limit by remember { mutableStateOf(settings.speedLimitKmh) }
+    var zoneId by remember { mutableStateOf(settings.timeZoneId) }
     var alertMode by remember { mutableStateOf(settings.alertMode) }
 
     LaunchedEffect(Unit) {
@@ -117,6 +118,23 @@ fun SetupScreen(
                             "3 seconds, so a brief overtake stays silent, and repeats at most " +
                             "once every 25 seconds."
                     },
+                    color = palette.dim, fontSize = m.body,
+                    modifier = Modifier.padding(top = m.gap / 2)
+                )
+            }
+
+            Section("TIME ZONE", palette, m) {
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(m.gap / 2)) {
+                    listOf("" to "DEVICE", "Asia/Kolkata" to "IST", "UTC" to "UTC").forEach {
+                        (id, label) ->
+                        Chip(label, id == zoneId, palette, m) { zoneId = id; settings.timeZoneId = id }
+                    }
+                }
+                Text(
+                    "This box has no SIM, so it never receives a timezone from a mobile network " +
+                        "and may sit at UTC no matter how accurate its clock is. Recorded times " +
+                        "are always correct; this only changes how they are displayed. Currently " +
+                        "showing ${settings.zone.id}.",
                     color = palette.dim, fontSize = m.body,
                     modifier = Modifier.padding(top = m.gap / 2)
                 )

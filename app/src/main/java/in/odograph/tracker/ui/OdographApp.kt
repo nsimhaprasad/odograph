@@ -48,7 +48,7 @@ fun OdographApp() {
     var direction by remember { mutableStateOf(settings.direction) }
     var themeMode by remember { mutableStateOf(settings.themeMode) }
     var showTiles by remember { mutableStateOf(true) }
-    var hour by remember { mutableStateOf(currentHour()) }
+    var hour by remember { mutableStateOf(currentHour(settings.zone)) }
 
     val live by TripRecorderService.state.collectAsState()
     val spring = remember { SpeedSpring() }
@@ -74,7 +74,7 @@ fun OdographApp() {
 
     LaunchedEffect(Unit) {
         while (true) {
-            hour = currentHour()
+            hour = currentHour(settings.zone)
             val id = TripRecorderService.state.value.tripId
             if (id > 0) {
                 withContext(Dispatchers.IO) {

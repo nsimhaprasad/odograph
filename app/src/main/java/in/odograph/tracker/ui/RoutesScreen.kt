@@ -30,6 +30,7 @@ import `in`.odograph.tracker.core.Periods
 import `in`.odograph.tracker.data.OdographDb
 import `in`.odograph.tracker.data.PeriodTotals
 import `in`.odograph.tracker.ui.theme.Palette
+import `in`.odograph.tracker.ui.theme.Settings
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -62,7 +63,7 @@ fun RoutesScreen(palette: Palette) {
     var ui by remember { mutableStateOf(RoutesUi()) }
 
     LaunchedEffect(period) {
-        val range = Periods.rangeFor(period, System.currentTimeMillis())
+        val range = Periods.rangeFor(period, System.currentTimeMillis(), Settings(ctx).zone)
         val next = withContext(Dispatchers.IO) {
             runCatching {
                 val dao = OdographDb.get(ctx).dao()
