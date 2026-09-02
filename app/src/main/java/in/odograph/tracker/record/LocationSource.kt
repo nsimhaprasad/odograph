@@ -6,6 +6,7 @@ import android.location.Location
 import android.location.LocationListener
 import android.location.LocationManager
 import android.os.Bundle
+import android.os.Looper
 import `in`.odograph.tracker.core.Fix
 
 /**
@@ -42,7 +43,13 @@ class GnssLocationSource(ctx: Context) : LocationSource {
             override fun onStatusChanged(provider: String?, status: Int, extras: Bundle?) = Unit
         }
         listener = l
-        lm.requestLocationUpdates(LocationManager.GPS_PROVIDER, 1000L, 0f, l)
+        // The four-argument overload delivers callbacks on the *calling* thread's Looper and
+        // throws when it has none. The recorder starts this from Dispatchers.IO, which is a plain
+        // worker thread, so the Looper has to be named explicitly. Callbacks land on the main
+        // thread and immediately hand the work back to IO, so nothing blocking runs there.
+        lm.requestLocationUpdates(
+            LocationManager.GPS_PROVIDER, 1000L, 0f, l, Looper.getMainLooper()
+        )
     }
 
     override fun stop() {

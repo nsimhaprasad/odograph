@@ -66,6 +66,16 @@ object DashboardServer {
                             ContentType.Text.Html
                         )
                     }
+                    // Lets the device report be pulled over the network instead of read off a
+                    // car screen, which is the only practical way to get it from a box with no ADB.
+                    get("/probe") {
+                        call.respondText(
+                            `in`.odograph.tracker.probe.DeviceProbe.collect(app).asText() +
+                                "\n--- live ---\n" +
+                                `in`.odograph.tracker.record.TripRecorderService.state.value + "\n",
+                            ContentType.Text.Plain
+                        )
+                    }
                     get("/trips.csv") {
                         call.respondText(
                             Exporters.tripsCsv(OdographDb.get(app).dao().allTrips()),

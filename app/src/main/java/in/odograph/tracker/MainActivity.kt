@@ -10,7 +10,9 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
+import `in`.odograph.tracker.diag.Diagnostics
 import `in`.odograph.tracker.record.TripRecorderService
+import `in`.odograph.tracker.ui.CrashScreen
 import `in`.odograph.tracker.ui.OdographApp
 
 class MainActivity : ComponentActivity() {
@@ -22,7 +24,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        // A driver should never have to poke the screen to keep the cluster visible.
+        Diagnostics.crumb("MainActivity.onCreate start")
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
 
         val wanted = buildList {
@@ -35,9 +37,30 @@ class MainActivity : ComponentActivity() {
         val missing = wanted.filter {
             ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED
         }
+        Diagnostics.crumb("permissions missing=${missing.size}")
         if (missing.isEmpty()) startRecordingIfPermitted() else requestPermissions.launch(missing.toTypedArray())
 
+        Diagnostics.crumb("setContent")
+        // If the previous run died, show why instead of relaunching straight into the crash.
+        val osVerdict = Diagnostics.exitReasons(this)
+        val crash = Diagnostics.lastCrash(this)
+        val diagnosis = listOfNotNull(
+            crash?.let { "OUR HANDLER SAID:\n$it" },
+            "ANDROID SAID:\n$osVerdict"
+        ).joinToString("\n\n")
+
+        // Safe mode keys off our own crash file, which is cleared on dismiss. Keying off the OS
+        // exit history instead would latch on permanently, because that history still lists old
+        // crashes long after the cause is fixed.
+        if (crash != null) {
+            Diagnostics.crumb("safe mode: previous run died")
+            setContent { CrashScreen(diagnosis) { Diagnostics.clearCrash(this); recreate() } }
+            Diagnostics.shipTrail()
+            return
+        }
         setContent { OdographApp() }
+        Diagnostics.crumb("MainActivity.onCreate complete")
+        Diagnostics.shipTrail()
     }
 
     /**
@@ -50,6 +73,7 @@ class MainActivity : ComponentActivity() {
         ) == PackageManager.PERMISSION_GRANTED
         if (!granted) return
 
+        Diagnostics.crumb("starting recorder service")
         val svc = Intent(this, TripRecorderService::class.java)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             startForegroundService(svc)
@@ -68,3 +92,4 @@ class MainActivity : ComponentActivity() {
         }
     }
 }
+

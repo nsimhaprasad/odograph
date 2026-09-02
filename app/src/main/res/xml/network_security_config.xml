@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<network-security-config>
+    <!--
+      targetSdk 34 blocks cleartext HTTP by default, which silently swallowed the crash reports
+      the app was posting to the development machine. Everything the app talks to in normal use
+      (OSM tiles, Nominatim, an Apps Script webhook) is HTTPS; this exception exists only so
+      bring-up diagnostics can reach a local collector. Remove it once the box is proven.
+    -->
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="false">10.82.127.144</domain>
+    </domain-config>
+</network-security-config>

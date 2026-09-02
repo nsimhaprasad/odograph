@@ -1,0 +1,33 @@
+ODOGRAPH EXIT REASONS
+device: QUALCOMM Bengal for arm64 sdk=33
+
+--- exit ---
+reason      : CRASH (uncaught exception) (4)
+description : crash
+status      : 0
+importance  : 125
+when        : 1788327645610
+--- exit ---
+reason      : CRASH (uncaught exception) (4)
+description : crash
+status      : 0
+importance  : 100
+when        : 1788327370581
+--- exit ---
+reason      : CRASH (uncaught exception) (4)
+description : crash
+status      : 0
+importance  : 100
+when        : 1788327045237
+--- exit ---
+reason      : CRASH (uncaught exception) (4)
+description : crash
+status      : 0
+importance  : 125
+when        : 1788327043693
+--- exit ---
+reason      : CRASH (uncaught exception) (4)
+description : crash
+status      : 0
+importance  : 100
+when        : 1788327042460

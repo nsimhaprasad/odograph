@@ -1,0 +1,19 @@
+1788327694066  crash handler installed
+1788327694076  Application.onCreate complete
+1788327694129  MainActivity.onCreate start
+1788327694139  permissions missing=0
+1788327694140  starting recorder service
+1788327694163  setContent
+1788327694174  safe mode: previous run died
+1788327694721  service onCreate start
+1788327694731  startForeground ok
+1788327694734  service deps built
+1788327694767  db opened
+1788327694862  recovery done trip=10
+1788327694869  starting dashboard server
+1788327695016  dashboard server step done
+1788327701996  MainActivity.onCreate start
+1788327701998  permissions missing=0
+1788327701998  starting recorder service
+1788327702003  setContent
+1788327702022  MainActivity.onCreate complete

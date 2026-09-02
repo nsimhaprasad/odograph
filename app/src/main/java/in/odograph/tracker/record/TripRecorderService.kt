@@ -15,6 +15,7 @@ import `in`.odograph.tracker.alert.SpeedAlert
 import `in`.odograph.tracker.core.Fix
 import `in`.odograph.tracker.core.Geo
 import `in`.odograph.tracker.data.OdographDb
+import `in`.odograph.tracker.diag.Diagnostics
 import `in`.odograph.tracker.geocode.PlaceNamer
 import `in`.odograph.tracker.data.PointEntity
 import `in`.odograph.tracker.server.DashboardServer
@@ -64,26 +65,35 @@ class TripRecorderService : Service() {
 
     override fun onCreate() {
         super.onCreate()
+        Diagnostics.crumb("service onCreate start")
         startInForeground()
+        Diagnostics.crumb("startForeground ok")
         source = GnssLocationSource(this)
         settings = Settings(this)
         alertSound = AlertSound(this)
+        Diagnostics.crumb("service deps built")
         runCatching { alertSound.prepare(settings.alertMode) }
 
         io.launch {
             val dao = OdographDb.get(this@TripRecorderService).dao()
             // startedAt is patched by the first real fix; GNSS time is the authority.
+            Diagnostics.crumb("db opened")
             tripId = TripRecovery.recoverAndStart(dao, nowFromGnss = null)
+            Diagnostics.crumb("recovery done trip=$tripId")
             _state.value = LiveState(tripId = tripId)
             source.start { fix -> io.launch { record(fix) } }
 
             // Everything below is best-effort and entirely optional. The hotspot is usually up,
             // but recording must behave identically when it is not, so both are wrapped and
             // neither is on the capture path.
+            Diagnostics.crumb("starting dashboard server")
             runCatching { DashboardServer.start(this@TripRecorderService) }
+                .onFailure { Diagnostics.crumb("dashboard server FAILED: $it") }
+            Diagnostics.crumb("dashboard server step done")
             // Give any new places a readable default name. Best-effort, rate-limited, and a
             // user's own label always wins over whatever comes back.
             runCatching { PlaceNamer.nameMissing(dao) }
+                .onFailure { Diagnostics.crumb("place naming failed: $it") }
 
             runCatching {
                 val settings = Settings(this@TripRecorderService)

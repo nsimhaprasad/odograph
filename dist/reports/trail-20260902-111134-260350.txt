@@ -1,0 +1,7 @@
+1788327694066  crash handler installed
+1788327694076  Application.onCreate complete
+1788327694129  MainActivity.onCreate start
+1788327694139  permissions missing=0
+1788327694140  starting recorder service
+1788327694163  setContent
+1788327694174  safe mode: previous run died
