@@ -168,29 +168,14 @@ class ScreenshotTest {
         compose.setContent {
             DetailScreen(
                 live = live, smoothedKmh = 88.6f, route = route, slowestKmMps = 3.4,
-                elevation = `in`.odograph.tracker.core.ElevationProfile(918.0, 214.0, 186.0, 890.0, 1004.0, 3.4),
-                energy = `in`.odograph.tracker.core.EnergyEstimate(3.21, 0.74, 18_432.0, 214.0, 186.0),
-                showEvMetrics = true, showTiles = false,
+                showTiles = false,
                 direction = Direction.ION, palette = paletteFor(Direction.ION, night = true)
             )
         }
         shoot("07-detailed-ion-night")
     }
 
-    @Test
-    @Config(qualifiers = "w640dp-h360dp-land")
-    fun `detailed simple without ev metrics`() {
-        compose.setContent {
-            DetailScreen(
-                live = live, smoothedKmh = 88.6f, route = route, slowestKmMps = 3.4,
-                elevation = `in`.odograph.tracker.core.ElevationProfile(918.0, 214.0, 186.0, 890.0, 1004.0, 3.4),
-                energy = `in`.odograph.tracker.core.EnergyEstimate(3.21, 0.74, 18_432.0, 214.0, 186.0),
-                showEvMetrics = false, showTiles = false, direction = Direction.ION,
-                palette = paletteFor(Direction.ION, night = true)
-            )
-        }
-        shoot("07b-detailed-simple")
-    }
+
 
     @Test
     @Config(qualifiers = "w640dp-h360dp-land")
@@ -198,9 +183,7 @@ class ScreenshotTest {
         compose.setContent {
             DetailScreen(
                 live = live, smoothedKmh = 88.6f, route = route, slowestKmMps = 3.4,
-                elevation = `in`.odograph.tracker.core.ElevationProfile(918.0, 214.0, 186.0, 890.0, 1004.0, 3.4),
-                energy = `in`.odograph.tracker.core.EnergyEstimate(3.21, 0.74, 18_432.0, 214.0, 186.0),
-                showEvMetrics = true, showTiles = false,
+                showTiles = false,
                 direction = Direction.VECTOR, palette = paletteFor(Direction.VECTOR, night = false)
             )
         }
@@ -331,13 +314,50 @@ class ScreenshotTest {
         compose.setContent {
             DetailScreen(
                 live = live, smoothedKmh = 88.6f, route = route, slowestKmMps = 3.4,
-                elevation = `in`.odograph.tracker.core.ElevationProfile(918.0, 214.0, 186.0, 890.0, 1004.0, 3.4),
-                energy = `in`.odograph.tracker.core.EnergyEstimate(3.21, 0.74, 18_432.0, 214.0, 186.0),
-                showEvMetrics = true, showTiles = false, direction = Direction.ION,
+                showTiles = false, direction = Direction.ION,
                 palette = paletteFor(Direction.ION, night = true)
             )
         }
         shoot("25-box-split-third-detailed")
+    }
+
+    @Test
+    @Config(qualifiers = "w1291dp-h726dp-land")
+    fun `detailed full window`() {
+        compose.setContent {
+            DetailScreen(
+                live = live, smoothedKmh = 88.6f, route = route, slowestKmMps = 3.4,
+                showTiles = false, direction = Direction.ION,
+                palette = paletteFor(Direction.ION, night = true)
+            )
+        }
+        shoot("26-detailed-full")
+    }
+
+    @Test
+    @Config(qualifiers = "w1291dp-h181dp-land")
+    fun `detailed split quarter`() {
+        compose.setContent {
+            DetailScreen(
+                live = live, smoothedKmh = 88.6f, route = route, slowestKmMps = 3.4,
+                showTiles = false, direction = Direction.ION,
+                palette = paletteFor(Direction.ION, night = true)
+            )
+        }
+        shoot("27-detailed-split-quarter")
+    }
+
+    @Test
+    @Config(qualifiers = "w645dp-h726dp")
+    fun `detailed split vertical`() {
+        compose.setContent {
+            DetailScreen(
+                live = live, smoothedKmh = 88.6f, route = route, slowestKmMps = 3.4,
+                showTiles = false, direction = Direction.ION,
+                palette = paletteFor(Direction.ION, night = true)
+            )
+        }
+        shoot("28-detailed-split-vertical")
     }
 
     @Test

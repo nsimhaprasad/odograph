@@ -12,8 +12,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import `in`.odograph.tracker.core.ElevationProfile
-import `in`.odograph.tracker.core.EnergyEstimate
 import `in`.odograph.tracker.record.TripRecorderService
 import `in`.odograph.tracker.ui.gauge.Gauge
 import `in`.odograph.tracker.ui.map.BareRouteTrace
@@ -22,8 +20,12 @@ import `in`.odograph.tracker.ui.theme.Direction
 import `in`.odograph.tracker.ui.theme.Palette
 
 /**
- * The passenger view. Attention budget is not a constraint here, so it can be dense: live gauge,
- * the route so far, and the full stat set.
+ * The passenger view: live instrument, the route so far, and the full stat set.
+ *
+ * Arranged by aspect ratio for the same reason as [DriverScreen]. The map is the element that
+ * suffers most from a wrong arrangement, because it is the only one whose usefulness scales with
+ * the area it gets. In a short window, putting the stats in a row underneath steals the height
+ * the map needs, so they move to a column beside it instead.
  */
 @Composable
 fun DetailScreen(
@@ -31,75 +33,96 @@ fun DetailScreen(
     smoothedKmh: Float,
     route: List<Pair<Double, Double>>,
     slowestKmMps: Double,
-    elevation: ElevationProfile,
-    energy: EnergyEstimate,
-    showEvMetrics: Boolean,
     showTiles: Boolean,
     direction: Direction,
     palette: Palette
 ) {
     BoxWithConstraints(Modifier.fillMaxSize().background(palette.ground)) {
         val m = rememberMetrics(maxWidth, maxHeight)
-        Column(Modifier.fillMaxSize().padding(m.pad)) {
-            Row(
-                modifier = Modifier.fillMaxWidth().weight(1f),
-                verticalAlignment = Alignment.CenterVertically
+        val aspect = maxWidth.value / maxHeight.value.coerceAtLeast(1f)
+
+        val gauge: @Composable (Modifier) -> Unit = { mod ->
+            Gauge(
+                speedKmh = smoothedKmh,
+                hasFix = live.hasFix,
+                direction = direction,
+                palette = palette,
+                modifier = mod,
+                overLimit = live.overLimit
+            )
+        }
+        val map: @Composable (Modifier) -> Unit = { mod ->
+            if (showTiles) RouteMap(route, palette, mod) else BareRouteTrace(route, palette, mod)
+        }
+
+        when {
+            aspect < 1.2f -> Column(
+                modifier = Modifier.fillMaxSize().padding(m.pad),
+                verticalArrangement = Arrangement.spacedBy(m.gap)
             ) {
-                Gauge(
-                    speedKmh = smoothedKmh,
-                    hasFix = live.hasFix,
-                    direction = direction,
-                    palette = palette,
-                    modifier = Modifier.weight(1f).fillMaxHeight(),
-                    overLimit = live.overLimit
-                )
-                if (showTiles) {
-                    RouteMap(route, palette, Modifier.weight(2f).fillMaxHeight())
-                } else {
-                    BareRouteTrace(route, palette, Modifier.weight(2f).fillMaxHeight())
+                gauge(Modifier.fillMaxWidth().weight(1f))
+                map(Modifier.fillMaxWidth().weight(1.6f))
+                StatRow(live, slowestKmMps, palette, m, compact = true)
+            }
+
+            // Short and wide: the stats go beside the map so they do not eat its height.
+            aspect > 3.0f -> Row(
+                modifier = Modifier.fillMaxSize().padding(m.pad),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(m.gap)
+            ) {
+                gauge(Modifier.fillMaxHeight().weight(0.8f))
+                map(Modifier.fillMaxHeight().weight(2.2f))
+                Column(
+                    modifier = Modifier.fillMaxHeight().weight(1.1f),
+                    verticalArrangement = Arrangement.SpaceEvenly
+                ) {
+                    Stat(formatKm(live.distanceM), "KM   DIST", palette, m, size = m.stat)
+                    Stat(formatHhMm(live.elapsedS), "ELAPSED", palette, m, size = m.stat)
+                    Stat(
+                        "${mpsToKmh(live.maxSpeedMps).toInt()}", "KM/H MAX",
+                        palette, m, size = m.stat
+                    )
                 }
             }
-            Row(
-                modifier = Modifier.fillMaxWidth().padding(top = m.gap),
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Stat(formatKm(live.distanceM), "KM   DIST", palette, m, size = m.stat)
-                Stat(formatHhMm(live.elapsedS), "ELAPSED", palette, m, size = m.stat)
-                Stat(formatHhMm(live.movingS), "MOVING", palette, m, size = m.stat)
-                Stat("${mpsToKmh(live.maxSpeedMps).toInt()}", "KM/H MAX", palette, m, size = m.stat)
-                // The honest replacement for "lowest speed", which is always zero at a signal:
-                // the worst rolling kilometre of the drive.
-                Stat(
-                    if (slowestKmMps > 0) "${mpsToKmh(slowestKmMps.toFloat()).toInt()}" else "—",
-                    "KM/H SLOWEST", palette, m, size = m.stat
-                )
+
+            else -> Column(Modifier.fillMaxSize().padding(m.pad)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth().weight(1f),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(m.gap)
+                ) {
+                    gauge(Modifier.fillMaxHeight().weight(1f))
+                    map(Modifier.fillMaxHeight().weight(2f))
+                }
+                StatRow(live, slowestKmMps, palette, m, compact = false)
             }
-            // Elevation and the energy it implies. Altitude comes only from GNSS, so these stay
-            // blank while the box is on network positioning alone. Optional, because in a short
-            // split-screen window this is the first row worth giving up.
-            if (showEvMetrics) Row(
-                modifier = Modifier.fillMaxWidth().padding(top = m.gap / 2),
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Stat(
-                    elevation.currentM?.let { "${it.toInt()}" } ?: "—",
-                    "M   ALTITUDE", palette, m, size = m.stat
-                )
-                Stat("+${elevation.gainM.toInt()}", "M   CLIMBED", palette, m, size = m.stat)
-                Stat("-${elevation.lossM.toInt()}", "M   DESCENDED", palette, m, size = m.stat)
-                Stat(
-                    "%.1f".format(elevation.gradePercent), "%   GRADE", palette, m, size = m.stat
-                )
-                Stat("%.2f".format(energy.netKwh), "KWH   EST USED", palette, m, size = m.stat)
-                Stat(
-                    if (energy.regeneratedKwh > 0) "%.2f".format(energy.regeneratedKwh) else "—",
-                    "KWH   REGEN", palette, m, size = m.stat
-                )
-                Stat(
-                    if (energy.kmPerKwh > 0) "%.1f".format(energy.kmPerKwh) else "—",
-                    "KM/KWH   EST", palette, m, size = m.stat
-                )
-            }
+        }
+    }
+}
+
+@Composable
+private fun StatRow(
+    live: TripRecorderService.LiveState,
+    slowestKmMps: Double,
+    palette: Palette,
+    m: Metrics,
+    compact: Boolean
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(top = m.gap / 2),
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+        Stat(formatKm(live.distanceM), "KM   DIST", palette, m, size = m.stat)
+        Stat(formatHhMm(live.elapsedS), "ELAPSED", palette, m, size = m.stat)
+        Stat(formatHhMm(live.movingS), "MOVING", palette, m, size = m.stat)
+        Stat("${mpsToKmh(live.maxSpeedMps).toInt()}", "KM/H MAX", palette, m, size = m.stat)
+        if (!compact) {
+            // The honest replacement for "lowest speed", which is always zero at a traffic signal.
+            Stat(
+                if (slowestKmMps > 0) "${mpsToKmh(slowestKmMps.toFloat()).toInt()}" else "—",
+                "KM/H SLOWEST", palette, m, size = m.stat
+            )
         }
     }
 }

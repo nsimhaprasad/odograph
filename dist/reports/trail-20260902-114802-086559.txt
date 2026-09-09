@@ -1,0 +1,9 @@
+ODOGRAPH EXIT REASONS
+device: QUALCOMM Bengal for arm64 sdk=33
+
+--- exit ---
+reason      : USER REQUESTED (10)
+description : stop in.odograph.tracker due to installPackageLI
+status      : 0
+importance  : 125
+when        : 1788328332544

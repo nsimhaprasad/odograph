@@ -1,0 +1,7 @@
+1788328338263  crash handler installed
+1788328338272  Application.onCreate complete
+1788328338363  MainActivity.onCreate start
+1788328338382  permissions missing=0
+1788328338382  starting recorder service
+1788328338397  setContent
+1788328338440  MainActivity.onCreate complete
