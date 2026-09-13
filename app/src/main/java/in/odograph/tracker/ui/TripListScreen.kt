@@ -236,10 +236,7 @@ private fun TripRow(
                 )
             }
         }
-        val usedPct = trip.socStart?.let { start ->
-            trip.socEnd?.let { end -> start - end }
-        }
-        trip.batteryLine(usedPct)?.let {
+        trip.batteryLine()?.let {
             Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
                 Text(it, color = palette.accent, fontSize = m.label)
             }
@@ -248,21 +245,19 @@ private fun TripRow(
 }
 
 /**
- * One spare line under a drive describing what it did to the battery: percentage points used
- * (or gained, when it charged), kW·h, the cost when a rate is known, and the achieved mileage.
+ * One spare line under a drive describing what it did to the battery: the starting and ending
+ * charge side by side (80→64%), kW·h, the cost when a rate is known, and the achieved mileage.
  * Every piece stays silent until it exists — no blanks are ever prettified into a fabricated 0.
  */
-private fun TripEntity.batteryLine(usedPct: Double?): String? {
+private fun TripEntity.batteryLine(): String? {
     val parts = mutableListOf<String>()
-    if (usedPct != null) {
-        parts += if (usedPct >= 0.05) "used %.0f%%".format(usedPct)
-        else if (usedPct <= -0.05) "charged %.0f%%".format(-usedPct)
-        else "SOC flat"
+    if (socStart != null && socEnd != null) {
+        parts += "%.0f→%.0f%%".format(socStart, socEnd)
     }
     energyKwh?.let {
         if (it != 0.0) parts += "%.1f kWh".format(it)
     }
-    if (usedPct != null && energyKwh != null && energyKwh > 0 && distanceM > 0) {
+    if (socStart != null && socEnd != null && energyKwh != null && energyKwh > 0 && distanceM > 0) {
         parts += "%.1f km/kWh".format(BatteryMath.kmPerKwh(energyKwh, distanceM) ?: 0.0)
     }
     costInr?.let { parts += "₹ %.0f".format(it) }
