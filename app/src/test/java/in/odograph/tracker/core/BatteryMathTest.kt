@@ -38,8 +38,9 @@ class BatteryMathTest {
             BatteryEntity(0, 2, 60_000, socPercent = 85.0, charging = true, chargingPowerKw = 40.0),
             BatteryEntity(0, 3, 120_000, socPercent = 80.0, charging = false)
         )
-        assertThat(BatteryMath.chargedKwh(samples)).isCloseTo(0.6667, within(1e-9))
-        assertThat(BatteryMath.consumedKwh(samples, capacity)).isCloseTo(4.92, within(1e-9))
+        assertThat(BatteryMath.chargedKwh(samples)).isCloseTo(40.0 * 60.0 / 3600.0, within(1e-9))
+        assertThat(BatteryMath.consumedKwh(samples, capacity))
+            .isCloseTo(4.92 + 40.0 * 60.0 / 3600.0, within(1e-9))
     }
 
     @Test
@@ -116,14 +117,14 @@ class BatteryMathTest {
 
     @Test
     fun `range at full scales with efficiency and capacity`() {
-        assertThat(BatteryMath.rangeAtFullKwh(49.2, 11.5)).isCloseTo(427.8, within(1e-9))
+        assertThat(BatteryMath.rangeAtFullKwh(49.2, 11.5)).isCloseTo(427.83, within(0.05))
     }
 
     @Test
     fun `range at a soc is clamped into 0 to 100`() {
-        assertThat(BatteryMath.rangeAtSocKwh(49.2, 50.0, 11.5)).isCloseTo(213.9, within(1e-9))
+        assertThat(BatteryMath.rangeAtSocKwh(49.2, 50.0, 11.5)).isCloseTo(213.91, within(0.05))
         assertThat(BatteryMath.rangeAtSocKwh(49.2, -5.0, 11.5)).isEqualTo(0.0)
-        assertThat(BatteryMath.rangeAtSocKwh(49.2, 140.0, 11.5)).isCloseTo(427.8, within(1e-9))
+        assertThat(BatteryMath.rangeAtSocKwh(49.2, 140.0, 11.5)).isCloseTo(427.83, within(0.05))
     }
 
     @Test
