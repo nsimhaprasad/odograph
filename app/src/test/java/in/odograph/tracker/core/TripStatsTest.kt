@@ -97,6 +97,46 @@ class TripStatsTest {
     }
 
     @Test
+    fun `a single fix is never movement`() {
+        assertThat(TripStats.moved(listOf(fix(0, 12.97, 77.59, 0f)))).isFalse()
+    }
+
+    @Test
+    fun `parked engine-on jitter is not movement`() {
+        // The exact scenario that used to record a 0 km Home-to-Home "trip": the ignition on,
+        // the car still, a few GPS samples drifting tens of metres around the driveway but no
+        // direction of travel. It must not count as a drive.
+        val fixes = listOf(
+            fix(0, 12.9700, 77.5900, 0f),
+            fix(60_000, 12.9703, 77.5903, 0f),
+            fix(120_000, 12.9699, 77.5902, 0f)
+        )
+        assertThat(TripStats.moved(fixes))
+            .`as`("jitter never leaves the origin")
+            .isFalse()
+    }
+
+    @Test
+    fun `leaving the origin counts as movement even without a speed reading`() {
+        // A network-only session reports no velocity at all, so the displacement fallback has
+        // to catch it: the car did travel, and the drive must be kept.
+        val fixes = listOf(
+            fix(0, 12.9700, 77.5900, 0f),
+            fix(60_000, 12.9900, 77.5900, 0f)   // ~2.2 km away
+        )
+        assertThat(TripStats.moved(fixes)).isTrue()
+    }
+
+    @Test
+    fun `a direction-of-travel reading of a real drive counts as movement`() {
+        val fixes = listOf(
+            fix(0, 12.9700, 77.5900, 12f),
+            fix(1000, 12.9710, 77.5900, 12f)
+        )
+        assertThat(TripStats.moved(fixes)).isTrue()
+    }
+
+    @Test
     fun `distance still accrues once the vehicle is actually moving`() {
         val fixes = listOf(
             Fix(0, 12.9700, 77.5900, speedMps = 12f, accuracyM = 8f),

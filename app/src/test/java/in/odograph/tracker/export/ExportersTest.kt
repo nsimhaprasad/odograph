@@ -56,4 +56,19 @@ class ExportersTest {
         )
         assertThat(csv).doesNotContain("null")
     }
+
+    @Test
+    fun `trips csv carries the battery and cost columns`() {
+        val csv = Exporters.tripsCsv(
+            listOf(trip.copy(socStart = 90.0, socEnd = 64.2, energyKwh = 12.7, costInr = 101.6))
+        )
+        val line = csv.trim().lines()[1]
+        assertThat(line).contains(",90.0,64.2,12.7,101.6")
+    }
+
+    @Test
+    fun `trips csv leaves battery blanks when a trip was not instrumented`() {
+        val line = Exporters.tripsCsv(listOf(trip)).trim().lines()[1]
+        assertThat(line).endsWith(",,,,")
+    }
 }

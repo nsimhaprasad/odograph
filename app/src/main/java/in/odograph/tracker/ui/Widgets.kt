@@ -51,8 +51,15 @@ fun Stat(
 }
 
 @Composable
-fun SmallStat(value: String, label: String, palette: Palette, m: Metrics) {
-    Row(horizontalArrangement = Arrangement.spacedBy(m.gap / 3)) {
+fun SmallStat(
+    value: String,
+    label: String,
+    palette: Palette,
+    m: Metrics,
+    onClick: (() -> Unit)? = null
+) {
+    val click = if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier
+    Row(horizontalArrangement = Arrangement.spacedBy(m.gap / 3), modifier = click) {
         Text(label, color = palette.label, fontSize = m.label, letterSpacing = 1.1.sp, maxLines = 1)
         Text(
             text = value,

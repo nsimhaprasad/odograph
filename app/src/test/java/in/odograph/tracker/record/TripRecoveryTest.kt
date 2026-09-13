@@ -46,7 +46,10 @@ class TripRecoveryTest {
     fun `the new trip inherits its origin from the previous trip's last point`() {
         val dao = db.dao()
         val old = dao.startTrip(1_000_000L)
-        dao.appendPoint(PointEntity(0, old, 1_060_000L, 12.9800, 77.5900, 0f, null, 905.0, 5f, false))
+        // Two fixes that clear the anchor noise floor, so the orphan is a real drive that keeps
+        // enough of itself to seed the next trip's origin.
+        dao.appendPoint(PointEntity(0, old, 1_000_000L, 12.9700, 77.5900, 0f, null, 905.0, 5f, false))
+        dao.appendPoint(PointEntity(0, old, 1_060_000L, 12.9800, 77.5900, 15f, null, 905.0, 5f, false))
 
         val newId = TripRecovery.recoverAndStart(dao, nowFromGnss = 2_000_000L)
 
@@ -63,6 +66,22 @@ class TripRecoveryTest {
         TripRecovery.recoverAndStart(dao, nowFromGnss = 2_000_000L)
 
         assertThat(dao.tripById(empty)).isNull()
+    }
+
+    @Test
+    fun `an orphan whose engine ran but never moved is discarded not recorded as a 0 km trip`() {
+        val dao = db.dao()
+        val parked = dao.startTrip(1_000_000L)
+        // The car sat with the engine on: cell-tower jitter around one spot, no direction of
+        // travel. Previously this surfaced as a tidy Home-to-Home "trip" of 0 km.
+        dao.appendPoint(PointEntity(0, parked, 1_000_000L, 12.9700, 77.5900, 0f, null, 905.0, 5f, false))
+        dao.appendPoint(PointEntity(0, parked, 1_060_000L, 12.9703, 77.5903, 0f, null, 905.0, 5f, false))
+        dao.appendPoint(PointEntity(0, parked, 1_120_000L, 12.9699, 77.5902, 0f, null, 905.0, 5f, false))
+
+        TripRecovery.recoverAndStart(dao, nowFromGnss = 2_000_000L)
+
+        assertThat(dao.tripById(parked)).isNull()
+        assertThat(dao.pointsFor(parked)).isEmpty()
     }
 
     @Test

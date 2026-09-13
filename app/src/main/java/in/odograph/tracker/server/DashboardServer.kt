@@ -15,10 +15,16 @@ import io.ktor.server.response.respondText
 import io.ktor.server.routing.get
 import io.ktor.server.routing.post
 import io.ktor.server.routing.routing
+import `in`.odograph.tracker.core.BatteryMath
+import `in`.odograph.tracker.data.OdographDao
 import `in`.odograph.tracker.data.OdographDb
+import `in`.odograph.tracker.data.TripEnergy
 import `in`.odograph.tracker.export.Exporters
 import `in`.odograph.tracker.sync.Outbound
 import `in`.odograph.tracker.ui.theme.Settings
+import io.windsor.telematics.TelematicsClient
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 /**
  * Serves the analysis dashboard on the local network.
@@ -48,9 +54,19 @@ object DashboardServer {
                         val dao = OdographDb.get(app).dao()
                         val trips = dao.allTrips()
                         val routes = trips.associate { it.id to dao.pointsFor(it.id) }
+                        val live = `in`.odograph.tracker.record.TripRecorderService.state.value
                         call.respondText(
                             DashboardHtml.render(
-                                trips, routes, settings.webhookUrl.isNotBlank(), dao.monthlyTotals()
+                                trips, routes,
+                                webhookConfigured = settings.webhookUrl.isNotBlank(),
+                                months = dao.monthlyTotals(),
+                                chargeEvents = dao.allChargeEvents(),
+                                telemetryDays = dao.allTelemetryDays(),
+                                capacityKwh = settings.batteryCapacityKwh,
+                                homeRateInr = settings.homeRateInr,
+                                outsideRateInr = settings.outsideRateInr,
+                                socPercent = live.batterySocPercent,
+                                liveRangeKm = live.batteryRangeAtFullKm
                             ),
                             ContentType.Text.Html
                         )
@@ -59,9 +75,19 @@ object DashboardServer {
                         val dao = OdographDb.get(app).dao()
                         val trips = dao.allTrips()
                         val routes = trips.associate { it.id to dao.pointsFor(it.id) }
+                        val live = `in`.odograph.tracker.record.TripRecorderService.state.value
                         call.respondText(
                             DashboardHtml.render(
-                                trips, routes, settings.webhookUrl.isNotBlank(), dao.monthlyTotals()
+                                trips, routes,
+                                webhookConfigured = settings.webhookUrl.isNotBlank(),
+                                months = dao.monthlyTotals(),
+                                chargeEvents = dao.allChargeEvents(),
+                                telemetryDays = dao.allTelemetryDays(),
+                                capacityKwh = settings.batteryCapacityKwh,
+                                homeRateInr = settings.homeRateInr,
+                                outsideRateInr = settings.outsideRateInr,
+                                socPercent = live.batterySocPercent,
+                                liveRangeKm = live.batteryRangeAtFullKm
                             ),
                             ContentType.Text.Html
                         )
@@ -104,7 +130,13 @@ object DashboardServer {
                     }
                     get("/config") {
                         call.respondText(
-                            DashboardHtml.configPage(settings.webhookUrl, settings.deviceId),
+                            DashboardHtml.configPage(
+                                settings.webhookUrl, settings.deviceId,
+                                settings.telematicsPhone, settings.telematicsPassword, settings.telematicsVin,
+                                batteryCapacityKwh = "%.1f".format(settings.batteryCapacityKwh),
+                                homeRateInr = "%.2f".format(settings.homeRateInr),
+                                outsideRateInr = "%.2f".format(settings.outsideRateInr)
+                            ),
                             ContentType.Text.Html
                         )
                     }
@@ -112,9 +144,43 @@ object DashboardServer {
                         val params = call.receiveParameters()
                         params["webhook"]?.let { settings.webhookUrl = it }
                         params["device"]?.let { if (it.isNotBlank()) settings.deviceId = it }
+                        params["capacity"]?.toDoubleOrNull()?.let { settings.batteryCapacityKwh = it }
+                        params["home_rate"]?.toDoubleOrNull()?.let { settings.homeRateInr = it }
+                        params["out_rate"]?.toDoubleOrNull()?.let { settings.outsideRateInr = it }
+
+                        val phone = params["tl_phone"]?.trim().orEmpty()
+                        val password = params["tl_password"].orEmpty()
+                        val vin = params["tl_vin"]?.trim().orEmpty()
+
+                        // "Try my connection" logs into the real account before anything is kept;
+                        // only a successful round-trip stores the credentials. "Save" (or a plain
+                        // submit, matching the old behaviour) stores immediately without testing.
+                        val wantTest = params["op"] == "test"
+                        val message: Pair<String, Boolean>
+                        if (wantTest) {
+                            if (phone.isEmpty() || password.isEmpty()) {
+                                message = "Enter the phone number and password before testing." to true
+                            } else {
+                                message = try {
+                                    testTelematics(phone, password, vin) to false
+                                } catch (e: Exception) {
+                                    "Connection failed: ${e.message ?: e.javaClass.simpleName}" to true
+                                }
+                                if (!message.second) {
+                                    settings.telematicsPhone = phone
+                                    settings.telematicsPassword = password
+                                    if (vin.isNotEmpty()) settings.telematicsVin = vin
+                                }
+                            }
+                        } else {
+                            if (phone.isNotEmpty()) settings.telematicsPhone = phone
+                            if (password.isNotEmpty()) settings.telematicsPassword = password
+                            if (vin.isNotEmpty()) settings.telematicsVin = vin
+                            message = "Saved." to false
+                        }
                         call.respondText(
-                            DashboardHtml.configPage(
-                                settings.webhookUrl, settings.deviceId, "Saved."
+                            configPageView(
+                                settings, message.first, message.second
                             ),
                             ContentType.Text.Html
                         )
@@ -127,7 +193,26 @@ object DashboardServer {
                             else -> "Delivered ${r.delivered} of ${r.attempted} drives."
                         }
                         call.respondText(
-                            DashboardHtml.configPage(settings.webhookUrl, settings.deviceId, msg),
+                            configPageView(settings, msg),
+                            ContentType.Text.Html
+                        )
+                    }
+                    get("/planner") {
+                        val dao = OdographDb.get(app).dao()
+                        val live = `in`.odograph.tracker.record.TripRecorderService.state.value
+                        val (cityEff, longEff) = cityAndLongEfficiency(dao)
+                        val lastPoll = dao.allTelemetryDays().maxOfOrNull { it.lastPollAt }
+                        call.respondText(
+                            DashboardHtml.plannerPage(
+                                socPercent = live.batterySocPercent,
+                                capacityKwh = settings.batteryCapacityKwh,
+                                homeRateInr = settings.homeRateInr,
+                                outsideRateInr = settings.outsideRateInr,
+                                cityEfficiencyKwhPer100Km = cityEff,
+                                longEfficiencyKwhPer100Km = longEff,
+                                totalKwh = dao.totalEnergyKwh(),
+                                lastPollAt = lastPoll
+                            ),
                             ContentType.Text.Html
                         )
                     }
@@ -170,4 +255,69 @@ object DashboardServer {
         engine?.stop(500, 1000)
         engine = null
     }
+
+    /**
+     * Mean real-world efficiency the box has measured, split by the city/long (50 km) line so
+     * the planner can price a short errand differently from an outstation run. Neither bucket is
+     * quoted until [BatteryMath.MIN_TRIPS_FOR_REAL_ESTIMATE] drives have filled it.
+     */
+    private fun cityAndLongEfficiency(dao: OdographDao): Pair<Double?, Double?> {
+        fun mean(list: List<TripEnergy>): Double? {
+            val effs = list.mapNotNull { BatteryMath.kwhPer100Km(it.energyKwh, it.distanceM) }
+            return if (effs.size >= BatteryMath.MIN_TRIPS_FOR_REAL_ESTIMATE) {
+                effs.sum() / effs.size
+            } else {
+                null
+            }
+        }
+        val all = dao.tripEnergies()
+        return mean(all.filter { it.distanceM <= BatteryMath.CITY_MAX_DISTANCE_M }) to
+            mean(all.filter { it.distanceM > BatteryMath.CITY_MAX_DISTANCE_M })
+    }
+
+    private fun configPageView(settings: Settings, message: String? = null, error: Boolean = false) =
+        DashboardHtml.configPage(
+            settings.webhookUrl, settings.deviceId,
+            settings.telematicsPhone, settings.telematicsPassword, settings.telematicsVin,
+            message, error,
+            batteryCapacityKwh = "%.1f".format(settings.batteryCapacityKwh),
+            homeRateInr = "%.2f".format(settings.homeRateInr),
+            outsideRateInr = "%.2f".format(settings.outsideRateInr)
+        )
+
+    /**
+     * One live login + vehicle + status round-trip against the real MG servers, for the "Try my
+     * connection" button. Throws on failure so the caller renders the error; a returned string
+     * describes what was found.
+     */
+    private suspend fun testTelematics(phone: String, password: String, vin: String): String =
+        withContext(Dispatchers.IO) {
+            val client = TelematicsClient.create(
+                phone, password, vin.takeIf { it.isNotBlank() }
+            )
+            client.login()
+            val vehicles = client.vehicles()
+            val status = client.status(includeCharge = true)
+            buildString {
+                append("Connected. Login and data both work.")
+                vehicles.firstOrNull()?.let { v ->
+                    append(" Found ")
+                    append(v.name)
+                    v.model?.let { append(" ").append(it) }
+                    append(", VIN ").append(v.vin).append(".")
+                }
+                if (vehicles.size > 1) append(" ${vehicles.size} vehicles on the account.")
+                status.charge?.let { ch ->
+                    ch.soc?.let { soc ->
+                        append(if (ch.isCharging) " Currently charging." else " Not charging now.")
+                        append(" Battery ").append("%.0f".format(soc)).append("%")
+                        append(", range ").append("%.0f".format(ch.rangeKm)).append(" km.")
+                    } ?: append(" No charge reading yet.")
+                } ?: append(" No live battery frame yet \u2014 the car may be off.")
+                status.gps?.takeIf { g -> g.hasFix }?.let { g ->
+                    append(" Car is at ")
+                    append("%.4f".format(g.latitude)).append(", ").append("%.4f".format(g.longitude)).append(".")
+                }
+            }
+        }
 }

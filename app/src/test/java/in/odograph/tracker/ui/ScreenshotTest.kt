@@ -361,13 +361,45 @@ class ScreenshotTest {
     }
 
     @Test
+    @Config(qualifiers = "w1291dp-h726dp-land")
+    fun `trips screen with trace`() {
+        val ctx = androidx.test.core.app.ApplicationProvider
+            .getApplicationContext<android.content.Context>()
+        val seeder = Thread {
+            val dao = `in`.odograph.tracker.data.OdographDb.get(ctx).dao()
+            val id = dao.startTrip(1_700_000_000_000L)
+            route.forEachIndexed { i, (lat, lon) ->
+                dao.appendPoint(
+                    `in`.odograph.tracker.data.PointEntity(
+                        tripId = id, t = 1_700_000_000_000L + i * 1000L,
+                        lat = lat, lon = lon, speedMps = 20f,
+                        bearingDeg = null, altitudeM = null, accuracyM = 5f,
+                        interpolated = false
+                    )
+                )
+            }
+            dao.finishTrip(id, 1_700_000_000_000L + route.size * 1000L, 18_432.0, 1_484, 1_219, 27.5f, 12.4, 3.4)
+        }
+        seeder.start()
+        seeder.join()
+
+        compose.setContent { TripListScreen(showTiles = false, paletteFor(Direction.ION, night = true)) }
+        repeat(40) {
+            compose.waitForIdle()
+            Thread.sleep(25)
+        }
+        shoot("13-trips-trace")
+    }
+
+    @Test
     @Config(qualifiers = "w640dp-h360dp-land")
     fun `setup screen`() {
         compose.setContent {
             SetupScreen(
                 direction = Direction.ION, themeMode = ThemeMode.AUTO, showTiles = true,
+                telematics = true,
                 palette = paletteFor(Direction.ION, night = true),
-                onDirection = {}, onThemeMode = {}, onTiles = {}
+                onDirection = {}, onThemeMode = {}, onTiles = {}, onTelematics = {}
             )
         }
         shoot("11-setup")

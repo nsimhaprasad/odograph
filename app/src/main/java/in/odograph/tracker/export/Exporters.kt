@@ -13,7 +13,7 @@ object Exporters {
         appendLine(
             "id,started_at,ended_at,distance_m,duration_s,moving_s," +
                 "max_speed_mps,avg_speed_mps,slowest_km_mps,start_lat,start_lon," +
-                "end_lat,end_lon,cluster_id"
+                "end_lat,end_lon,cluster_id,soc_start_pct,soc_end_pct,energy_kwh,cost_inr"
         )
         trips.forEach { t ->
             appendLine(
@@ -21,7 +21,7 @@ object Exporters {
                     t.id, t.startedAt, t.endedAt ?: "", t.distanceM, t.durationS, t.movingS,
                     t.maxSpeedMps, t.avgSpeedMps, t.slowestKmMps,
                     t.startLat ?: "", t.startLon ?: "", t.endLat ?: "", t.endLon ?: "",
-                    t.clusterId ?: ""
+                    t.clusterId ?: "", t.socStart ?: "", t.socEnd ?: "", t.energyKwh ?: "", t.costInr ?: ""
                 ).joinToString(",")
             )
         }

@@ -9,23 +9,28 @@ import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
+import android.os.SystemClock
 import `in`.odograph.tracker.alert.AlertConfig
 import `in`.odograph.tracker.alert.AlertSound
 import `in`.odograph.tracker.alert.SpeedAlert
 import `in`.odograph.tracker.core.Fix
 import `in`.odograph.tracker.core.Geo
 import `in`.odograph.tracker.core.LiveTrack
+import `in`.odograph.tracker.core.BatteryMath
 import `in`.odograph.tracker.data.OdographDb
+import `in`.odograph.tracker.data.BatteryEntity
+import `in`.odograph.tracker.data.PointEntity
 import `in`.odograph.tracker.diag.Diagnostics
 import `in`.odograph.tracker.geocode.PlaceNamer
-import `in`.odograph.tracker.data.PointEntity
 import `in`.odograph.tracker.server.DashboardServer
 import `in`.odograph.tracker.sync.Outbound
 import `in`.odograph.tracker.ui.theme.Settings
+import io.windsor.telematics.TelematicsClient
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
@@ -41,7 +46,15 @@ class TripRecorderService : Service() {
         val movingS: Long = 0,
         val tripId: Long = -1,
         val overLimit: Boolean = false,
-        val speedLimitKmh: Int = 0
+        val speedLimitKmh: Int = 0,
+        val batterySocPercent: Double? = null,
+        val batteryCharging: Boolean? = null,
+        /** Real-world mileage this trip, km·kWh⁻¹. Null until the trip is long enough to trust. */
+        val batteryMileageKmPerKwh: Double? = null,
+        /** What a 100% charge would carry you, from real consumption (or the car's estimate). */
+        val batteryRangeAtFullKm: Double? = null,
+        /** Lifetime energy the car has consumed over instrumented drives, kW·h. */
+        val batteryTotalKwh: Double = 0.0
     )
 
     companion object {
@@ -49,9 +62,43 @@ class TripRecorderService : Service() {
         const val NOTIFICATION_ID = 1
         private const val ACCURACY_LIMIT_M = 25f
         private const val SPEED_ACCURACY_LIMIT_M = 15f
+        /**
+         * Cadence while the MG screen is being looked at. Being on-screen is one of the three
+         * things that may warrant a call — see [telematicsLoop] for the guard.
+         */
+        private const val TELEMATICS_POLL_MS = 30_000L
+
+        /** Freshness floor when the MG screen is not visible: even idle, at most one call per 5 min. */
+        private const val TELEMATICS_HEARTBEAT_MS = 5 * 60_000L
+
+        /**
+         * Hard floor between any two MG server calls. Every trigger — explicit refresh, screen
+         * visible, heartbeat — funnels through here, so bursts of taps coalesce into at most one
+         * request per floor. This is what keeps us from looking like a DoS source.
+         */
+        private const val TELEMATICS_MIN_INTERVAL_MS = 30_000L
+
+        /** How often the guard re-evaluates. A local tick, no network involved. */
+        private const val TELEMATICS_WAKE_MS = 1_000L
 
         private val _state = MutableStateFlow(LiveState())
         val state: StateFlow<LiveState> = _state
+
+        /** True while the trip's battery tile is visible, so polling may run at [TELEMATICS_POLL_MS]. */
+        private val telematicsVisible = MutableStateFlow(false)
+
+        /** A one-shot "go now" flag. Coalesced by the min-interval floor, so it can never burst. */
+        private val telematicsRefresh = MutableStateFlow(false)
+
+        /** The driver screen is where the MG battery tile lives; being there justifies live data. */
+        fun setTelematicsScreenVisible(visible: Boolean) {
+            telematicsVisible.value = visible
+        }
+
+        /** User-triggered freshness (e.g. tapping the battery tile). Honours the min-interval floor. */
+        fun requestTelematicsRefresh() {
+            telematicsRefresh.value = true
+        }
     }
 
     private lateinit var source: LocationSource
@@ -81,7 +128,13 @@ class TripRecorderService : Service() {
             // startedAt is patched by the first real fix; GNSS time is the authority.
             Diagnostics.crumb("db opened")
             track = LiveTrack()
-            tripId = TripRecovery.recoverAndStart(dao, nowFromGnss = null)
+            tripId = TripRecovery.recoverAndStart(
+                dao,
+                nowFromGnss = null,
+                capacityKwh = settings.batteryCapacityKwh,
+                homeRateInr = settings.homeRateInr,
+                outsideRateInr = settings.outsideRateInr
+            )
             Diagnostics.crumb("recovery done trip=$tripId")
             _state.value = LiveState(tripId = tripId)
             source.start { fix -> io.launch { record(fix) } }
@@ -106,6 +159,164 @@ class TripRecorderService : Service() {
                     )
                 }
             }
+
+            telematicsLoop()
+        }
+    }
+
+    /**
+     * Best-effort MG iSMART battery poller. Entirely out of the capture path: a network outage,
+     * expired credentials, or the vehicle being out of range must never affect recording. It
+     * calls the real MG servers over the hotspot, so it also fails quietly on purpose.
+     *
+     * These servers belong to someone else, so we must not hammer them, or our login looks like
+     * an attack and the account gets blocked. A status call only goes out when at least one of
+     * these holds:
+     *   1. the MG battery screen is visible (up to once every [TELEMATICS_POLL_MS]),
+     *   2. an explicit refresh was requested (coalesced by the floor below),
+     *   3. [TELEMATICS_HEARTBEAT_MS] elapsed without any call (freshness floor in the background).
+     * Whatever the trigger, no two calls happen closer than [TELEMATICS_MIN_INTERVAL_MS].
+     *
+     * Credentials are re-read every round so the box can be reconfigured over the dashboard
+     * without a restart; a blank phone disables the poller entirely.
+     */
+    private suspend fun telematicsLoop() {
+        val dao = OdographDb.get(this).dao()
+        var client: TelematicsClient? = null
+        var creds: Triple<String, String, String>? = null
+        var lastCallElapsed = Long.MIN_VALUE
+
+        while (true) {
+            delay(TELEMATICS_WAKE_MS)
+
+            val sinceLast = SystemClock.elapsedRealtime() - lastCallElapsed
+            val neverCalled = lastCallElapsed == Long.MIN_VALUE
+            val demanded =
+                telematicsVisible.value ||
+                    telematicsRefresh.value ||
+                    sinceLast >= TELEMATICS_HEARTBEAT_MS
+            val cooled = neverCalled || sinceLast >= TELEMATICS_MIN_INTERVAL_MS
+            if (!demanded || !cooled) continue
+            telematicsRefresh.value = false
+
+            val settings = Settings(this)
+            val phone = settings.telematicsPhone
+            val password = settings.telematicsPassword
+            // The on/off switch is authoritative: off means no MG calls at all and no stale
+            // battery data on the driving screen, even if credentials exist.
+            if (!settings.telematicsEnabled || phone.isBlank() || password.isBlank()) {
+                client = null
+                creds = null
+                _state.value = _state.value.copy(batterySocPercent = null, batteryCharging = null)
+                continue
+            }
+
+            val want = Triple(phone, password, settings.telematicsVin)
+            if (client == null || creds != want) {
+                val fresh = TelematicsClient.create(phone, password, settings.telematicsVin.takeIf { it.isNotBlank() })
+                client = fresh
+                creds = want
+                runCatching { fresh.login() }
+                    .onFailure { Diagnostics.crumb("telematics login failed: $it") }
+                runCatching { fresh.vehicles() }
+                    .onFailure { Diagnostics.crumb("telematics vehicles() failed: $it") }
+            }
+            val c = client
+
+            runCatching {
+                val status = c.status(includeCharge = true)
+                val ch = status.charge
+                val now = System.currentTimeMillis()
+                val powerKw = if (ch != null)
+                    ch.chargingVoltage * 0.25 * (ch.chargingCurrent - 1000) * 0.05 / 1000
+                else 0.0
+                // A snapshot without a SOC reading is not charge data — it is noise that would
+                // make a battery-less trip look instrumented. Only rows from a real charging
+                // frame, on a trip that actually exists, are stored.
+                if (ch != null && ch.soc != null && tripId >= 0) {
+                    val t = lastFix?.t ?: now
+                    dao.insertBattery(
+                        BatteryEntity(
+                            tripId = tripId,
+                            t = t,
+                            socPercent = ch.soc,
+                            charging = ch.isCharging,
+                            rangeKm = ch.rangeKm,
+                            chargingPowerKw = powerKw,
+                            workingVoltage = ch.workingVoltage?.let { it * 0.25 },
+                            workingCurrent = ch.workingCurrent?.let { (it - 1000) * 0.05 }
+                        )
+                    )
+                }
+
+                // Charging sessions survive the drives they happened under. Whatever this frame
+                // says, the ledger lands it in charge_events or closes the session it ends.
+                val capacity = settings.batteryCapacityKwh
+                ChargeLedger(dao, capacity, settings.homeRateInr, settings.outsideRateInr)
+                    .observe(ch?.isCharging, ch?.soc, powerKw, now)
+
+                // Coverage honesty: note that the poller ran at all, so the dashboard can show
+                // the days it did not.
+                recordDailyCoverage(dao, settings.zone, now)
+
+                // Per-trip energy and the live efficiency readouts the drive screen shows.
+                val soc = ch?.soc
+                if (soc != null) {
+                    val state = _state.value
+                    if (tripId >= 0) {
+                        val samples = dao.batteryRangeFor(tripId)
+                        val energy = BatteryMath.consumedKwh(samples, capacity)
+                        if (samples.isNotEmpty()) {
+                            dao.setChargeSummary(tripId, samples.first().socPercent, soc, energy)
+                        }
+                        val kmPerKwh = BatteryMath.kmPerKwh(energy, state.distanceM)
+                        val effs = dao.tripEnergies()
+                            .mapNotNull { BatteryMath.kwhPer100Km(it.energyKwh, it.distanceM) }
+                        val rolling = BatteryMath.rollingKwhPer100Km(effs)
+                        val rangeAtFull = if (
+                            effs.size >= BatteryMath.MIN_TRIPS_FOR_REAL_ESTIMATE &&
+                            rolling != null
+                        ) {
+                            BatteryMath.rangeAtFullKwh(capacity, rolling)
+                        } else {
+                            ch.rangeKm?.let { r -> if (soc > 0) r / soc * 100.0 else null }
+                        }
+                        _state.value = state.copy(
+                            batterySocPercent = soc,
+                            batteryCharging = ch.isCharging,
+                            batteryMileageKmPerKwh = kmPerKwh,
+                            batteryRangeAtFullKm = rangeAtFull,
+                            batteryTotalKwh = dao.totalEnergyKwh()
+                        )
+                    } else {
+                        _state.value = _state.value.copy(batterySocPercent = soc, batteryCharging = ch.isCharging)
+                    }
+                } else {
+                    _state.value = _state.value.copy(batterySocPercent = null, batteryCharging = null)
+                }
+            }.onFailure {
+                Diagnostics.crumb("telematics poll failed: $it")
+                // A stale session is the usual culprit; the next round logs in again.
+                runCatching { c.login() }
+            }
+            lastCallElapsed = SystemClock.elapsedRealtime()
+        }
+    }
+
+    /**
+     * Marks today as a day the poller reached the MG servers, widening the captured window from
+     * the first poll of the day to the latest. Any local day without a row was simply not
+     * captured — which is exactly the honesty the archive's coverage display needs.
+     */
+    private fun recordDailyCoverage(dao: `in`.odograph.tracker.data.OdographDao, zone: java.util.TimeZone, now: Long) {
+        val cal = java.util.Calendar.getInstance(zone)
+        val day = cal.get(java.util.Calendar.YEAR) * 10_000 +
+            (cal.get(java.util.Calendar.MONTH) + 1) * 100 +
+            cal.get(java.util.Calendar.DAY_OF_MONTH)
+        if (dao.telemetryDay(day) == null) {
+            dao.insertTelemetryDayIfAbsent(day, first = now, last = now)
+        } else {
+            dao.setTelemetryDayLast(day, now)
         }
     }
 

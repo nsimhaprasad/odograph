@@ -48,6 +48,7 @@ fun OdographApp() {
     var direction by remember { mutableStateOf(settings.direction) }
     var themeMode by remember { mutableStateOf(settings.themeMode) }
     var showTiles by remember { mutableStateOf(true) }
+    var telematics by remember { mutableStateOf(settings.telematicsEnabled) }
     var hour by remember { mutableStateOf(currentHour(settings.zone)) }
 
     val live by TripRecorderService.state.collectAsState()
@@ -80,19 +81,26 @@ fun OdographApp() {
                 withContext(Dispatchers.IO) {
                     runCatching {
                         val points = OdographDb.get(ctx).dao().pointsFor(id)
-                        route = points.map { it.lat to it.lon }
                         val fixes = points.map {
                             Fix(
                                 it.t, it.lat, it.lon, it.speedMps, it.accuracyM,
                                 it.interpolated, it.altitudeM
                             )
                         }
+                        route = buildSmoothRoute(fixes)
                         slowestKmMps = TripStats.compute(fixes).slowestKmSpeedMps
                     }
                 }
             }
             delay(5_000)
         }
+    }
+
+    // The MG battery tile lives on the drive screen. While it is visible the poller may run its
+    // normal cadence; entering the screen also asks for a fresh sample immediately.
+    LaunchedEffect(tab) {
+        TripRecorderService.setTelematicsScreenVisible(tab == Tab.DRIVE)
+        if (tab == Tab.DRIVE) TripRecorderService.requestTelematicsRefresh()
     }
 
     BoxWithConstraints(Modifier.fillMaxSize().background(palette.ground)) {
@@ -135,10 +143,12 @@ fun OdographApp() {
                 direction = direction,
                 themeMode = themeMode,
                 showTiles = showTiles,
+                telematics = telematics,
                 palette = palette,
                 onDirection = { direction = it; settings.direction = it },
                 onThemeMode = { themeMode = it; settings.themeMode = it },
-                onTiles = { showTiles = it }
+                onTiles = { showTiles = it },
+                onTelematics = { telematics = it; settings.telematicsEnabled = it }
             )
         }
     }

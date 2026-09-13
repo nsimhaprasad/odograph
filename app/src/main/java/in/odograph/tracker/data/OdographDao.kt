@@ -30,6 +30,93 @@ interface OdographDao {
     @Query("SELECT * FROM points WHERE tripId = :tripId ORDER BY t DESC LIMIT 1")
     fun lastPointOf(tripId: Long): PointEntity?
 
+    // ---- battery snapshots ----
+
+    @Insert
+    fun insertBattery(sample: BatteryEntity): Long
+
+    @Query("SELECT * FROM battery WHERE tripId = :tripId ORDER BY t DESC LIMIT 1")
+    fun lastBatteryOf(tripId: Long): BatteryEntity?
+
+    @Query("SELECT * FROM battery WHERE tripId = :tripId ORDER BY t ASC")
+    fun batteryRangeFor(tripId: Long): List<BatteryEntity>
+
+    /**
+     * Writes the trip-level charge summary. Each value is only ever replaced with a real reading:
+     * COALESCE keeps whatever is stored when the argument is null, so a trip that produced no
+     * charge data keeps nulls (meaning "no data"), never a fabricated zero.
+     */
+    @Query(
+        "UPDATE trips SET socStart = COALESCE(:socStart, socStart), socEnd = COALESCE(:socEnd, socEnd), " +
+            "energyKwh = COALESCE(:energyKwh, energyKwh) WHERE id = :id"
+    )
+    fun setChargeSummary(id: Long, socStart: Double?, socEnd: Double?, energyKwh: Double?)
+
+    @Query("UPDATE trips SET costInr = :costInr WHERE id = :id")
+    fun setTripCost(id: Long, costInr: Double?)
+
+    /** Every instrumented trip's energy, newest first, for rolling efficiency. */
+    @Query("SELECT distanceM, energyKwh FROM trips WHERE endedAt IS NOT NULL AND energyKwh IS NOT NULL ORDER BY startedAt DESC")
+    fun tripEnergies(): List<TripEnergy>
+
+    /** Sum of the (positive) energy every drive consumed, kW·h — the car's lifetime fuel bill. */
+    @Query("SELECT COALESCE(SUM(CASE WHEN energyKwh > 0 THEN energyKwh ELSE 0 END), 0) FROM trips")
+    fun totalEnergyKwh(): Double
+
+    /** Sum of every known drive cost — a trip never billed (unknown rate) contributes nothing. */
+    @Query("SELECT COALESCE(SUM(costInr), 0) FROM trips")
+    fun totalCostInr(): Double
+
+    @Query("DELETE FROM battery WHERE tripId = :id")
+    fun deleteBatteryFor(id: Long)
+
+    // ---- charge sessions ----
+
+    @Insert
+    fun insertChargeEvent(event: ChargeEventEntity): Long
+
+    /** The charge still awaiting more frames, i.e. not yet closed and priced. */
+    @Query("SELECT * FROM charge_events WHERE kind IS NULL ORDER BY startTime DESC LIMIT 1")
+    fun openChargeEvent(): ChargeEventEntity?
+
+    @Query(
+        "UPDATE charge_events SET endTime = :endTime, endSoc = :endSoc, " +
+            "energyKwh = :energyKwh, peakPowerKw = :peakPowerKw WHERE id = :id"
+    )
+    fun advanceChargeEvent(id: Long, endTime: Long, endSoc: Double?, energyKwh: Double, peakPowerKw: Double?)
+
+    @Query("UPDATE charge_events SET kind = :kind, costInr = :costInr WHERE id = :id")
+    fun closeChargeEvent(id: Long, kind: Int, costInr: Double)
+
+    /**
+     * The most recent completed charge sessions that began before [ms] — the fills this drive
+     * burned through. Priced-only, newest first, so a road trip where some refills were home and
+     * some were fast gets both voices heard.
+     */
+    @Query("SELECT * FROM charge_events WHERE kind IS NOT NULL AND startTime < :ms ORDER BY startTime DESC LIMIT :limit")
+    fun fillsBefore(ms: Long, limit: Int = 5): List<ChargeEventEntity>
+
+    @Query("SELECT * FROM charge_events ORDER BY startTime ASC")
+    fun allChargeEvents(): List<ChargeEventEntity>
+
+    @Query("SELECT * FROM charge_events WHERE startTime >= :fromMs AND startTime < :toMs ORDER BY startTime DESC")
+    fun chargeEventsBetween(fromMs: Long, toMs: Long): List<ChargeEventEntity>
+
+    // ---- daily coverage ----
+
+    /** The day's row exists in three flavours: absent, fresh, or already widened. */
+    @Query("INSERT OR IGNORE INTO daily_telemetry(day, firstPollAt, lastPollAt) VALUES(:day, :first, :last)")
+    fun insertTelemetryDayIfAbsent(day: Int, first: Long, last: Long)
+
+    @Query("UPDATE daily_telemetry SET lastPollAt = :last WHERE day = :day")
+    fun setTelemetryDayLast(day: Int, last: Long)
+
+    @Query("SELECT * FROM daily_telemetry ORDER BY day ASC")
+    fun allTelemetryDays(): List<DailyTelemetryEntity>
+
+    @Query("SELECT * FROM daily_telemetry WHERE day = :day")
+    fun telemetryDay(day: Int): DailyTelemetryEntity?
+
     @Query("SELECT COUNT(*) FROM points WHERE tripId = :tripId")
     fun pointCount(tripId: Long): Int
 
@@ -63,6 +150,10 @@ interface OdographDao {
 
     @Query("DELETE FROM trips WHERE id = :id")
     fun deleteTrip(id: Long)
+
+    /** Points and charge samples only matter while their trip exists. */
+    @Query("DELETE FROM points WHERE tripId = :id")
+    fun deletePointsFor(id: Long)
 
     // ---- places ----
 
@@ -158,6 +249,11 @@ data class PeriodTotals(
     val durationS: Long,
     val movingS: Long,
     val bestMaxSpeedMps: Float
+)
+
+data class TripEnergy(
+    val distanceM: Double,
+    val energyKwh: Double
 )
 
 data class MonthTotal(

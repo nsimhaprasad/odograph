@@ -30,7 +30,9 @@ data class TripEntity(
     // and saves a migration later.
     val socStart: Double? = null,
     val socEnd: Double? = null,
-    val energyKwh: Double? = null
+    val energyKwh: Double? = null,
+    /** Rupees the energy on this drive cost, from the weighted rate of its recent recharges. */
+    val costInr: Double? = null
 )
 
 @Entity(tableName = "points", indices = [Index(value = ["tripId", "t"])])
@@ -45,6 +47,26 @@ data class PointEntity(
     val altitudeM: Double?,
     val accuracyM: Float,
     val interpolated: Boolean
+)
+
+/**
+ * A battery/charge snapshot taken by the iSMART poller while a trip is open.
+ *
+ * The poller is best-effort and out of the GPS capture path, so these rows are allowed to be
+ * sparse (roughly one per 30 s when the vehicle network responds within the poll budget) and a
+ * sample can legitimately carry a null SOC when the charging frame does not arrive.
+ */
+@Entity(tableName = "battery", indices = [Index(value = ["tripId", "t"])])
+data class BatteryEntity(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val tripId: Long,
+    val t: Long,
+    val socPercent: Double? = null,
+    val charging: Boolean? = null,
+    val rangeKm: Double? = null,
+    val chargingPowerKw: Double? = null,
+    val workingVoltage: Double? = null,
+    val workingCurrent: Double? = null
 )
 
 /**
@@ -68,3 +90,44 @@ data class PlaceEntity(
             ?: autoName?.takeIf { it.isNotBlank() }
             ?: "%.4f, %.4f".format(lat, lon)
 }
+
+/**
+ * One plug-in charging session, aggregated by the poller from consecutive charging frames.
+ *
+ * Independent of trips on purpose: a parked charge belongs to no drive, and its frames live under
+ * whichever open (and later discarded) trip the box had at the time, so the session has to carry
+ * its own record or it dies with that trip.
+ *
+ * A row is "open" (awaiting more frames) while [kind] is null; the first non-charging frame, or a
+ * gap longer than the session threshold, closes it by classifying it (SLOW/FAST) and pricing it.
+ */
+@Entity(tableName = "charge_events", indices = [Index(value = ["startTime"])])
+data class ChargeEventEntity(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val startTime: Long,
+    val startSoc: Double? = null,
+    /** Timestamp of the last charging frame seen, i.e. the session end while open. */
+    val endTime: Long? = null,
+    val endSoc: Double? = null,
+    /** kW·h added this session, derived from the SOC swing so slept-though nights cost nothing fake. */
+    val energyKwh: Double = 0.0,
+    val peakPowerKw: Double? = null,
+    /** Ordinal of BatteryMath.ChargeKind. Null while the session is still open. */
+    val kind: Int? = null,
+    /** Rupees for the session's energy, snapshot at close with the rates then configured. */
+    val costInr: Double? = null
+)
+
+/**
+ * One row per local day the box was alive and the poller reached the MG servers.
+ *
+ * Records the captured window, so the dashboard can be honest about what it did not see (a night
+ * the box slept through is a gap between two rows, and a day with no row is a day no polling
+ * happened at all).
+ */
+@Entity(tableName = "daily_telemetry")
+data class DailyTelemetryEntity(
+    @PrimaryKey val day: Int,
+    val firstPollAt: Long,
+    val lastPollAt: Long
+)

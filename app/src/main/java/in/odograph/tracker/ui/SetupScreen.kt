@@ -40,10 +40,12 @@ fun SetupScreen(
     direction: Direction,
     themeMode: ThemeMode,
     showTiles: Boolean,
+    telematics: Boolean,
     palette: Palette,
     onDirection: (Direction) -> Unit,
     onThemeMode: (ThemeMode) -> Unit,
-    onTiles: (Boolean) -> Unit
+    onTiles: (Boolean) -> Unit,
+    onTelematics: (Boolean) -> Unit
 ) {
     val ctx = LocalContext.current
     val settings = remember { Settings(ctx) }
@@ -148,6 +150,30 @@ fun SetupScreen(
                 Text(
                     "Tiles download over your hotspot and cache permanently. Trace only never " +
                         "touches the network.",
+                    color = palette.dim, fontSize = m.body,
+                    modifier = Modifier.padding(top = m.gap / 2)
+                )
+            }
+
+            Section("MG TELEMETRY", palette, m) {
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(m.gap / 2)) {
+                    Chip("ON", telematics, palette, m) { onTelematics(true) }
+                    Chip("OFF", !telematics, palette, m) { onTelematics(false) }
+                }
+                Text(
+                    if (telematics) {
+                        "Live battery and charge readings from your MG server are fetched while " +
+                            "this screen is up — gently, never faster than every 30 seconds."
+                    } else {
+                        "Off. No MG server calls at all, and the driving screen shows the " +
+                            "speedometer only."
+                    },
+                    color = palette.dim, fontSize = m.body,
+                    modifier = Modifier.padding(top = m.gap / 2)
+                )
+                Text(
+                    "Credentials for the iSMART account are typed at " +
+                        "http://<this device>:${DashboardServer.PORT}/config, once, from your Mac.",
                     color = palette.dim, fontSize = m.body,
                     modifier = Modifier.padding(top = m.gap / 2)
                 )

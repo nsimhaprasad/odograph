@@ -3,6 +3,7 @@ package `in`.odograph.tracker.ui.map
 import androidx.compose.foundation.Canvas
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -31,7 +32,10 @@ fun RouteMap(
     modifier: Modifier = Modifier
 ) {
     AndroidView(
-        modifier = modifier,
+        // osmdroid's MapView has a habit of drawing past the panel it sits in unless the host
+        // clips it. Clip explicitly so the route map can never bleed over the trip list, the
+        // period chips, or anything else sharing the screen.
+        modifier = modifier.clipToBounds(),
         factory = { ctx ->
             Configuration.getInstance().apply {
                 // OSM's tile policy requires an identifying agent. Personal use, low volume.

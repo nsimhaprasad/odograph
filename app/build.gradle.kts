@@ -19,8 +19,8 @@ android {
         applicationId = "in.odograph.tracker"
         minSdk = 26
         targetSdk = 34
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = 3
+        versionName = "0.3.0"
     }
 
     buildFeatures { compose = true }
@@ -97,6 +97,9 @@ dependencies {
     implementation("androidx.activity:activity-compose:1.9.0")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.2")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
+
+    // MG iSMART India vehicle/charging status, brought in via the composite build.
+    implementation("io.windsor.telematics:telematics:0.1.0")
 
     implementation("androidx.room:room-runtime:2.6.1")
     implementation("androidx.room:room-ktx:2.6.1")

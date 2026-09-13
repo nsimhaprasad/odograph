@@ -28,6 +28,29 @@ object TripStats {
     /** Displacement must exceed the fix uncertainty by this much before it counts as movement. */
     private const val NOISE_FACTOR = 1.5f
 
+    /**
+     * A GNSS-reported direction of travel is velocity, so a parked receiver reads zero while a
+     * drive reads tens of km/h. When the provider supplies no velocity at all (network fixes),
+     * the displacement of the car from where it started stands in: genuine driving leaves the
+     * origin, while parked GPS jitter is a bounded random walk around it.
+     */
+    private const val MIN_DIRECTION_MPS = 1.0f
+    private const val MIN_DRIVE_M = 50.0
+
+    /**
+     * Whether these fixes describe a trip worth keeping. The car's engine can be on without the
+     * car moving — a parked-and-idling session must never surface as a 0 km home-to-home trip.
+     */
+    fun moved(fixes: List<Fix>): Boolean {
+        val stats = compute(fixes)
+        if (stats.maxSpeedMps >= MIN_DIRECTION_MPS) return true
+        val usable = fixes.sortedBy { it.t }
+            .filter { it.accuracyM <= ACCURACY_LIMIT_M }
+            .takeIf { it.size >= 2 } ?: return false
+        val origin = usable.first()
+        return usable.maxOf { Geo.haversineMetres(origin.lat, origin.lon, it.lat, it.lon) } >= MIN_DRIVE_M
+    }
+
     fun compute(fixes: List<Fix>): Stats {
         if (fixes.size < 2) return Stats(0.0, 0, 0, 0f, 0.0, 0.0)
         val sorted = fixes.sortedBy { it.t }

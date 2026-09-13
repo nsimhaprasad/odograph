@@ -1,6 +1,7 @@
 package `in`.odograph.tracker.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
@@ -16,6 +17,7 @@ import `in`.odograph.tracker.record.TripRecorderService
 import `in`.odograph.tracker.ui.gauge.Gauge
 import `in`.odograph.tracker.ui.theme.Direction
 import `in`.odograph.tracker.ui.theme.Palette
+import kotlin.math.roundToInt
 
 /**
  * The window this draws into is not fixed. The box supports split screen with a divider the
@@ -88,6 +90,26 @@ private fun TallLayout(
             if (live.speedLimitKmh > 0) {
                 SmallStat("${live.speedLimitKmh}", "LIMIT", palette, m)
             }
+            live.batterySocPercent?.let {
+                SmallStat(
+                    "${it.roundToInt()}",
+                    if (live.batteryCharging == true) "CHARGING" else "BATTERY",
+                    palette, m,
+                    onClick = { TripRecorderService.requestTelematicsRefresh() }
+                )
+            }
+        }
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceEvenly
+        ) {
+            live.batteryMileageKmPerKwh?.let {
+                SmallStat("%.1f km/kWh".format(it), "MILEAGE", palette, m)
+            }
+            live.batteryRangeAtFullKm?.let {
+                SmallStat("%.0f km".format(it), "RANGE@100", palette, m)
+            }
+            SmallStat("%.1f kWh".format(live.batteryTotalKwh), "LIFETIME", palette, m)
         }
     }
 }
@@ -113,6 +135,26 @@ private fun WideLayout(
         Stat("${mpsToKmh(live.maxSpeedMps).toInt()}", "KM/H   MAX", palette, m, size = m.stat,
             modifier = Modifier.weight(1f))
         Stat(formatHhMm(live.movingS), "H:MM   MOVING", palette, m, size = m.stat,
+            modifier = Modifier.weight(1f))
+        live.batterySocPercent?.let {
+            Stat(
+                "${it.roundToInt()}",
+                if (live.batteryCharging == true) "SOC   CHARGING" else "SOC   BATTERY",
+                palette, m, size = m.stat,
+                modifier = Modifier
+                    .weight(1f)
+                    .clickable { TripRecorderService.requestTelematicsRefresh() }
+            )
+        }
+        live.batteryRangeAtFullKm?.let {
+            Stat("%.0f".format(it), "KM RANGE@100", palette, m, size = m.stat,
+                modifier = Modifier.weight(1f))
+        }
+        live.batteryMileageKmPerKwh?.let {
+            Stat("%.1f".format(it), "KM/KWH", palette, m, size = m.stat,
+                modifier = Modifier.weight(1f))
+        }
+        Stat("%.1f".format(live.batteryTotalKwh), "KWH  LIFETIME", palette, m, size = m.stat,
             modifier = Modifier.weight(1f))
         if (live.speedLimitKmh > 0) {
             Stat("${live.speedLimitKmh}", "KM/H   LIMIT", palette, m, size = m.stat,
@@ -151,6 +193,26 @@ private fun BalancedLayout(
                 if (live.speedLimitKmh > 0) {
                     SmallStat("${live.speedLimitKmh}", "LIMIT", palette, m)
                 }
+                live.batterySocPercent?.let {
+                    SmallStat(
+                        "${it.roundToInt()}",
+                        if (live.batteryCharging == true) "CHARGING" else "BATTERY",
+                        palette, m,
+                        onClick = { TripRecorderService.requestTelematicsRefresh() }
+                    )
+                }
+            }
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(top = m.gap),
+                horizontalArrangement = Arrangement.spacedBy(m.gap)
+            ) {
+                live.batteryMileageKmPerKwh?.let {
+                    SmallStat("%.1f km/kWh".format(it), "MILEAGE", palette, m)
+                }
+                live.batteryRangeAtFullKm?.let {
+                    SmallStat("%.0f km".format(it), "RANGE@100", palette, m)
+                }
+                SmallStat("%.1f kWh".format(live.batteryTotalKwh), "LIFETIME", palette, m)
             }
         }
     }

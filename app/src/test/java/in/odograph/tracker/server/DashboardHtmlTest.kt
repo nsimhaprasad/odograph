@@ -1,5 +1,7 @@
 package `in`.odograph.tracker.server
 
+import `in`.odograph.tracker.data.ChargeEventEntity
+import `in`.odograph.tracker.data.DailyTelemetryEntity
 import `in`.odograph.tracker.data.MonthTotal
 import `in`.odograph.tracker.data.PlaceEntity
 import `in`.odograph.tracker.data.RouteSummary
@@ -40,7 +42,7 @@ class DashboardHtmlTest {
     @Test
     fun `an empty history still renders a valid page`() {
         val html = DashboardHtml.render(emptyList(), emptyMap())
-        assertThat(html).contains("const TRIPS = []")
+        assertThat(html).contains("var TRIPS = []")
         assertThat(html).contains("No drives recorded yet")
     }
 
@@ -121,5 +123,65 @@ class DashboardHtmlTest {
         val html = DashboardHtml.render(emptyList(), emptyMap())
         assertThat(html).contains("By month")
         assertThat(html).contains("No completed drives yet")
+    }
+
+    @Test
+    fun `trip battery and cost fields reach the archive json`() {
+        val equipped = trip.copy(socStart = 90.0, socEnd = 64.2, energyKwh = 12.7, costInr = 101.6)
+        val html = DashboardHtml.render(listOf(equipped), emptyMap())
+        assertThat(html).contains("\"energyKwh\":12.7")
+        assertThat(html).contains("\"costInr\":101.6")
+        assertThat(html).contains("\"socStart\":90.0")
+    }
+
+    @Test
+    fun `an un-instrumented trip serializes nulls in the archive json`() {
+        val html = DashboardHtml.render(listOf(trip), emptyMap())
+        assertThat(html).contains("\"energyKwh\":null")
+    }
+
+    @Test
+    fun `the archive renders the x-y energy chart and charge events`() {
+        val html = DashboardHtml.render(
+            emptyList(), emptyMap(),
+            chargeEvents = listOf(
+                ChargeEventEntity(1, 1_000L, startSoc = 30.0, endTime = 3_600_000L, endSoc = 60.0,
+                    energyKwh = 14.76, peakPowerKw = 7.4, kind = 0, costInr = 118.08)
+            ),
+            telemetryDays = listOf(DailyTelemetryEntity(20260913, 1_000L, 12_000L))
+        )
+        assertThat(html).contains("Energy per drive")
+        assertThat(html).contains("\"kwh\":14.76")
+        assertThat(html).contains("Capture coverage")
+        assertThat(html).contains("\"d\":20260913")
+    }
+
+    @Test
+    fun `the config page exposes the electricity rates`() {
+        val html = DashboardHtml.configPage("", "windsor", batteryCapacityKwh = "49.2",
+            homeRateInr = "8.00", outsideRateInr = "25.00")
+        assertThat(html).contains("value=\"8.00\"")
+        assertThat(html).contains("value=\"25.00\"")
+        assertThat(html).contains("name=\"capacity\"")
+    }
+
+    @Test
+    fun `the planner renders real learned numbers and falls back when nothing is learned yet`() {
+        val learned = DashboardHtml.plannerPage(
+            socPercent = 62.0, capacityKwh = 49.2, homeRateInr = 8.0, outsideRateInr = 25.0,
+            cityEfficiencyKwhPer100Km = 11.5, longEfficiencyKwhPer100Km = 14.2,
+            totalKwh = 240.0, lastPollAt = 1_700_000_000_000L
+        )
+        assertThat(learned).contains("265 km")
+        assertThat(learned).contains("city: 8.70")
+        assertThat(learned).contains("outRate = 25.0")
+
+        val bare = DashboardHtml.plannerPage(
+            socPercent = null, capacityKwh = 49.2, homeRateInr = 8.0, outsideRateInr = 25.0,
+            cityEfficiencyKwhPer100Km = null, longEfficiencyKwhPer100Km = null,
+            totalKwh = 0.0, lastPollAt = null
+        )
+        assertThat(bare).contains("never")
+        assertThat(bare).contains("Not enough real driving yet")
     }
 }
