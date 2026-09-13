@@ -1,14 +1,18 @@
 package `in`.odograph.tracker.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -32,6 +36,7 @@ import `in`.odograph.tracker.record.TripRecorderService
 import `in`.odograph.tracker.ui.gauge.SpeedSpring
 import `in`.odograph.tracker.ui.theme.Settings
 import `in`.odograph.tracker.ui.theme.ThemeMode
+import `in`.odograph.tracker.ui.theme.Palette
 import `in`.odograph.tracker.ui.theme.currentHour
 import `in`.odograph.tracker.ui.theme.isNight
 import `in`.odograph.tracker.ui.theme.paletteFor
@@ -128,6 +133,7 @@ fun OdographApp() {
                     detailed = !detailed
                 }
             }
+            Spacer(Modifier.weight(1f))
             Text(
                 text = if (live.hasFix) "REC" else "ACQUIRING",
                 color = if (live.hasFix) palette.accent else palette.label,
@@ -136,6 +142,7 @@ fun OdographApp() {
                 maxLines = 1,
                 modifier = Modifier.padding(start = m.gap / 2)
             )
+            TelematicsPill(live.telematicsConnected, palette, m)
         }
 
         when (tab) {
@@ -200,5 +207,37 @@ fun OdographApp() {
             }
         }
       }
+    }
+}
+
+/**
+ * The MG link chip in the header's far corner. A green tick means the last poll round-trip
+ * reached the car, a red cross means the last attempt failed, and a dim idle dot means the
+ * poller has never talked to the car or is switched off. Tapping it asks for a fresh sample —
+ * handy right after a red cross, or to peel the dot off the screen when the poller is idle.
+ */
+@Composable
+private fun TelematicsPill(connected: Boolean?, palette: Palette, m: Metrics) {
+    val (glyph, color) = when (connected) {
+        true -> "✓" to Color(0xFF2ECC71)
+        false -> "✗" to Color(0xFFE74C3C)
+        null -> "·" to palette.dim
+    }
+    Box(
+        modifier = Modifier
+            .padding(start = m.gap)
+            .background(Color.Black.copy(alpha = 0.35f), RoundedCornerShape(5.dp))
+            .border(1.dp, color.copy(alpha = 0.55f), RoundedCornerShape(5.dp))
+            .clickable { TripRecorderService.requestTelematicsRefresh() }
+            .padding(horizontal = m.gap, vertical = m.gap / 4),
+        contentAlignment = androidx.compose.ui.Alignment.Center
+    ) {
+        Text(
+            text = "$glyph MG",
+            color = color,
+            fontSize = m.label,
+            letterSpacing = 1.2.sp,
+            maxLines = 1
+        )
     }
 }

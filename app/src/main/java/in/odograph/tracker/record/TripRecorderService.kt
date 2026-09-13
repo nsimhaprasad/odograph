@@ -51,6 +51,12 @@ class TripRecorderService : Service() {
         val speedLimitKmh: Int = 0,
         val batterySocPercent: Double? = null,
         val batteryCharging: Boolean? = null,
+        /**
+         * The MG telematics link. True after a poll round-trip (login + status) succeeded, false
+         * after any step failed, null before the first attempt or while the poller is switched
+         * off. This is what the corner indicator draws — a green tick, a red cross, or nothing.
+         */
+        val telematicsConnected: Boolean? = null,
         /** Real-world mileage this trip, km·kWh⁻¹. Null until the trip is long enough to trust. */
         val batteryMileageKmPerKwh: Double? = null,
         /** What a 100% charge would carry you, from real consumption (or the car's estimate). */
@@ -232,10 +238,9 @@ class TripRecorderService : Service() {
             if (!settings.telematicsEnabled || phone.isBlank() || password.isBlank()) {
                 client = null
                 creds = null
-                _state.value = _state.value.copy(batterySocPercent = null, batteryCharging = null)
+                _state.value = _state.value.copy(batterySocPercent = null, batteryCharging = null, telematicsConnected = null)
                 continue
             }
-
             val want = Triple(phone, password, settings.telematicsVin)
             if (client == null || creds != want) {
                 val framesDir = RawFrames.directory(this)
@@ -253,9 +258,15 @@ class TripRecorderService : Service() {
                 client = fresh
                 creds = want
                 runCatching { fresh.login() }
-                    .onFailure { Diagnostics.crumb("telematics login failed: $it") }
+                    .onFailure {
+                        Diagnostics.crumb("telematics login failed: $it")
+                        _state.update { it.copy(telematicsConnected = false) }
+                    }
                 runCatching { fresh.vehicles() }
-                    .onFailure { Diagnostics.crumb("telematics vehicles() failed: $it") }
+                    .onFailure {
+                        Diagnostics.crumb("telematics vehicles() failed: $it")
+                        _state.update { it.copy(telematicsConnected = false) }
+                    }
             }
             val c = client
 
@@ -364,8 +375,13 @@ class TripRecorderService : Service() {
                 } else {
                     _state.value = _state.value.copy(batterySocPercent = null, batteryCharging = null)
                 }
+
+                // Whatever the frame carried, a round-trip that returned without throwing means
+                // the MG link is up — the corner indicator can go green.
+                _state.update { it.copy(telematicsConnected = true) }
             }.onFailure {
                 Diagnostics.crumb("telematics poll failed: $it")
+                _state.update { it.copy(telematicsConnected = false) }
                 // A stale session is the usual culprit; the next round logs in again.
                 runCatching { c.login() }
             }
