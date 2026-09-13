@@ -37,6 +37,18 @@ class TripStatsTest {
     }
 
     @Test
+    fun `non-finite coordinates are dropped without poisoning the totals`() {
+        val fixes = listOf(
+            fix(0, 12.9700, 77.5900, 10f),
+            Fix(1000, Double.NaN, 77.5900, 10f, 5f),
+            fix(2000, 12.9899, 77.5900, 10f)
+        )
+        // The corrupt middle fix is bridged over exactly like a bad-accuracy one.
+        assertThat(TripStats.compute(fixes).distanceM).isCloseTo(2224.0, within(50.0))
+        assertThat(TripStats.moved(fixes)).isTrue()
+    }
+
+    @Test
     fun `moving time excludes stationary fixes below the threshold`() {
         val fixes = listOf(
             fix(0, 12.97, 77.59, 0.1f),

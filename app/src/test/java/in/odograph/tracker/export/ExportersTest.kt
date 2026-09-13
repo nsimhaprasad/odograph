@@ -63,7 +63,7 @@ class ExportersTest {
             listOf(trip.copy(socStart = 90.0, socEnd = 64.2, energyKwh = 12.7, costInr = 101.6))
         )
         val line = csv.trim().lines()[1]
-        assertThat(line).contains(",90.0,64.2,12.7,101.6")
+        assertThat(line).contains(",90.0,64.2,12.70,101.60")
     }
 
     @Test

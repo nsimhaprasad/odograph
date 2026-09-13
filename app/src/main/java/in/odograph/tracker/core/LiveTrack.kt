@@ -34,7 +34,7 @@ class LiveTrack(
         private set
 
     fun add(fix: Fix) {
-        if (fix.accuracyM > accuracyLimitM) return
+        if (fix.accuracyM > accuracyLimitM || !fix.lat.isFinite() || !fix.lon.isFinite()) return
 
         val from = anchor
         if (from == null) {

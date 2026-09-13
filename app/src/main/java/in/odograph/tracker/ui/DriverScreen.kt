@@ -104,12 +104,12 @@ private fun TallLayout(
             horizontalArrangement = Arrangement.SpaceEvenly
         ) {
             live.batteryMileageKmPerKwh?.let {
-                SmallStat("%.1f km/kWh".format(it), "MILEAGE", palette, m)
+                SmallStat("%.2f km/kWh".format(it), "MILEAGE", palette, m)
             }
             live.batteryRangeAtFullKm?.let {
                 SmallStat("%.0f km".format(it), "RANGE@100", palette, m)
             }
-            SmallStat("%.1f kWh".format(live.batteryTotalKwh), "LIFETIME", palette, m)
+            SmallStat("%.2f kWh".format(live.batteryTotalKwh), "LIFETIME", palette, m)
             if (live.elevGainM > 0 || live.elevLossM > 0) {
                 SmallStat(
                     "↑%.0f ↓%.0f".format(live.elevGainM, live.elevLossM), "CLIMB  M", palette, m
@@ -218,12 +218,12 @@ private fun BalancedLayout(
                 horizontalArrangement = Arrangement.spacedBy(m.gap)
             ) {
                 live.batteryMileageKmPerKwh?.let {
-                    SmallStat("%.1f km/kWh".format(it), "MILEAGE", palette, m)
+                    SmallStat("%.2f km/kWh".format(it), "MILEAGE", palette, m)
                 }
                 live.batteryRangeAtFullKm?.let {
                     SmallStat("%.0f km".format(it), "RANGE@100", palette, m)
                 }
-                SmallStat("%.1f kWh".format(live.batteryTotalKwh), "LIFETIME", palette, m)
+                SmallStat("%.2f kWh".format(live.batteryTotalKwh), "LIFETIME", palette, m)
                 if (live.elevGainM > 0 || live.elevLossM > 0) {
                     SmallStat(
                         "↑%.0f ↓%.0f".format(live.elevGainM, live.elevLossM), "CLIMB  M", palette, m

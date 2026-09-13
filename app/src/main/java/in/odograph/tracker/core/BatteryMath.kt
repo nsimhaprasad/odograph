@@ -33,6 +33,20 @@ object BatteryMath {
      */
     const val FAST_CHARGE_KW = 10.0
 
+    /**
+     * Power readings below this many are not evidence of a sustained {FAST,SLOW} profile — a
+     * 3-sample session cannot distinguish a lone spike from real fast charging, so classification
+     * falls back to the peak/average rule instead.
+     */
+    const val FAST_EVIDENCE_MIN_SAMPLES = 5
+
+    /**
+     * A session is fast when this share of its power readings sat at or above [FAST_CHARGE_KW].
+     * Majority, not any single reading: one brief grid spike never makes a home charge a "fast
+     * charge", and one momentary dip never demotes a real fastcharger.
+     */
+    const val FAST_EVIDENCE_FRACTION = 0.5
+
     /** Tracks shorter than this are measurement noise, not a drive worth quoting efficiency for. */
     const val MIN_EFFICIENCY_DISTANCE_M = 2_000.0
 
@@ -42,19 +56,24 @@ object BatteryMath {
     /** Where the energy for a charge session came from, which picks which electricity rate applies. */
     enum class ChargeKind { SLOW, FAST }
 
+    /** Rounds to 0.01 (paise, or 0.01 kW·h) so stored money and energy never carry float noise. */
+    fun round2(value: Double): Double = Math.round(value * 100.0) / 100.0
+
     /**
      * kW·h drained from the battery over a trip, from its charge snapshots. Charge-adjusted: any
      * energy the charging frames measured going back in is added back, so a trip that charged on
      * the way counts the fuel it actually used.
      *
      * Guards covered: fewer than two usable SOC readings or an unknown capacity -> null; SOC is
-     * clamped to the physical [0,100] range so sensor noise cannot manufacture kWh; the result is
-     * signed — a strongly negative value means the trip net-charged (regen or a plugged-in pause),
-     * and callers that bill money clamp it at zero rather than inventing a refund.
+     * clamped to the physical [0,100] range so sensor noise cannot manufacture kWh, and a NaN
+     * reading is evidence of nothing so it is dropped like a missing one; the result is signed — a
+     * strongly negative value means the trip net-charged (regen or a plugged-in pause), and
+     * callers that bill money clamp it at zero rather than inventing a refund.
      */
     fun consumedKwh(samples: List<BatteryEntity>, capacityKwh: Double): Double? {
         if (capacityKwh <= 0) return null
-        val socs = samples.filter { it.socPercent != null }.map { it.socPercent!!.coerceIn(0.0, 100.0) }
+        val socs = samples.filter { it.socPercent != null && it.socPercent!!.isFinite() }
+            .map { it.socPercent!!.coerceIn(0.0, 100.0) }
         if (socs.size < 2) return null
         val drawn = capacityKwh * (socs.first() - socs.last()) / 100.0
         return drawn + chargedKwh(samples)
@@ -71,7 +90,7 @@ object BatteryMath {
             val prev = samples[i - 1]
             val cur = samples[i]
             val power = cur.chargingPowerKw ?: 0.0
-            if (cur.charging == true && power > 0 && cur.t > prev.t) {
+            if (cur.charging == true && power.isFinite() && power > 0 && cur.t > prev.t) {
                 charged += power * (cur.t - prev.t) / 3_600_000.0
             }
         }
@@ -81,7 +100,7 @@ object BatteryMath {
     /** Energy a recharge added between two SOC readings, clamped to the physical battery size. */
     fun rechargeEnergyKwh(startSoc: Double?, endSoc: Double, capacityKwh: Double): Double {
         if (capacityKwh <= 0) return 0.0
-        if (startSoc == null) return 0.0
+        if (startSoc == null || !startSoc.isFinite() || !endSoc.isFinite()) return 0.0
         val drawn = (endSoc.coerceIn(0.0, 100.0) - startSoc.coerceIn(0.0, 100.0)) / 100.0
         return (drawn * capacityKwh).coerceIn(0.0, capacityKwh)
     }
@@ -115,14 +134,48 @@ object BatteryMath {
         capacityKwh * socPercent.coerceIn(0.0, 100.0) / 100.0 / efficiencyKwhPer100Km * 100.0
 
     /**
-     * Classifies a charge session. Defaults to the peak reported power (the charger's capability,
-     * immune to a slept-though night shrinking the measured duration); if no power was ever
-     * reported, falls back to the session-average power drawn from energy and wall-clock time.
+     * Classifies a charge session from its reported power readings. The caller keeps a running
+     * count of readings at or above [FAST_CHARGE_KW] versus total readings; when enough readings
+     * exist the consistent majority decides, which is immune to a single transient spike (never
+     * makes a home charge "fast") and to a single momentary dip (never demotes a fastcharger).
+     * With too few readings to judge consistency it falls back to the peak (the charger's
+     * capability, immune to a slept-through night shrinking the measured duration) and the
+     * session-average as a last resort when power was never reported.
      */
-    fun chargeKind(peakPowerKw: Double?, energyKwh: Double, startTime: Long, endTime: Long): ChargeKind {
+    fun chargeKind(
+        peakPowerKw: Double?,
+        energyKwh: Double,
+        startTime: Long,
+        endTime: Long,
+        samplesTotal: Int = 0,
+        samplesAbove: Int = 0
+    ): ChargeKind {
+        if (samplesTotal >= FAST_EVIDENCE_MIN_SAMPLES) {
+            // Majority without floats: above*2 > total is strictly more than half. A tie stays
+            // silent-and-slow — a session right on the 10 kW line is not worth the fast rate.
+            return if (samplesAbove * 2 > samplesTotal) ChargeKind.FAST else ChargeKind.SLOW
+        }
         val peak = peakPowerKw ?: 0.0
         val hours = (endTime - startTime).coerceAtLeast(1L) / 3_600_000.0
         val average = if (hours > 0) energyKwh / hours else 0.0
         return if (maxOf(peak, average) >= FAST_CHARGE_KW) ChargeKind.FAST else ChargeKind.SLOW
+    }
+
+    /**
+     * The driver-entered price of a charge session, from whichever way they entered it:
+     * a total bill already includes GST and is final; a per-kWh tariff gets GST added on top.
+     * Null when neither was entered, meaning the configured default rate applies.
+     */
+    fun sessionCostInr(
+        energyKwh: Double,
+        enteredRateInr: Double?,
+        enteredBillInr: Double?,
+        gstRatePct: Double?
+    ): Double? {
+        enteredBillInr?.let { return it.coerceIn(0.0, Double.MAX_VALUE) }
+        if (enteredRateInr != null && gstRatePct != null) {
+            return energyKwh * enteredRateInr.coerceAtLeast(0.0) * (1.0 + gstRatePct / 100.0)
+        }
+        return null
     }
 }

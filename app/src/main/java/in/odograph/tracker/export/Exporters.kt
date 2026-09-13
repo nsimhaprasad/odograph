@@ -9,6 +9,9 @@ import java.util.TimeZone
 
 object Exporters {
 
+    /** Money and energy to two decimals, so the CSV and the screens never disagree on the last paisa. */
+    private fun num(v: Double): String = "%.2f".format(v)
+
     fun tripsCsv(trips: List<TripEntity>): String = buildString {
         appendLine(
             "id,started_at,ended_at,distance_m,duration_s,moving_s," +
@@ -23,7 +26,8 @@ object Exporters {
                     t.maxSpeedMps, t.avgSpeedMps, t.slowestKmMps,
                     t.elevGainM, t.elevLossM,
                     t.startLat ?: "", t.startLon ?: "", t.endLat ?: "", t.endLon ?: "",
-                    t.clusterId ?: "", t.socStart ?: "", t.socEnd ?: "", t.energyKwh ?: "", t.costInr ?: ""
+                    t.clusterId ?: "", t.socStart ?: "", t.socEnd ?: "",
+                    t.energyKwh?.let { num(it) } ?: "", t.costInr?.let { num(it) } ?: ""
                 ).joinToString(",")
             )
         }

@@ -56,6 +56,7 @@ object TripRecovery {
                 val battery = dao.batteryRangeFor(orphan.id)
                 if (battery.isNotEmpty()) {
                     val energy = BatteryMath.consumedKwh(battery, capacityKwh)
+                        ?.let { BatteryMath.round2(it) }
                     dao.setChargeSummary(
                         orphan.id,
                         battery.first().socPercent,
@@ -68,7 +69,10 @@ object TripRecovery {
                 // blended rate prices its energy; energy that is negative (a drive that noted
                 // charging) finances nothing, so only the positive part is ever billed.
                 val energy = dao.tripById(orphan.id)?.energyKwh
-                dao.setTripCost(orphan.id, driveCost(dao, energy, orphan.startedAt))
+                dao.setTripCost(
+                    orphan.id,
+                    driveCost(dao, energy, orphan.startedAt)?.let { BatteryMath.round2(it) }
+                )
 
                 // Now that the trip has real endpoints, attach it to the places it ran between.
                 // This is what makes "most visited route" answerable with a GROUP BY.

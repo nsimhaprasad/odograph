@@ -255,11 +255,11 @@ private fun TripEntity.batteryLine(): String? {
         parts += "%.0f→%.0f%%".format(socStart, socEnd)
     }
     energyKwh?.let {
-        if (it != 0.0) parts += "%.1f kWh".format(it)
+        if (it != 0.0) parts += "%.2f kWh".format(it)
     }
     if (socStart != null && socEnd != null && energyKwh != null && energyKwh > 0 && distanceM > 0) {
-        parts += "%.1f km/kWh".format(BatteryMath.kmPerKwh(energyKwh, distanceM) ?: 0.0)
+        parts += "%.2f km/kWh".format(BatteryMath.kmPerKwh(energyKwh, distanceM) ?: 0.0)
     }
-    costInr?.let { parts += "₹ %.0f".format(it) }
+    costInr?.let { parts += "₹ %.2f".format(it) }
     return if (parts.isEmpty()) null else parts.joinToString("  ·  ")
 }

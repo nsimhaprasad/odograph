@@ -135,6 +135,43 @@ class BatteryMathTest {
         assertThat(BatteryMath.rollingKwhPer100Km(listOf(12.0), window = 10)).isCloseTo(12.0, within(1e-9))
     }
 
+    // ---- two-decimal precision ----
+
+    @Test
+    fun `round2 keeps money and energy to two decimals`() {
+        assertThat(BatteryMath.round2(123.456)).isEqualTo(123.46)
+        assertThat(BatteryMath.round2(7.5)).isEqualTo(7.5)
+        assertThat(BatteryMath.round2(0.004)).isEqualTo(0.0)
+        assertThat(BatteryMath.round2(-1.476)).isEqualTo(-1.48)
+        assertThat(BatteryMath.round2(49.2 * 30.0 / 100.0)).isEqualTo(14.76)
+    }
+
+    @Test
+    fun `a nan reading is evidence of nothing, not a wild swing`() {
+        val nan = Double.NaN
+        // A corrupt SOC drops out of the swing entirely: one usable reading is not a trip.
+        assertThat(
+            BatteryMath.consumedKwh(
+                listOf(
+                    BatteryEntity(0, 1, 0, socPercent = 50.0, charging = false),
+                    BatteryEntity(0, 2, 60_000, socPercent = nan, charging = false)
+                ),
+                capacity
+            )
+        ).isNull()
+        // A corrupt power spike never books energy into the road bill.
+        assertThat(
+            BatteryMath.chargedKwh(
+                listOf(
+                    BatteryEntity(0, 1, 0, socPercent = 50.0, charging = true, chargingPowerKw = nan),
+                    BatteryEntity(0, 2, 60_000, socPercent = 51.0, charging = true, chargingPowerKw = nan)
+                )
+            )
+        ).isZero()
+        assertThat(BatteryMath.rechargeEnergyKwh(50.0, nan, capacity)).isEqualTo(0.0)
+        assertThat(BatteryMath.rechargeEnergyKwh(nan, 60.0, capacity)).isEqualTo(0.0)
+    }
+
     // ---- charge kind ----
 
     @Test
@@ -157,6 +194,61 @@ class BatteryMathTest {
         assertThat(BatteryMath.chargeKind(null, 6.0, 0, 3_600_000)).isEqualTo(ChargeKind.SLOW)
         // A zero-energy session of unknown provenance is not fast.
         assertThat(BatteryMath.chargeKind(null, 0.0, 0, 3_600_000)).isEqualTo(ChargeKind.SLOW)
+    }
+
+    @Test
+    fun `a lone power spike cannot make a home charge a fast charge`() {
+        // 6 readings at grid power, one reading briefly over 10 kW: not a fast charger. The ~7 kW
+        // majority wins over the blip's peak.
+        assertThat(
+            BatteryMath.chargeKind(
+                45.0, 7.0, 0, 90 * 60_000L, samplesTotal = 7, samplesAbove = 1
+            )
+        ).isEqualTo(ChargeKind.SLOW)
+    }
+
+    @Test
+    fun `occasional dips never demote a real fast charger`() {
+        // 30 readings at full fast-charger power with two momentary dips below 10 kW: still fast.
+        assertThat(
+            BatteryMath.chargeKind(
+                40.0, 16.0, 0, 40 * 60_000L, samplesTotal = 32, samplesAbove = 30
+            )
+        ).isEqualTo(ChargeKind.FAST)
+    }
+
+    @Test
+    fun `a session exactly half-fast stays slow`() {
+        // A tie on the 10 kW line is not worth the fast rate. 6 readings and 3 above the line
+        // still reach the majority rule (6 >= FAST_EVIDENCE_MIN_SAMPLES), where 2*3 > 6 is false.
+        assertThat(
+            BatteryMath.chargeKind(
+                30.0, 12.0, 0, 60 * 60_000L, samplesTotal = 6, samplesAbove = 3
+            )
+        ).isEqualTo(ChargeKind.SLOW)
+    }
+
+    @Test
+    fun `too few readings to judge consistency fall back to the peak`() {
+        // 3 readings can be a blip or the start of a fast charge; the capability peek decides.
+        assertThat(
+            BatteryMath.chargeKind(
+                38.0, 6.0, 0, 2 * 60 * 60_000L, samplesTotal = 3, samplesAbove = 3
+            )
+        ).isEqualTo(ChargeKind.FAST)
+        assertThat(
+            BatteryMath.chargeKind(
+                9.0, 6.0, 0, 2 * 60 * 60_000L, samplesTotal = 3, samplesAbove = 0
+            )
+        ).isEqualTo(ChargeKind.SLOW)
+    }
+
+    @Test
+    fun `a total bill is the final price, a tariff gets gst added on top`() {
+        assertThat(BatteryMath.sessionCostInr(10.0, null, 250.0, 18.0)).isEqualTo(250.0)
+        assertThat(BatteryMath.sessionCostInr(10.0, 20.0, null, 18.0))
+            .isCloseTo(10.0 * 20.0 * 1.18, within(1e-9))
+        assertThat(BatteryMath.sessionCostInr(10.0, null, null, 18.0)).isNull()
     }
 
     private fun within(tolerance: Double) = org.assertj.core.data.Offset.offset(tolerance)

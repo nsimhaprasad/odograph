@@ -29,6 +29,9 @@ object TripStats {
     private const val SPEED_ACCURACY_LIMIT_M = 15f
     private const val MOVING_THRESHOLD_MPS = 0.5f
 
+    /** A non-finite number is a corrupt fix; it must neither disturb nor poison the totals. */
+    private fun Fix.sane(): Boolean = lat.isFinite() && lon.isFinite() && accuracyM.isFinite()
+
     /**
      * A GNSS altitude is only good to a few metres, so a raw per-sample difference would
      * manufacture hundreds of metres of "climb" out of parked jitter. A delta only counts once it
@@ -58,7 +61,7 @@ object TripStats {
         val stats = compute(fixes)
         if (stats.maxSpeedMps >= MIN_DIRECTION_MPS) return true
         val usable = fixes.sortedBy { it.t }
-            .filter { it.accuracyM <= ACCURACY_LIMIT_M }
+            .filter { it.sane() && it.accuracyM <= ACCURACY_LIMIT_M }
             .takeIf { it.size >= 2 } ?: return false
         val origin = usable.first()
         return usable.maxOf { Geo.haversineMetres(origin.lat, origin.lon, it.lat, it.lon) } >= MIN_DRIVE_M
@@ -81,7 +84,7 @@ object TripStats {
         // Holding an anchor and only counting once displacement clearly exceeds the uncertainty
         // solves both: noise never clears the bar, and real movement clears it within a second or
         // two and is then counted in full.
-        val usable = sorted.filter { it.accuracyM <= ACCURACY_LIMIT_M }
+        val usable = sorted.filter { it.sane() && it.accuracyM <= ACCURACY_LIMIT_M }
         var distance = 0.0
         var elevGain = 0.0
         var elevLoss = 0.0
@@ -125,7 +128,7 @@ object TripStats {
 
         val durationS = (sorted.last().t - sorted.first().t) / 1000
         val movingS = movingMs / 1000
-        val maxSpeed = sorted.filter { it.accuracyM <= SPEED_ACCURACY_LIMIT_M }
+        val maxSpeed = sorted.filter { it.sane() && it.accuracyM <= SPEED_ACCURACY_LIMIT_M }
             .maxOfOrNull { it.speedMps } ?: 0f
         val avg = if (movingS > 0) distance / movingS else 0.0
         return Stats(
