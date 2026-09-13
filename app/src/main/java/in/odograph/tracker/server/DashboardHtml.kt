@@ -50,6 +50,7 @@ object DashboardHtml {
             """{"id":${t.id},"startedAt":${t.startedAt},"endedAt":${t.endedAt ?: 0},""" +
                 """"distanceM":${t.distanceM},"durationS":${t.durationS},""" +
                 """"movingS":${t.movingS},"maxSpeedMps":${t.maxSpeedMps},""" +
+                """"elevGainM":${t.elevGainM},"elevLossM":${t.elevLossM},""" +
                 """"energyKwh":${t.energyKwh ?: "null"},"costInr":${t.costInr ?: "null"},""" +
                 """"socStart":${t.socStart ?: "null"},"socEnd":${t.socEnd ?: "null"}}"""
         }
@@ -130,7 +131,7 @@ svg text{fill:#5C6877;font:9px ui-monospace,monospace}
       <div class="panel">
         <h2>Drives</h2>
         <table id="t"><thead><tr>
-          <th>Started</th><th>Distance</th><th>Used</th><th>kWh</th><th>&#8377;</th><th>km/kWh</th><th>Elapsed</th><th>Moving</th><th>Avg</th><th>Max</th>
+          <th>Started</th><th>Distance</th><th>Gain/Loss</th><th>Used</th><th>kWh</th><th>&#8377;</th><th>km/kWh</th><th>Elapsed</th><th>Moving</th><th>Avg</th><th>Max</th>
         </tr></thead><tbody></tbody></table>
       </div>
       <div class="panel" style="margin-top:22px">
@@ -207,11 +208,13 @@ tbody.innerHTML = TRIPS.map(function(t){
   var kwh = t.energyKwh!=null? t.energyKwh.toFixed(2) : null;
   var cost = t.costInr!=null? '&#8377;'+t.costInr.toFixed(1) : null;
   var eff = (t.energyKwh>0 && t.distanceM>0)? (t.distanceM/1000/t.energyKwh).toFixed(1) : null;
+  var climb = (t.elevGainM>0 || t.elevLossM>0)?
+    '\u2191'+Math.round(t.elevGainM)+'\u00b7\u2193'+Math.round(t.elevLossM)+' m' : null;
   return '<tr data-id="'+t.id+'"><td>'+fmtD(t.startedAt)+'</td><td>'+km(t.distanceM)+
-    '</td>'+(used?cell(used.toFixed(1)+'%'):cell(null))+cell(kwh)+cell(cost)+cell(eff)+
+    '</td>'+cell(climb)+(used?cell(used.toFixed(1)+'%'):cell(null))+cell(kwh)+cell(cost)+cell(eff)+
     '</td><td>'+hm(t.durationS)+'</td><td>'+hm(t.movingS)+'</td><td>'+kmh(t.avgSpeedMps)+
     '</td><td>'+kmh(t.maxSpeedMps)+'</td></tr>';
-}).join('') || '<tr><td colspan="10" style="color:#5C6877">No drives recorded yet.</td></tr>';
+}).join('') || '<tr><td colspan="11" style="color:#5C6877">No drives recorded yet.</td></tr>';
 
 // x-y chart: energy (kWh) per drive, newest on the right.
 (function(){

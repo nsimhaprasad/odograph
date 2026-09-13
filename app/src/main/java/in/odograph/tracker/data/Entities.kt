@@ -32,7 +32,11 @@ data class TripEntity(
     val socEnd: Double? = null,
     val energyKwh: Double? = null,
     /** Rupees the energy on this drive cost, from the weighted rate of its recent recharges. */
-    val costInr: Double? = null
+    val costInr: Double? = null,
+    /** Metres climbed this drive, deadbanded against GNSS altitude noise. Battery consumption depends on it. */
+    val elevGainM: Double = 0.0,
+    /** Metres descended this drive. Always >= 0, so a there-and-back shows both directions. */
+    val elevLossM: Double = 0.0
 )
 
 @Entity(tableName = "points", indices = [Index(value = ["tripId", "t"])])

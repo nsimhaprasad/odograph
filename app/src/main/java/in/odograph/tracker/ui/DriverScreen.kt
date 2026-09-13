@@ -110,6 +110,11 @@ private fun TallLayout(
                 SmallStat("%.0f km".format(it), "RANGE@100", palette, m)
             }
             SmallStat("%.1f kWh".format(live.batteryTotalKwh), "LIFETIME", palette, m)
+            if (live.elevGainM > 0 || live.elevLossM > 0) {
+                SmallStat(
+                    "↑%.0f ↓%.0f".format(live.elevGainM, live.elevLossM), "CLIMB  M", palette, m
+                )
+            }
         }
     }
 }
@@ -156,6 +161,12 @@ private fun WideLayout(
         }
         Stat("%.1f".format(live.batteryTotalKwh), "KWH  LIFETIME", palette, m, size = m.stat,
             modifier = Modifier.weight(1f))
+        if (live.elevGainM > 0 || live.elevLossM > 0) {
+            Stat(
+                "↑%.0f ↓%.0f".format(live.elevGainM, live.elevLossM), "M  CLIMB",
+                palette, m, size = m.stat, modifier = Modifier.weight(1f)
+            )
+        }
         if (live.speedLimitKmh > 0) {
             Stat("${live.speedLimitKmh}", "KM/H   LIMIT", palette, m, size = m.stat,
                 modifier = Modifier.weight(1f))
@@ -213,6 +224,11 @@ private fun BalancedLayout(
                     SmallStat("%.0f km".format(it), "RANGE@100", palette, m)
                 }
                 SmallStat("%.1f kWh".format(live.batteryTotalKwh), "LIFETIME", palette, m)
+                if (live.elevGainM > 0 || live.elevLossM > 0) {
+                    SmallStat(
+                        "↑%.0f ↓%.0f".format(live.elevGainM, live.elevLossM), "CLIMB  M", palette, m
+                    )
+                }
             }
         }
     }

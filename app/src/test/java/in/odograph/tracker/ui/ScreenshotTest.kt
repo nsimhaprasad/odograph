@@ -239,7 +239,8 @@ class ScreenshotTest {
                     val id = dao.startTrip(startedAt)
                     dao.finishTrip(
                         id, startedAt + seconds * 1000, metres, seconds,
-                        (seconds * 0.82).toLong(), 27.5f, metres / seconds, 3.4
+                        (seconds * 0.82).toLong(), 27.5f, metres / seconds, 3.4,
+                        0.0, 0.0
                     )
                     dao.setTripPlaces(id, from, to)
                 }
@@ -378,7 +379,7 @@ class ScreenshotTest {
                     )
                 )
             }
-            dao.finishTrip(id, 1_700_000_000_000L + route.size * 1000L, 18_432.0, 1_484, 1_219, 27.5f, 12.4, 3.4)
+            dao.finishTrip(id, 1_700_000_000_000L + route.size * 1000L, 18_432.0, 1_484, 1_219, 27.5f, 12.4, 3.4, 0.0, 0.0)
         }
         seeder.start()
         seeder.join()

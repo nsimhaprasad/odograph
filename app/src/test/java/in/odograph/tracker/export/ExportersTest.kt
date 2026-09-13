@@ -67,6 +67,21 @@ class ExportersTest {
     }
 
     @Test
+    fun `trips csv carries the per-trip climb and descent after the speed stats`() {
+        val line = Exporters.tripsCsv(
+            listOf(trip.copy(elevGainM = 120.0, elevLossM = 35.0))
+        ).trim().lines()[1]
+        // The elevation values sit right after the speed stats (slowest_km_mps).
+        assertThat(line).contains(",120.0,35.0,")
+    }
+
+    @Test
+    fun `header includes the elevation columns`() {
+        assertThat(Exporters.tripsCsv(emptyList()).trim().lines()[0])
+            .contains("elev_gain_m,elev_loss_m")
+    }
+
+    @Test
     fun `trips csv leaves battery blanks when a trip was not instrumented`() {
         val line = Exporters.tripsCsv(listOf(trip)).trim().lines()[1]
         assertThat(line).endsWith(",,,,")

@@ -16,6 +16,7 @@ class LiveTrack(
     private val maxPlausibleMps: Float = 70f
 ) {
     private var anchor: Fix? = null
+    private var elevAnchor: Fix? = null
 
     var distanceM: Double = 0.0
         private set
@@ -24,12 +25,21 @@ class LiveTrack(
     var speedMps: Float = 0f
         private set
 
+    /** Metres climbed this trip so far, deadbanded exactly as [TripStats] does. */
+    var elevGainM: Double = 0.0
+        private set
+
+    /** Metres descended this trip so far. Always >= 0, so "gain / loss" reads naturally. */
+    var elevLossM: Double = 0.0
+        private set
+
     fun add(fix: Fix) {
         if (fix.accuracyM > accuracyLimitM) return
 
         val from = anchor
         if (from == null) {
             anchor = fix
+            elevAnchor = fix
             if (fix.speedMps > 0f) speedMps = fix.speedMps
             return
         }
@@ -40,6 +50,19 @@ class LiveTrack(
 
         if (moved > noiseFloor) {
             distanceM += moved
+            // Elevation only counts where the car actually moved, with the same deadband as the
+            // archived totals — parked GNSS drift can manufacture a fake climb otherwise. A fix
+            // without altitude (network provider / interpolated bridge) never becomes the
+            // elevation anchor, so the climb either side of it survives.
+            if (fix.altitudeM != null) {
+                val fromAlt = elevAnchor?.altitudeM
+                if (fromAlt != null) {
+                    val delta = fix.altitudeM - fromAlt
+                    if (delta > TripStats.ELEV_DEADBAND) elevGainM += delta
+                    else if (delta < -TripStats.ELEV_DEADBAND) elevLossM += -delta
+                }
+                elevAnchor = fix
+            }
             val derived = if (seconds > 0) (moved / seconds).toFloat() else 0f
             speedMps = when {
                 fix.speedMps > 0f -> fix.speedMps

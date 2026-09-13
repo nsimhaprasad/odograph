@@ -12,7 +12,8 @@ object Exporters {
     fun tripsCsv(trips: List<TripEntity>): String = buildString {
         appendLine(
             "id,started_at,ended_at,distance_m,duration_s,moving_s," +
-                "max_speed_mps,avg_speed_mps,slowest_km_mps,start_lat,start_lon," +
+                "max_speed_mps,avg_speed_mps,slowest_km_mps,elev_gain_m,elev_loss_m," +
+                "start_lat,start_lon," +
                 "end_lat,end_lon,cluster_id,soc_start_pct,soc_end_pct,energy_kwh,cost_inr"
         )
         trips.forEach { t ->
@@ -20,6 +21,7 @@ object Exporters {
                 listOf(
                     t.id, t.startedAt, t.endedAt ?: "", t.distanceM, t.durationS, t.movingS,
                     t.maxSpeedMps, t.avgSpeedMps, t.slowestKmMps,
+                    t.elevGainM, t.elevLossM,
                     t.startLat ?: "", t.startLon ?: "", t.endLat ?: "", t.endLon ?: "",
                     t.clusterId ?: "", t.socStart ?: "", t.socEnd ?: "", t.energyKwh ?: "", t.costInr ?: ""
                 ).joinToString(",")

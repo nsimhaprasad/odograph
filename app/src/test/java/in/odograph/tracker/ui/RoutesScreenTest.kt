@@ -43,7 +43,7 @@ class RoutesScreenTest {
             repeat(drives) { n ->
                 val startedAt = System.currentTimeMillis() - (n + 1) * 60_000L
                 val id = dao.startTrip(startedAt)
-                dao.finishTrip(id, startedAt + 600_000, 10_000.0, 600, 500, 25f, 20.0, 3.0)
+                dao.finishTrip(id, startedAt + 600_000, 10_000.0, 600, 500, 25f, 20.0, 3.0, 0.0, 0.0)
                 dao.setTripPlaces(id, home, office)
             }
         }

@@ -54,7 +54,11 @@ class TripRecorderService : Service() {
         /** What a 100% charge would carry you, from real consumption (or the car's estimate). */
         val batteryRangeAtFullKm: Double? = null,
         /** Lifetime energy the car has consumed over instrumented drives, kW·h. */
-        val batteryTotalKwh: Double = 0.0
+        val batteryTotalKwh: Double = 0.0,
+        /** Metres climbed this drive, deadbanded — the context battery consumption depends on. */
+        val elevGainM: Double = 0.0,
+        /** Metres descended this drive, never netted against the climb because descent regenerates. */
+        val elevLossM: Double = 0.0
     )
 
     companion object {
@@ -361,6 +365,8 @@ class TripRecorderService : Service() {
             elapsedS = (fix.t - (startedAt ?: fix.t)) / 1000,
             maxSpeedMps = maxOf(cur.maxSpeedMps, effectiveSpeedMps),
             movingS = cur.movingS + if (effectiveSpeedMps > 0.5f) 1 else 0,
+            elevGainM = track.elevGainM,
+            elevLossM = track.elevLossM,
             tripId = tripId,
             overLimit = alert.overLimit,
             speedLimitKmh = limit

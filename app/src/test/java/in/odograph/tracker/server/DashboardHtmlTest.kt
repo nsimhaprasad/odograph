@@ -135,6 +135,20 @@ class DashboardHtmlTest {
     }
 
     @Test
+    fun `per-trip climb and descent appear in the archive json and table header`() {
+        val climbed = trip.copy(elevGainM = 214.0, elevLossM = 98.0)
+        val html = DashboardHtml.render(listOf(climbed), emptyMap())
+        assertThat(html).contains("\"elevGainM\":214.0")
+        assertThat(html).contains("\"elevLossM\":98.0")
+        assertThat(html).contains("Gain/Loss")
+        // The climb cell is composed at load time from the JSON above: the up/down glyphs and the
+        // row builder must be wired up, and the values themselves travel in the archive json.
+        assertThat(html).contains("\\u2191")
+        assertThat(html).contains("\\u00b7\\u2193")
+        assertThat(html).contains("Math.round(t.elevGainM)")
+    }
+
+    @Test
     fun `an un-instrumented trip serializes nulls in the archive json`() {
         val html = DashboardHtml.render(listOf(trip), emptyMap())
         assertThat(html).contains("\"energyKwh\":null")

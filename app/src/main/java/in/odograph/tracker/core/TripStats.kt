@@ -17,13 +17,26 @@ data class Stats(
     val movingS: Long,
     val maxSpeedMps: Float,
     val avgSpeedMps: Double,
-    val slowestKmSpeedMps: Double
+    val slowestKmSpeedMps: Double,
+    /** Metres climbed this trip, deadbanded against GNSS altitude noise. Always >= 0. */
+    val elevGainM: Double,
+    /** Metres descended this trip. Always >= 0, so a descending drive reads as gain-bad, loss-big. */
+    val elevLossM: Double
 )
 
 object TripStats {
     private const val ACCURACY_LIMIT_M = 25f
     private const val SPEED_ACCURACY_LIMIT_M = 15f
     private const val MOVING_THRESHOLD_MPS = 0.5f
+
+    /**
+     * A GNSS altitude is only good to a few metres, so a raw per-sample difference would
+     * manufacture hundreds of metres of "climb" out of parked jitter. A delta only counts once it
+     * moves past this far from the last one that cleared the bar — and it is then counted in full,
+     * the same anchor philosophy the distance loop uses. Shared with [LiveTrack] so the live
+     * readout and stored totals cannot disagree.
+     */
+    internal const val ELEV_DEADBAND = 3.0
 
     /** Displacement must exceed the fix uncertainty by this much before it counts as movement. */
     private const val NOISE_FACTOR = 1.5f
@@ -52,7 +65,7 @@ object TripStats {
     }
 
     fun compute(fixes: List<Fix>): Stats {
-        if (fixes.size < 2) return Stats(0.0, 0, 0, 0f, 0.0, 0.0)
+        if (fixes.size < 2) return Stats(0.0, 0, 0, 0f, 0.0, 0.0, 0.0, 0.0)
         val sorted = fixes.sortedBy { it.t }
 
         // Drop inaccurate fixes first, then measure between consecutive survivors. Rejecting a
@@ -70,17 +83,37 @@ object TripStats {
         // two and is then counted in full.
         val usable = sorted.filter { it.accuracyM <= ACCURACY_LIMIT_M }
         var distance = 0.0
+        var elevGain = 0.0
+        var elevLoss = 0.0
         var anchor: Fix? = null
+        // A fix without altitude (network provider, interpolated bridge) must not become the
+        // elevation reference — otherwise the climb either side of it would be lost. So elevation
+        // keeps its own anchor that only advances when the moving fix carries an altitude.
+        var elevAnchor: Fix? = null
         for (fix in usable) {
             val from = anchor
             if (from == null) {
                 anchor = fix
+                if (fix.altitudeM != null) elevAnchor = fix
                 continue
             }
             val moved = Geo.haversineMetres(from.lat, from.lon, fix.lat, fix.lon)
             val noiseFloor = maxOf(from.accuracyM, fix.accuracyM) * NOISE_FACTOR
             if (moved > noiseFloor) {
                 distance += moved
+                // A GNSS altitude is only good to a few metres, so only count a delta once it
+                // clears the deadband; anything smaller is jitter. Moving fixes only, so parked
+                // GPS drift can never manufacture a climb. This mirrors LiveTrack exactly, so the
+                // live readout and the stored total agree.
+                if (fix.altitudeM != null) {
+                    val fromAlt = elevAnchor?.altitudeM
+                    if (fromAlt != null) {
+                        val delta = fix.altitudeM - fromAlt
+                        if (delta > ELEV_DEADBAND) elevGain += delta
+                        else if (delta < -ELEV_DEADBAND) elevLoss += -delta
+                    }
+                    elevAnchor = fix
+                }
                 anchor = fix
             }
         }
@@ -95,7 +128,9 @@ object TripStats {
         val maxSpeed = sorted.filter { it.accuracyM <= SPEED_ACCURACY_LIMIT_M }
             .maxOfOrNull { it.speedMps } ?: 0f
         val avg = if (movingS > 0) distance / movingS else 0.0
-        return Stats(distance, durationS, movingS, maxSpeed, avg, slowestKm(sorted))
+        return Stats(
+            distance, durationS, movingS, maxSpeed, avg, slowestKm(sorted), elevGain, elevLoss
+        )
     }
 
     /** Worst rolling 1 km split — the honest replacement for "lowest speed", which is always 0. */

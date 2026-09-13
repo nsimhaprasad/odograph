@@ -62,6 +62,27 @@ class MigrationTest {
 
     private var helper: SupportSQLiteOpenHelper? = null
 
+    private fun openV4(): SupportSQLiteDatabase {
+        val ctx = ApplicationProvider.getApplicationContext<android.content.Context>()
+        ctx.deleteDatabase("migration-test.db")
+        val h = FrameworkSQLiteOpenHelperFactory().create(
+            SupportSQLiteOpenHelper.Configuration.builder(ctx)
+                .name("migration-test.db")
+                .callback(object : SupportSQLiteOpenHelper.Callback(4) {
+                    override fun onCreate(db: SupportSQLiteDatabase) {
+                        // The v4 trips table is the v2 shape plus the cost column 3->4 added.
+                        db.execSQL(v2Trips.replace("`energyKwh` REAL)", "`energyKwh` REAL, `costInr` REAL)"))
+                        db.execSQL(v2Points)
+                        db.execSQL(v2Places)
+                    }
+                    override fun onUpgrade(db: SupportSQLiteDatabase, old: Int, new: Int) = Unit
+                })
+                .build()
+        )
+        helper = h
+        return h.writableDatabase
+    }
+
     private fun openV1(): SupportSQLiteDatabase {
         val ctx = ApplicationProvider.getApplicationContext<android.content.Context>()
         ctx.deleteDatabase("migration-test.db")
@@ -169,6 +190,28 @@ class MigrationTest {
             assertThat(c.moveToFirst()).isTrue()
             assertThat(c.getInt(0)).isEqualTo(3)
         }
+    }
+
+    @Test
+    fun `migrating from v4 adds the elevation columns for battery-context totals`() {
+        val db = openV4()
+        db.execSQL(
+            """INSERT INTO trips (startedAt, endedAt, distanceM, durationS, movingS,
+               maxSpeedMps, avgSpeedMps, slowestKmMps)
+               VALUES (1000, 2000, 5000.0, 60, 55, 20.0, 18.0, 4.0)"""
+        )
+
+        OdographDb.MIGRATION_4_5.migrate(db)
+
+        // Existing drives survive with a honest flat-road default of zero climb.
+        db.query("SELECT distanceM, elevGainM, elevLossM FROM trips").use { c ->
+            assertThat(c.moveToFirst()).isTrue()
+            assertThat(c.getDouble(0)).isEqualTo(5000.0)
+            assertThat(c.getDouble(1)).isEqualTo(0.0)
+            assertThat(c.getDouble(2)).isEqualTo(0.0)
+        }
+        // The new columns accept the values recovery writes.
+        db.execSQL("UPDATE trips SET elevGainM = 214.0, elevLossM = 98.0 WHERE startedAt = 1000")
     }
 
     @Test

@@ -6,8 +6,8 @@ import org.junit.Test
 
 class TripStatsTest {
 
-    private fun fix(t: Long, lat: Double, lon: Double, s: Float, acc: Float = 5f) =
-        Fix(t, lat, lon, s, acc)
+    private fun fix(t: Long, lat: Double, lon: Double, s: Float, acc: Float = 5f, alt: Double? = null) =
+        Fix(t, lat, lon, s, acc, altitudeM = alt)
 
     @Test
     fun `empty input yields zeroed stats`() {
@@ -156,5 +156,78 @@ class TripStatsTest {
         )
         // Both moving legs count; the stationary pair contributes nothing.
         assertThat(TripStats.compute(fixes).distanceM).isCloseTo(222.0, within(25.0))
+    }
+
+    // ---- elevation: every up and every down count, never the net ----
+
+    private fun climb(latStep: Double, vararg alts: Double): List<Fix> = alts.mapIndexed { i, alt ->
+        Fix(
+            (i * 1000).toLong() + 1_000_000,       // 1 Hz cadence
+            12.9700 + latStep * i, 77.5900,
+            speedMps = 12f, accuracyM = 5f,        // each step is ~latStep km, far past the noise floor
+            altitudeM = alt
+        )
+    }
+
+    @Test
+    fun `a hill climbed and descended counts both the up and the down, not the net`() {
+        // 900 -> 1100 climbing, then back down to 950. Start/end differ by only 50 m, but the
+        // drive really burned energy on two climbs and reclaimed one descent: gain must sum 200,
+        // loss must sum 150 — net would hide the regen story entirely.
+        val s = TripStats.compute(climb(0.01, 900.0, 1000.0, 1100.0, 950.0))
+        assertThat(s.elevGainM).isCloseTo(200.0, within(0.01))
+        assertThat(s.elevLossM).isCloseTo(150.0, within(0.01))
+    }
+
+    @Test
+    fun `altitude jitter below the deadband never manufactures a climb`() {
+        // Each step changes altitude by less than the 3 m deadband even though the car moved km.
+        val s = TripStats.compute(climb(0.01, 900.0, 901.5, 902.0, 900.5, 899.0))
+        assertThat(s.elevGainM).isZero()
+        assertThat(s.elevLossM).isZero()
+    }
+
+    @Test
+    fun `parked altitude wobble does not count because nothing moved`() {
+        // Stationary fixes whose altitude swings wildly: no displacement, no elevation.
+        val s = TripStats.compute(
+            listOf(
+                Fix(0, 12.9700, 77.5900, speedMps = 0f, accuracyM = 5f, altitudeM = 900.0),
+                Fix(1000, 12.9700, 77.5900, speedMps = 0f, accuracyM = 5f, altitudeM = 950.0),
+                Fix(2000, 12.9700, 77.5900, speedMps = 0f, accuracyM = 5f, altitudeM = 880.0)
+            )
+        )
+        assertThat(s.elevGainM).isZero()
+        assertThat(s.elevLossM).isZero()
+    }
+
+    @Test
+    fun `network fixes with no altitude skip cleanly and the climb continues`() {
+        // The middle fix carries no altitude (network provider / interpolated bridge); the
+        // neighbouring real fixes still form the climb.
+        val fixes = listOf(
+            Fix(0, 12.9700, 77.5900, speedMps = 12f, accuracyM = 5f, altitudeM = 900.0),
+            Fix(1000, 12.9710, 77.5900, speedMps = 12f, accuracyM = 5f, altitudeM = 940.0),
+            Fix(2000, 12.9720, 77.5900, speedMps = 12f, accuracyM = 5f, altitudeM = null),
+            Fix(3000, 12.9730, 77.5900, speedMps = 12f, accuracyM = 5f, altitudeM = 1000.0)
+        )
+        val s = TripStats.compute(fixes)
+        assertThat(s.elevGainM).isCloseTo(100.0, within(0.01))
+        assertThat(s.elevLossM).isZero()
+    }
+
+    @Test
+    fun `live track elevation agrees with the archived totals`() {
+        // The live readout and the stored total come from different classes but must never
+        // disagree about what the same fixes climbed: 900->1000, 1000->1100, 1100->950,
+        // 950->1050 is 300 m gained and 150 m descended.
+        val fixes = climb(0.01, 900.0, 1000.0, 1100.0, 950.0, 1050.0)
+        val archived = TripStats.compute(fixes)
+        val live = LiveTrack()
+        fixes.forEach { live.add(it) }
+        assertThat(live.elevGainM).isCloseTo(archived.elevGainM, within(0.01))
+        assertThat(live.elevLossM).isCloseTo(archived.elevLossM, within(0.01))
+        assertThat(archived.elevGainM).isCloseTo(300.0, within(0.01))
+        assertThat(archived.elevLossM).isCloseTo(150.0, within(0.01))
     }
 }

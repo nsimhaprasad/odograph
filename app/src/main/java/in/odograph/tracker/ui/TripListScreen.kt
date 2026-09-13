@@ -227,6 +227,14 @@ private fun TripRow(
                 "${mpsToKmh(trip.maxSpeedMps).toInt()} max",
                 color = palette.dim, fontSize = m.body
             )
+            // Every climb and every descent, never netted: each up costs battery, each down
+            // regenerates, so the driver wants both numbers.
+            if (trip.elevGainM > 0 || trip.elevLossM > 0) {
+                Text(
+                    "↑%.0f ↓%.0f m".format(trip.elevGainM, trip.elevLossM),
+                    color = palette.accent, fontSize = m.body
+                )
+            }
         }
         val usedPct = trip.socStart?.let { start ->
             trip.socEnd?.let { end -> start - end }

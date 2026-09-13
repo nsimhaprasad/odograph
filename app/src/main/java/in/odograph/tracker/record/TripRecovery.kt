@@ -30,7 +30,7 @@ object TripRecovery {
 
         dao.openTrip()?.let { orphan ->
             val points = dao.pointsFor(orphan.id)
-            val fixes = points.map { Fix(it.t, it.lat, it.lon, it.speedMps, it.accuracyM, it.interpolated) }
+            val fixes = points.map { Fix(it.t, it.lat, it.lon, it.speedMps, it.accuracyM, it.interpolated, it.altitudeM) }
             if (fixes.isEmpty() || !TripStats.moved(fixes)) {
                 // Either the engine never got a fix, or it idled without the car moving. A
                 // parked session is not a trip and must not surface as a 0 km drive, so the
@@ -44,7 +44,8 @@ object TripRecovery {
                 val last = points.last()
                 dao.finishTrip(
                     orphan.id, last.t, stats.distanceM, stats.durationS,
-                    stats.movingS, stats.maxSpeedMps, stats.avgSpeedMps, stats.slowestKmSpeedMps
+                    stats.movingS, stats.maxSpeedMps, stats.avgSpeedMps, stats.slowestKmSpeedMps,
+                    stats.elevGainM, stats.elevLossM
                 )
                 if (orphan.startLat == null) dao.setOrigin(orphan.id, first.lat, first.lon)
                 dao.setDestination(orphan.id, last.lat, last.lon)

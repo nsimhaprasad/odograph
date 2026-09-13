@@ -28,7 +28,7 @@ class PeriodTotalsTest {
     private fun finishedTrip(startedAt: Long, metres: Double, seconds: Long): Long {
         val dao = db.dao()
         val id = dao.startTrip(startedAt)
-        dao.finishTrip(id, startedAt + seconds * 1000, metres, seconds, seconds, 25f, 20.0, 3.0)
+        dao.finishTrip(id, startedAt + seconds * 1000, metres, seconds, seconds, 25f, 20.0, 3.0, 0.0, 0.0)
         return id
     }
 

@@ -123,11 +123,13 @@ interface OdographDao {
     @Query(
         """UPDATE trips SET endedAt = :endedAt, distanceM = :distanceM,
            durationS = :durationS, movingS = :movingS, maxSpeedMps = :maxSpeedMps,
-           avgSpeedMps = :avgSpeedMps, slowestKmMps = :slowestKmMps WHERE id = :id"""
+           avgSpeedMps = :avgSpeedMps, slowestKmMps = :slowestKmMps,
+           elevGainM = :elevGainM, elevLossM = :elevLossM WHERE id = :id"""
     )
     fun finishTrip(
         id: Long, endedAt: Long, distanceM: Double, durationS: Long,
-        movingS: Long, maxSpeedMps: Float, avgSpeedMps: Double, slowestKmMps: Double
+        movingS: Long, maxSpeedMps: Float, avgSpeedMps: Double, slowestKmMps: Double,
+        elevGainM: Double, elevLossM: Double
     )
 
     @Query("UPDATE trips SET startLat = :lat, startLon = :lon WHERE id = :id")

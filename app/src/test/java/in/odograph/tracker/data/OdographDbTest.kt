@@ -29,7 +29,7 @@ class OdographDbTest {
         val id = db.dao().startTrip(1_700_000_000_000L)
         assertThat(db.dao().openTrip()?.id).isEqualTo(id)
 
-        db.dao().finishTrip(id, 1_700_000_060_000L, 1000.0, 60, 55, 20f, 18.2, 5.0)
+        db.dao().finishTrip(id, 1_700_000_060_000L, 1000.0, 60, 55, 20f, 18.2, 5.0, 0.0, 0.0)
         assertThat(db.dao().openTrip()).isNull()
     }
 
@@ -57,11 +57,13 @@ class OdographDbTest {
     @Test
     fun `finishing a trip stores the computed totals`() {
         val id = db.dao().startTrip(0L)
-        db.dao().finishTrip(id, 60_000, 1500.5, 60, 50, 22.2f, 30.0, 4.4)
+        db.dao().finishTrip(id, 60_000, 1500.5, 60, 50, 22.2f, 30.0, 4.4, 112.0, 86.0)
 
         val t = db.dao().tripById(id)!!
         assertThat(t.distanceM).isEqualTo(1500.5)
         assertThat(t.movingS).isEqualTo(50L)
         assertThat(t.maxSpeedMps).isEqualTo(22.2f)
+        assertThat(t.elevGainM).isEqualTo(112.0)
+        assertThat(t.elevLossM).isEqualTo(86.0)
     }
 }

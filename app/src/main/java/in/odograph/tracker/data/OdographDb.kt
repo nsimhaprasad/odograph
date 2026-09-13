@@ -9,7 +9,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
 
 @Database(
     entities = [TripEntity::class, PointEntity::class, PlaceEntity::class, BatteryEntity::class, ChargeEventEntity::class, DailyTelemetryEntity::class],
-    version = 4,
+    version = 5,
     exportSchema = true
 )
 abstract class OdographDb : RoomDatabase() {
@@ -85,6 +85,14 @@ abstract class OdographDb : RoomDatabase() {
                         `firstPollAt` INTEGER NOT NULL,
                         `lastPollAt` INTEGER NOT NULL)"""
                 )
+            }
+        }
+
+        /** Per-trip climb and descent, the elevation context battery consumption depends on. */
+        val MIGRATION_4_5 = object : Migration(4, 5) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE `trips` ADD COLUMN `elevGainM` REAL NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE `trips` ADD COLUMN `elevLossM` REAL NOT NULL DEFAULT 0")
             }
         }
 
