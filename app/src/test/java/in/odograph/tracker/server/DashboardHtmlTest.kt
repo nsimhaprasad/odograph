@@ -198,4 +198,13 @@ class DashboardHtmlTest {
         assertThat(bare).contains("never")
         assertThat(bare).contains("Not enough real driving yet")
     }
+
+    @Test
+    fun `frames page shows raw payloads and warns they are sensitive`() {
+        val html = DashboardHtml.framesPage(listOf(RawFrames.Entry("charge.raw", "1A2B3C4D")))
+        assertThat(html).contains("1A2B3C4D")
+        assertThat(html).contains("charge.raw</h3>")
+        assertThat(html).contains("session UID and token")
+        assertThat(DashboardHtml.framesPage(emptyList())).contains("Nothing captured yet")
+    }
 }

@@ -102,6 +102,12 @@ object DashboardServer {
                             ContentType.Text.Plain
                         )
                     }
+                    get("/frames") {
+                        call.respondText(
+                            DashboardHtml.framesPage(RawFrames.read(RawFrames.directory(app))),
+                            ContentType.Text.Html
+                        )
+                    }
                     get("/trips.csv") {
                         call.respondText(
                             Exporters.tripsCsv(OdographDb.get(app).dao().allTrips()),
@@ -133,7 +139,7 @@ object DashboardServer {
                             DashboardHtml.configPage(
                                 settings.webhookUrl, settings.deviceId,
                                 settings.telematicsPhone, settings.telematicsPassword, settings.telematicsVin,
-                                batteryCapacityKwh = "%.1f".format(settings.batteryCapacityKwh),
+                                batteryCapacityKwh = "%.2f".format(settings.batteryCapacityKwh),
                                 homeRateInr = "%.2f".format(settings.homeRateInr),
                                 outsideRateInr = "%.2f".format(settings.outsideRateInr)
                             ),
@@ -280,7 +286,7 @@ object DashboardServer {
             settings.webhookUrl, settings.deviceId,
             settings.telematicsPhone, settings.telematicsPassword, settings.telematicsVin,
             message, error,
-            batteryCapacityKwh = "%.1f".format(settings.batteryCapacityKwh),
+            batteryCapacityKwh = "%.2f".format(settings.batteryCapacityKwh),
             homeRateInr = "%.2f".format(settings.homeRateInr),
             outsideRateInr = "%.2f".format(settings.outsideRateInr)
         )

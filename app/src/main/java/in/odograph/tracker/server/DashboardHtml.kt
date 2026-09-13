@@ -193,9 +193,9 @@ else if (SOC>0 && LIVE_RANGE) range100 = LIVE_RANGE/SOC*100;
 document.getElementById('cards').innerHTML = [
   ['Drives', TRIPS.length],
   ['Total km', km(TRIPS.reduce(function(a,t){return a+t.distanceM;},0))],
-  ['Used kWh', usedAll.toFixed(1)],
-  ['Energy cost', '&#8377;'+costAll.toFixed(1)],
-  ['Mileage', avgEff? (100/avgEff).toFixed(1)+' km/kWh' : '&mdash;'],
+  ['Used kWh', usedAll.toFixed(2)],
+  ['Energy cost', '&#8377;'+costAll.toFixed(2)],
+  ['Mileage', avgEff? (100/avgEff).toFixed(2)+' km/kWh' : '&mdash;'],
   ['Range@100%', range100? km(range100)+' km' : '&mdash;'],
   ['Total time', hm(TRIPS.reduce(function(a,t){return a+t.durationS;},0))],
   ['Top speed', kmh(Math.max(0,TRIPS.reduce(function(a,t){return Math.max(a,t.maxSpeedMps);},0)))+' km/h']
@@ -206,8 +206,8 @@ var tbody = document.querySelector('#t tbody');
 tbody.innerHTML = TRIPS.map(function(t){
   var used = (t.socStart!=null && t.socEnd!=null)?(t.socStart-t.socEnd):null;
   var kwh = t.energyKwh!=null? t.energyKwh.toFixed(2) : null;
-  var cost = t.costInr!=null? '&#8377;'+t.costInr.toFixed(1) : null;
-  var eff = (t.energyKwh>0 && t.distanceM>0)? (t.distanceM/1000/t.energyKwh).toFixed(1) : null;
+  var cost = t.costInr!=null? '&#8377;'+t.costInr.toFixed(2) : null;
+  var eff = (t.energyKwh>0 && t.distanceM>0)? (t.distanceM/1000/t.energyKwh).toFixed(2) : null;
   var climb = (t.elevGainM>0 || t.elevLossM>0)?
     '\u2191'+Math.round(t.elevGainM)+'\u00b7\u2193'+Math.round(t.elevLossM)+' m' : null;
   return '<tr data-id="'+t.id+'"><td>'+fmtD(t.startedAt)+'</td><td>'+km(t.distanceM)+
@@ -233,12 +233,12 @@ tbody.innerHTML = TRIPS.map(function(t){
   var dots = pts.map(function(p){return '<circle cx="'+p[0]+'" cy="'+p[1]+'" r="2" fill="#3DE1FF"/>';}).join('');
   var labels = '';
   labels += '<text x="'+pad+'" y="'+(H-6)+'">'+fmtD(data[data.length-1].startedAt).slice(0,10)+'</text>';
-  labels += '<text x="'+(W-60)+'" y="14">max '+maxY.toFixed(1)+' kWh</text>';
+  labels += '<text x="'+(W-60)+'" y="14">max '+maxY.toFixed(2)+' kWh</text>';
   svg.innerHTML = '<polyline points="'+poly+'" fill="none" stroke="#3DE1FF" stroke-width="2" stroke-linejoin="round">'
     +'</polyline>'+dots+labels;
   var avgKwh = data.reduce(function(a,t){return a+pos(t);},0)/data.length;
-  note.textContent = data.length+' drives \u00b7 avg '+avgKwh.toFixed(1)+' kWh \u00b7 '
-    + (avgEff?(100/avgEff).toFixed(1)+' km/kWh':'')+' \u00b7 rate \u00a5'+HOME+' home / \u00a5'+EXT+' fast';
+  note.textContent = data.length+' drives \u00b7 avg '+avgKwh.toFixed(2)+' kWh \u00b7 '
+    + (avgEff?(100/avgEff).toFixed(2)+' km/kWh':'')+' \u00b7 rate \u00a5'+HOME+' home / \u00a5'+EXT+' fast';
 })();
 
 // Charging sessions, newest first; an open session is waiting for its closing frame.
@@ -250,15 +250,15 @@ tbody.innerHTML = TRIPS.map(function(t){
   EVENTS.forEach(function(e){
     if (e.kind===1){nFast++;kwhFast+=e.kwh;} else if (e.kind===0){nSlow++;kwhSlow+=e.kwh;}
   });
-  cv.textContent = nSlow+' slow ('+kwhSlow.toFixed(0)+' kWh)  '+nFast+' fast ('+kwhFast.toFixed(0)+' kWh)';
+  cv.textContent = nSlow+' slow ('+kwhSlow.toFixed(2)+' kWh)  '+nFast+' fast ('+kwhFast.toFixed(2)+' kWh)';
   var rows = EVENTS.slice().sort(function(a,b){return b.s-a.s;}).map(function(e){
     var badge = e.kind===1? '<span class="badge fast">FAST</span>'
       : e.kind===0? '<span class="badge slow">SLOW</span>'
       : '<span class="badge open">OPEN</span>';
     var dur = e.e? Math.round((e.e-e.s)/60000) : 0;
-    var cost = e.cost!=null? '&#8377;'+e.cost.toFixed(1) : '\u2014';
+    var cost = e.cost!=null? '&#8377;'+e.cost.toFixed(2) : '\u2014';
     return '<div class="chg"><div>'+badge+' '+fmtD(e.s)+
-      '<div class="meta">'+e.kwh.toFixed(1)+' kWh \u00b7 '+(e.peak? e.peak.toFixed(1):'\u2014')+' kW peak \u00b7 '+dur+' min</div></div>'+
+      '<div class="meta">'+e.kwh.toFixed(2)+' kWh \u00b7 '+(e.peak? e.peak.toFixed(1):'\u2014')+' kW peak \u00b7 '+dur+' min</div></div>'+
       '<div class="meta">'+cost+'</div></div>';
   }).join('');
   wrap.innerHTML = rows;
@@ -565,11 +565,11 @@ a{color:#3DE1FF}
   <p class="sub">Real numbers from everything this box has recorded. Sensor snapshot taken $poll &mdash; tap refresh on the car screen for a newer one.</p>
   <div class="kpis">
     <div><b>$socTxt%</b><span>Charge now</span></div>
-    <div><b>${nowKwh?.let { "%.1f".format(it) } ?: "\u2014"}</b><span>kWh on board</span></div>
+    <div><b>${nowKwh?.let { "%.2f".format(it) } ?: "\u2014"}</b><span>kWh on board</span></div>
     <div><b>${cityRange?.let { "%.0f".format(it) } ?: "\u2014"} km</b><span>City range</span></div>
     <div><b>${longRange?.let { "%.0f".format(it) } ?: "\u2014"} km</b><span>Outstation range</span></div>
-    <div><b>${cityKmPerKwh?.let { "%.1f".format(it) } ?: "\u2014"}</b><span>City km/kWh</span></div>
-    <div><b>${longKmPerKwh?.let { "%.1f".format(it) } ?: "\u2014"}</b><span>Trip km/kWh</span></div>
+    <div><b>${cityKmPerKwh?.let { "%.2f".format(it) } ?: "\u2014"}</b><span>City km/kWh</span></div>
+    <div><b>${longKmPerKwh?.let { "%.2f".format(it) } ?: "\u2014"}</b><span>Trip km/kWh</span></div>
   </div>
   <label for="km">How far are you going? (km)</label>
   <input id="km" type="number" min="1" max="600" value="80" inputmode="numeric">
@@ -604,9 +604,9 @@ function upd(){
   var cheap = shortfall*homeRate, pricey = shortfall*outRate;
   var cost = shortfall>0? (Math.min(cheap,pricey)) : 0;
   var who = shortfall>0? (cheap<=pricey? 'home (slow)':'fast charger') : '&mdash;';
-  var res = '<b>'+need.toFixed(1)+' kWh</b> to cover '+km+' km &mdash; you carry '+onBoard.toFixed(1)+' kWh, so range is '+can.toFixed(0)+' km.<br>';
+  var res = '<b>'+need.toFixed(2)+' kWh</b> to cover '+km+' km &mdash; you carry '+onBoard.toFixed(2)+' kWh, so range is '+can.toFixed(0)+' km.<br>';
   if (shortfall>0){
-    res += 'Needs '+shortfall.toFixed(1)+' kWh more, roughly <b>\u00a5'+cost.toFixed(0)+'</b> on a '+who+'.';
+    res += 'Needs '+shortfall.toFixed(2)+' kWh more, roughly <b>\u00a5'+cost.toFixed(2)+'</b> on a '+who+'.';
   } else {
     res += 'Fits on the current charge &mdash; no charging on the way.';
   }
@@ -616,5 +616,44 @@ document.getElementById('km').addEventListener('input', upd);
 document.getElementById('kind').addEventListener('change', upd);
 upd();
 </script>"""
+    }
+
+    /**
+     * The raw payloads the MG servers replied with, next to the decoded model built from them —
+     * so the decoder can be checked against exactly what the car sent, byte for byte.
+     */
+    fun framesPage(entries: List<RawFrames.Entry>): String {
+        val blocks = entries.joinToString("\n") { e ->
+            "<h3>" + esc(e.label) + "</h3>\n<pre>" + esc(e.content) + "</pre>"
+        }.ifEmpty {
+            "<p class=\"hint\">Nothing captured yet &mdash; the poller records every frame on its next run.</p>"
+        }
+        return """<!doctype html>
+<title>Odograph frames</title>
+<style>
+:root{color-scheme:dark}
+body{margin:0;background:#08090C;color:#EAEEF4;padding:44px 28px;
+ font:14px/1.6 ui-sans-serif,system-ui,sans-serif}
+.wrap{max-width:980px;margin:0 auto}
+h1{font-size:24px;margin:0 0 6px}
+p.sub{color:#8B96A5;margin:0 0 20px}
+.warn{border:1px solid rgba(255,90,120,.35);border-radius:4px;padding:12px 14px;
+ background:#0D1015;color:#FF7A8A;font-size:13px;margin-bottom:26px}
+h3{font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:#5C6877;
+ margin:22px 0 6px}
+pre{margin:0;padding:14px 16px;background:#0D1015;border:1px solid #1E2530;
+ border-radius:4px;overflow-x:auto;color:#9FE8B8;
+ font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;white-space:pre-wrap;
+ word-break:break-all}
+.hint{color:#8B96A5;font-size:12px;margin-top:14px}
+a{color:#3DE1FF}
+</style>
+<div class="wrap">
+  <h1>Raw MG frames</h1>
+  <p class="sub">Newest at the bottom. Each raw response sits above the model the decoder built from it.</p>
+  <div class="warn">Hex frames echo the account&rsquo;s session UID and token &mdash; treat this page as a password. Do not copy it anywhere public.</div>
+  $blocks
+  <p class="hint"><a href="/">Dashboard</a> &middot; <a href="/config">Setup</a></p>
+</div>"""
     }
 }
