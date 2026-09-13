@@ -9,7 +9,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
 
 @Database(
     entities = [TripEntity::class, PointEntity::class, PlaceEntity::class, BatteryEntity::class, ChargeEventEntity::class, DailyTelemetryEntity::class],
-    version = 5,
+    version = 6,
     exportSchema = true
 )
 abstract class OdographDb : RoomDatabase() {
@@ -96,6 +96,21 @@ abstract class OdographDb : RoomDatabase() {
             }
         }
 
+        /**
+         * Consistent fast-charge detection and driver-entered session costs: charge sessions now
+         * keep the power-reading evidence that decides fast vs slow, and whatever the driver
+         * entered to price the session (a tariff + GST or a total bill).
+         */
+        val MIGRATION_5_6 = object : Migration(5, 6) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE `charge_events` ADD COLUMN `samplesTotal` INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE `charge_events` ADD COLUMN `samplesAbove` INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE `charge_events` ADD COLUMN `enteredRateInr` REAL")
+                db.execSQL("ALTER TABLE `charge_events` ADD COLUMN `enteredBillInr` REAL")
+                db.execSQL("ALTER TABLE `charge_events` ADD COLUMN `gstRatePct` REAL")
+            }
+        }
+
         private const val NAME = "odograph.db"
 
         @Volatile
@@ -119,7 +134,7 @@ abstract class OdographDb : RoomDatabase() {
                 // The car cuts power without warning. Write-ahead logging means a torn write
                 // costs one in-flight row, never the database.
                 .setJournalMode(JournalMode.WRITE_AHEAD_LOGGING)
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
                 .build()
                 .also { instance = it }
         }

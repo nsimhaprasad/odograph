@@ -23,6 +23,7 @@ import `in`.odograph.tracker.data.PointEntity
 import `in`.odograph.tracker.diag.Diagnostics
 import `in`.odograph.tracker.geocode.PlaceNamer
 import `in`.odograph.tracker.server.DashboardServer
+import `in`.odograph.tracker.server.RawFrames
 import `in`.odograph.tracker.sync.Outbound
 import `in`.odograph.tracker.ui.theme.Settings
 import io.windsor.telematics.TelematicsClient
@@ -33,6 +34,7 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
 class TripRecorderService : Service() {
@@ -58,7 +60,21 @@ class TripRecorderService : Service() {
         /** Metres climbed this drive, deadbanded — the context battery consumption depends on. */
         val elevGainM: Double = 0.0,
         /** Metres descended this drive, never netted against the climb because descent regenerates. */
-        val elevLossM: Double = 0.0
+        val elevLossM: Double = 0.0,
+        /**
+         * A fast charge the driver should price, surfaced to the UI as a prompt. Set from the
+         * poller when a fast session opens (pre-price) or closes (correct with the real bill);
+         * the dialog that shows it clears it. A slow session never prompts — the home rate stands.
+         */
+        val pendingChargePrompt: ChargePrompt? = null
+    )
+
+    /** What the charger the driver just used expects to be paid. */
+    data class ChargePrompt(
+        val sessionId: Long,
+        val energyKwh: Double,
+        val isOpen: Boolean,
+        val currentCostInr: Double? = null
     )
 
     companion object {
@@ -102,6 +118,11 @@ class TripRecorderService : Service() {
         /** User-triggered freshness (e.g. tapping the battery tile). Honours the min-interval floor. */
         fun requestTelematicsRefresh() {
             telematicsRefresh.value = true
+        }
+
+        /** The dialog that shows a charge prompt clears it once handled. */
+        fun clearChargePrompt() {
+            _state.update { it.copy(pendingChargePrompt = null) }
         }
     }
 
@@ -217,7 +238,18 @@ class TripRecorderService : Service() {
 
             val want = Triple(phone, password, settings.telematicsVin)
             if (client == null || creds != want) {
-                val fresh = TelematicsClient.create(phone, password, settings.telematicsVin.takeIf { it.isNotBlank() })
+                val framesDir = RawFrames.directory(this)
+                val fresh = TelematicsClient.create(
+                    phone, password, settings.telematicsVin.takeIf { it.isNotBlank() },
+                    onRawResponse = { label, hex ->
+                        val kind = when (label) {
+                            "Status" -> "status.raw"
+                            "Charge status" -> "charge.raw"
+                            else -> label
+                        }
+                        RawFrames.record(framesDir, kind, hex)
+                    },
+                )
                 client = fresh
                 creds = want
                 runCatching { fresh.login() }
@@ -229,6 +261,9 @@ class TripRecorderService : Service() {
 
             runCatching {
                 val status = c.status(includeCharge = true)
+                val framesDir = RawFrames.directory(this)
+                RawFrames.record(framesDir, "status.decoded", status.toString())
+                status.charge?.let { RawFrames.record(framesDir, "charge.decoded", it.toString()) }
                 val ch = status.charge
                 val now = System.currentTimeMillis()
                 val powerKw = if (ch != null)
@@ -254,10 +289,40 @@ class TripRecorderService : Service() {
                 }
 
                 // Charging sessions survive the drives they happened under. Whatever this frame
-                // says, the ledger lands it in charge_events or closes the session it ends.
+                // says, the ledger lands it in charge_events or closes the session it ends, and
+                // fast sessions surface a prompt so the driver can price the kWh they actually
+                // paid for. A slow session never prompts — the home rate stands.
                 val capacity = settings.batteryCapacityKwh
-                ChargeLedger(dao, capacity, settings.homeRateInr, settings.outsideRateInr)
+                val change = ChargeLedger(dao, capacity, settings.homeRateInr, settings.outsideRateInr)
                     .observe(ch?.isCharging, ch?.soc, powerKw, now)
+                when (change) {
+                    is ChargeLedger.Change.Opened -> {
+                        val e = change.event
+                        val fastLooking = (e.peakPowerKw ?: 0.0) >= `in`.odograph.tracker.core.BatteryMath.FAST_CHARGE_KW
+                        if (fastLooking) {
+                            _state.update {
+                                if (it.pendingChargePrompt == null) {
+                                    it.copy(pendingChargePrompt = ChargePrompt(e.id, 0.0, isOpen = true))
+                                } else it
+                            }
+                        }
+                    }
+                    is ChargeLedger.Change.Closed -> {
+                        val e = change.event
+                        if (e.kind == `in`.odograph.tracker.core.BatteryMath.ChargeKind.FAST.ordinal) {
+                            _state.update {
+                                if (it.pendingChargePrompt == null) {
+                                    it.copy(
+                                        pendingChargePrompt = ChargePrompt(
+                                            e.id, e.energyKwh, isOpen = false, currentCostInr = e.costInr
+                                        )
+                                    )
+                                } else it
+                            }
+                        }
+                    }
+                    ChargeLedger.Change.None -> {}
+                }
 
                 // Coverage honesty: note that the poller ran at all, so the dashboard can show
                 // the days it did not.
@@ -270,6 +335,7 @@ class TripRecorderService : Service() {
                     if (tripId >= 0) {
                         val samples = dao.batteryRangeFor(tripId)
                         val energy = BatteryMath.consumedKwh(samples, capacity)
+                            ?.let { BatteryMath.round2(it) }
                         if (samples.isNotEmpty()) {
                             dao.setChargeSummary(tripId, samples.first().socPercent, soc, energy)
                         }

@@ -116,6 +116,16 @@ data class ChargeEventEntity(
     /** kW·h added this session, derived from the SOC swing so slept-though nights cost nothing fake. */
     val energyKwh: Double = 0.0,
     val peakPowerKw: Double? = null,
+    /** How many charging frames reported a power reading this session; the evidence for a kind. */
+    val samplesTotal: Int = 0,
+    /** How many of those readings sat at or above the fast threshold; the consistent majority. */
+    val samplesAbove: Int = 0,
+    /** Driver-entered fast-charger tariff, ₹/kW·h before GST. Null until they price the session. */
+    val enteredRateInr: Double? = null,
+    /** Driver-entered total bill in ₹, GST already included. Overrides the per-kWh tariff. */
+    val enteredBillInr: Double? = null,
+    /** GST percent applied on top of [enteredRateInr], frozen at entry time. */
+    val gstRatePct: Double? = null,
     /** Ordinal of BatteryMath.ChargeKind. Null while the session is still open. */
     val kind: Int? = null,
     /** Rupees for the session's energy, snapshot at close with the rates then configured. */

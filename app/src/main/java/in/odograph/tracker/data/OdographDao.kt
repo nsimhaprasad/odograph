@@ -81,12 +81,40 @@ interface OdographDao {
 
     @Query(
         "UPDATE charge_events SET endTime = :endTime, endSoc = :endSoc, " +
-            "energyKwh = :energyKwh, peakPowerKw = :peakPowerKw WHERE id = :id"
+            "energyKwh = :energyKwh, peakPowerKw = :peakPowerKw, " +
+            "samplesTotal = :samplesTotal, samplesAbove = :samplesAbove WHERE id = :id"
     )
-    fun advanceChargeEvent(id: Long, endTime: Long, endSoc: Double?, energyKwh: Double, peakPowerKw: Double?)
+    fun advanceChargeEvent(
+        id: Long, endTime: Long, endSoc: Double?, energyKwh: Double,
+        peakPowerKw: Double?, samplesTotal: Int, samplesAbove: Int
+    )
 
     @Query("UPDATE charge_events SET kind = :kind, costInr = :costInr WHERE id = :id")
     fun closeChargeEvent(id: Long, kind: Int, costInr: Double)
+
+    /**
+     * Records what the driver actually paid for a (closed) session — a tariff with GST added on
+     * top, or a total bill — and rewrites the session's price from it. Kind is left untouched:
+     * pricing a session never re-labels it.
+     */
+    @Query(
+        "UPDATE charge_events SET enteredRateInr = :enteredRateInr, enteredBillInr = :enteredBillInr, " +
+            "gstRatePct = :gstRatePct, costInr = :costInr WHERE id = :id"
+    )
+    fun setChargeCost(
+        id: Long, enteredRateInr: Double?, enteredBillInr: Double?,
+        gstRatePct: Double?, costInr: Double?
+    )
+
+    /** Marks a still-open session as driver-priced so its close applies the entered cost. */
+    @Query(
+        "UPDATE charge_events SET enteredRateInr = :enteredRateInr, enteredBillInr = :enteredBillInr, " +
+            "gstRatePct = :gstRatePct WHERE id = :id"
+    )
+    fun setChargeCostLedger(id: Long, enteredRateInr: Double?, enteredBillInr: Double?, gstRatePct: Double?)
+
+    @Query("SELECT * FROM charge_events WHERE id = :id")
+    fun chargeEvent(id: Long): ChargeEventEntity?
 
     /**
      * The most recent completed charge sessions that began before [ms] — the fills this drive

@@ -82,6 +82,11 @@ class Settings(ctx: Context) {
         get() = prefs.getFloat(KEY_OUTSIDE_RATE, 25.0f).toDouble()
         set(value) = prefs.edit().putFloat(KEY_OUTSIDE_RATE, value.toFloat().coerceIn(0f, 200f)).apply()
 
+    /** GST % added on top of a driver-entered fast-charge tariff. The negotiated Indian default. */
+    var gstRatePct: Double
+        get() = prefs.getFloat(KEY_GST_RATE, 18.0f).toDouble()
+        set(value) = prefs.edit().putFloat(KEY_GST_RATE, value.toFloat().coerceIn(0f, 100f)).apply()
+
     /** Kilometres per hour. Zero disables overspeed alerting entirely. */
     var speedLimitKmh: Int
         get() = prefs.getInt(KEY_LIMIT, 0)
@@ -122,6 +127,7 @@ class Settings(ctx: Context) {
         const val KEY_BATT_CAP = "battery_capacity_kwh"
         const val KEY_HOME_RATE = "home_rate_inr"
         const val KEY_OUTSIDE_RATE = "outside_rate_inr"
+        const val KEY_GST_RATE = "gst_rate_pct"
     }
 }
 

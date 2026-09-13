@@ -121,6 +121,38 @@ class MigrationTest {
         return h.writableDatabase
     }
 
+    private val v5ChargeEvents = """
+        CREATE TABLE IF NOT EXISTS `charge_events` (
+            `id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+            `startTime` INTEGER NOT NULL, `startSoc` REAL,
+            `endTime` INTEGER, `endSoc` REAL, `energyKwh` REAL NOT NULL,
+            `peakPowerKw` REAL, `kind` INTEGER, `costInr` REAL)
+    """.trimIndent()
+
+    /** The v5 shape: v4 plus the elevation columns 4->5 added. */
+    private fun openV5(): SupportSQLiteDatabase {
+        val ctx = ApplicationProvider.getApplicationContext<android.content.Context>()
+        ctx.deleteDatabase("migration-test.db")
+        val h = FrameworkSQLiteOpenHelperFactory().create(
+            SupportSQLiteOpenHelper.Configuration.builder(ctx)
+                .name("migration-test.db")
+                .callback(object : SupportSQLiteOpenHelper.Callback(5) {
+                    override fun onCreate(db: SupportSQLiteDatabase) {
+                        db.execSQL(
+                            v2Trips.replace("`energyKwh` REAL)", "`energyKwh` REAL, `costInr` REAL, `elevGainM` REAL NOT NULL DEFAULT 0, `elevLossM` REAL NOT NULL DEFAULT 0)")
+                        )
+                        db.execSQL(v5ChargeEvents)
+                        db.execSQL(v2Points)
+                        db.execSQL(v2Places)
+                    }
+                    override fun onUpgrade(db: SupportSQLiteDatabase, old: Int, new: Int) = Unit
+                })
+                .build()
+        )
+        helper = h
+        return h.writableDatabase
+    }
+
     @After
     fun tearDown() {
         helper?.close()
@@ -212,6 +244,37 @@ class MigrationTest {
         }
         // The new columns accept the values recovery writes.
         db.execSQL("UPDATE trips SET elevGainM = 214.0, elevLossM = 98.0 WHERE startedAt = 1000")
+    }
+
+    @Test
+    fun `migrating from v5 adds the charge evidence and driver-price columns`() {
+        val db = openV5()
+        db.execSQL(
+            """INSERT INTO charge_events (startTime, startSoc, endTime, endSoc, energyKwh, peakPowerKw, kind, costInr)
+               VALUES (1000, 30.0, 3600000, 60.0, 14.76, 7.4, 0, 118.08)"""
+        )
+
+        OdographDb.MIGRATION_5_6.migrate(db)
+
+        // Existing sessions survive with a honest no-evidence default; the counts accept updates.
+        db.query("SELECT energyKwh, samplesTotal, samplesAbove FROM charge_events").use { c ->
+            assertThat(c.moveToFirst()).isTrue()
+            assertThat(c.getDouble(0)).isEqualTo(14.76)
+            assertThat(c.getInt(1)).isEqualTo(0)
+            assertThat(c.getInt(2)).isEqualTo(0)
+        }
+        // The driver-price columns accept what the dialog writes.
+        db.execSQL(
+            "UPDATE charge_events SET samplesTotal = 42, samplesAbove = 40, " +
+                "enteredRateInr = 20.0, enteredBillInr = NULL, gstRatePct = 18.0 WHERE startTime = 1000"
+        )
+        db.query("SELECT samplesTotal, samplesAbove, enteredRateInr, gstRatePct FROM charge_events").use { c ->
+            assertThat(c.moveToFirst()).isTrue()
+            assertThat(c.getInt(0)).isEqualTo(42)
+            assertThat(c.getInt(1)).isEqualTo(40)
+            assertThat(c.getDouble(2)).isEqualTo(20.0)
+            assertThat(c.getDouble(3)).isEqualTo(18.0)
+        }
     }
 
     @Test

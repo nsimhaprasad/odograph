@@ -22,10 +22,13 @@ import `in`.odograph.tracker.data.OdographDao
  *    session too, with the closing frame's SOC so the final kW·h the box never saw is still
  *    booked.
  *
- * Closing classifies by the peak reported power (the charger's capability, immune to wrong
- * durations), with the session-average as a fallback, then prices it with whichever rate that
- * kind buys, snapshot at close so later rate changes never rewrite history. A session with no
- * energy costs zero, not nothing.
+ * Closing classifies by the consistent speed, not a lone spike: every power reading is tallied,
+ * and once enough readings exist the majority at or above the fast threshold decides. A single
+ * gration spike never makes a home charge a "fast charge", and a momentary dip never demotes a
+ * real fastcharger; only with too few readings to judge does the peak swing back in. The session
+ * is then priced with whichever rate that kind buys, unless the driver already entered a real
+ * price (a tariff with GST, or a total bill) into the still-open session — that wins, because
+ * what you actually paid beats any rate.
  *
  * The cost of the honesty: a session that slept across two genuinely separate charges is merged,
  * and its kWh attributed from the endpoint swing. The capture-coverage display shows those gaps,
@@ -42,8 +45,18 @@ class ChargeLedger(
     private val outsideRateInr: Double
 ) {
 
-    fun observe(charging: Boolean?, socPercent: Double?, powerKw: Double?, now: Long) {
+    /** What a batch of frames did to the ledger, so the caller can prompt the driver. */
+    sealed interface Change {
+        data object None : Change
+        /** A fresh session opened from this frame; the driver may pre-price a fast one. */
+        data class Opened(val event: ChargeEventEntity) : Change
+        /** A session closed and was priced; a fast one may be worth correcting with the real bill. */
+        data class Closed(val event: ChargeEventEntity) : Change
+    }
+
+    fun observe(charging: Boolean?, socPercent: Double?, powerKw: Double?, now: Long): Change {
         var open = dao.openChargeEvent()
+        val sampleAbove = powerKw != null && powerKw >= BatteryMath.FAST_CHARGE_KW
 
         // A stale row is only worth closing when the car is not (or no longer) charging: the box
         // died and woke to find the charge over. If the car still says it is charging, the gap is
@@ -54,40 +67,46 @@ class ChargeLedger(
         }
 
         if (charging == true) {
-            if (socPercent == null) {
-                // A charging frame without SOC is worthless as energy evidence; we keep the
-                // session alive but cannot extend the numbers fairly.
-                return
-            }
             if (open == null) {
-                dao.insertChargeEvent(
-                    ChargeEventEntity(
-                        startTime = now,
-                        startSoc = socPercent,
-                        endTime = now,
-                        endSoc = socPercent,
-                        energyKwh = 0.0,
-                        peakPowerKw = powerKw?.coerceAtLeast(0.0)
-                    )
+                val event = ChargeEventEntity(
+                    startTime = now,
+                    startSoc = socPercent,
+                    endTime = now,
+                    endSoc = socPercent,
+                    energyKwh = 0.0,
+                    peakPowerKw = powerKw?.coerceAtLeast(0.0),
+                    samplesTotal = if (powerKw != null) 1 else 0,
+                    samplesAbove = if (sampleAbove) 1 else 0
                 )
-            } else {
-                val energy = BatteryMath.rechargeEnergyKwh(open.startSoc, socPercent, capacityKwh)
-                val peak = maxOf(
-                    open.peakPowerKw ?: 0.0,
-                    powerKw?.coerceAtLeast(0.0) ?: 0.0
-                )
-                dao.advanceChargeEvent(
-                    open.id, endTime = now, endSoc = socPercent,
-                    energyKwh = energy, peakPowerKw = peak
-                )
+                val id = dao.insertChargeEvent(event)
+                return Change.Opened(event.copy(id = id))
             }
-            return
+            // The SOC may be missing (a frame without SOC is worthless as energy evidence) but the
+            // power reading is still evidence of the charger's speed, so it is tallied regardless.
+            val energy = if (socPercent == null) {
+                open.energyKwh
+            } else {
+                BatteryMath.round2(BatteryMath.rechargeEnergyKwh(open.startSoc, socPercent, capacityKwh))
+            }
+            val peak = maxOf(
+                open.peakPowerKw ?: 0.0,
+                powerKw?.coerceAtLeast(0.0) ?: 0.0
+            )
+            val samplesTotal = open.samplesTotal + if (powerKw != null) 1 else 0
+            val samplesAbove = open.samplesAbove + if (sampleAbove) 1 else 0
+            dao.advanceChargeEvent(
+                open.id, endTime = now, endSoc = socPercent,
+                energyKwh = energy, peakPowerKw = peak,
+                samplesTotal = samplesTotal, samplesAbove = samplesAbove
+            )
+            return Change.None
         }
 
         // The car now says it is not charging. That is the authoritative end of the session; a
         // brief AC pause reads as a split session, which is harmless (both splits are slow). If
         // there was no open session it is a nop.
-        if (open != null) close(open, now, socPercent)
+        if (open != null) return close(open, now, socPercent)
+        return Change.None
     }
 
     private fun isStale(open: ChargeEventEntity, now: Long): Boolean =
@@ -95,22 +114,40 @@ class ChargeLedger(
 
     /**
      * Closes an open session, taking the closing frame's SOC so a charge whose final frames were
-     * slept through still books its real energy. Classifies it and prices it, so the row becomes
-     * a billed fill that later drives can draw their rate from.
+     * slept through still books its real energy. Classifies it from the consistent power evidence
+     * and prices it, so the row becomes a billed fill that later drives can draw their rate from.
+     * A rate or bill the driver already entered into the open session wins over the default rate.
      */
-    private fun close(open: ChargeEventEntity, now: Long, closingSoc: Double?) {
+    private fun close(open: ChargeEventEntity, now: Long, closingSoc: Double?): Change.Closed {
         val endSoc = closingSoc ?: open.endSoc
         val energy = if (open.startSoc != null && endSoc != null) {
-            BatteryMath.rechargeEnergyKwh(open.startSoc, endSoc, capacityKwh)
+            BatteryMath.round2(BatteryMath.rechargeEnergyKwh(open.startSoc, endSoc, capacityKwh))
         } else {
             open.energyKwh
         }
         val peak = open.peakPowerKw ?: 0.0
-        dao.advanceChargeEvent(
-            open.id, endTime = now, endSoc = endSoc, energyKwh = energy, peakPowerKw = peak
+        val kind = BatteryMath.chargeKind(
+            peak, energy, open.startTime, now,
+            open.samplesTotal, open.samplesAbove
         )
-        val kind = BatteryMath.chargeKind(peak, energy, open.startTime, now)
-        val rate = if (kind == ChargeKind.FAST) outsideRateInr else homeRateInr
-        dao.closeChargeEvent(open.id, kind.ordinal, energy * rate)
+        val entered = BatteryMath.sessionCostInr(energy, open.enteredRateInr, open.enteredBillInr, open.gstRatePct)
+        val cost = BatteryMath.round2(
+            if (kind == ChargeKind.FAST) {
+                entered ?: energy * outsideRateInr
+            } else {
+                // A rate entered expecting a fast charge means nothing on a slow one; the grid rate
+                // the driver configured is the truth for home charging.
+                energy * homeRateInr
+            }
+        )
+        val closed = open.copy(
+            endTime = now, endSoc = endSoc, energyKwh = energy, kind = kind.ordinal, costInr = cost
+        )
+        dao.advanceChargeEvent(
+            open.id, endTime = now, endSoc = endSoc, energyKwh = energy, peakPowerKw = peak,
+            samplesTotal = open.samplesTotal, samplesAbove = open.samplesAbove
+        )
+        dao.closeChargeEvent(open.id, kind.ordinal, cost)
+        return Change.Closed(closed)
     }
 }
