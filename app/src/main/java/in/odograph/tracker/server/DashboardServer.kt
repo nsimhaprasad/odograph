@@ -5,11 +5,16 @@ import android.net.nsd.NsdManager
 import android.net.nsd.NsdServiceInfo
 import android.util.Log
 import io.ktor.http.ContentType
+import io.ktor.http.HttpStatusCode
 import io.ktor.server.application.call
 import io.ktor.server.cio.CIO
 import io.ktor.server.engine.ApplicationEngine
 import io.ktor.server.engine.embeddedServer
+import io.ktor.server.request.receiveChannel
 import io.ktor.server.request.receiveParameters
+import io.ktor.server.response.respond
+import io.ktor.server.response.respondBytes
+import io.ktor.server.response.respondFile
 import io.ktor.server.response.respondRedirect
 import io.ktor.server.response.respondText
 import io.ktor.server.routing.get
@@ -20,12 +25,14 @@ import `in`.odograph.tracker.data.OdographDao
 import `in`.odograph.tracker.data.OdographDb
 import `in`.odograph.tracker.data.TripEnergy
 import `in`.odograph.tracker.export.Exporters
+import `in`.odograph.tracker.record.TripRecorderService
 import `in`.odograph.tracker.sync.Outbound
 import `in`.odograph.tracker.sync.SheetsSync
 import `in`.odograph.tracker.ui.theme.Settings
 import io.windsor.telematics.TelematicsClient
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import java.io.File
 
 /**
  * Serves the analysis dashboard on the local network.
@@ -52,25 +59,13 @@ object DashboardServer {
             embeddedServer(CIO, port = PORT) {
                 routing {
                     get("/") {
-                        val dao = OdographDb.get(app).dao()
-                        val trips = dao.allTrips()
-                        val routes = trips.associate { it.id to dao.pointsFor(it.id) }
-                        val live = `in`.odograph.tracker.record.TripRecorderService.state.value
-                        call.respondText(
-                            DashboardHtml.render(
-                                trips, routes,
-                                webhookConfigured = settings.webhookUrl.isNotBlank(),
-                                months = dao.monthlyTotals(),
-                                chargeEvents = dao.allChargeEvents(),
-                                telemetryDays = dao.allTelemetryDays(),
-                                capacityKwh = settings.batteryCapacityKwh,
-                                homeRateInr = settings.homeRateInr,
-                                outsideRateInr = settings.outsideRateInr,
-                                socPercent = live.batterySocPercent,
-                                liveRangeKm = live.batteryRangeAtFullKm
-                            ),
-                            ContentType.Text.Html
-                        )
+                        respondWeb(call, app, "index.html", ContentType.Text.Html)
+                    }
+                    get("/app.js") {
+                        respondWeb(call, app, "app.js", ContentType.Application.JavaScript)
+                    }
+                    get("/style.css") {
+                        respondWeb(call, app, "style.css", ContentType.Text.CSS)
                     }
                     get("/archive.html") {
                         val dao = OdographDb.get(app).dao()
@@ -153,6 +148,50 @@ object DashboardServer {
                             ContentType.Text.Html
                         )
                     }
+                    get("/backup") {
+                        val dao = OdographDb.get(app).dao()
+                        if (settings.lanExportEnabled) {
+                            val tmp = File(app.cacheDir, "odograph-backup.db")
+                            OdographDb.snapshotTo(app, tmp)
+                            call.respondFile(tmp)
+                        } else {
+                            call.respondText(
+                                "LAN export is off.\nTurn it on under SETUP → LAN DATA.\n",
+                                ContentType.Text.Plain
+                            )
+                        }
+                    }
+                    post("/restore") {
+                        if (!settings.lanExportEnabled) {
+                            call.respondText("LAN export is off.", ContentType.Text.Plain)
+                        } else if (!`in`.odograph.tracker.record.TripRecorderService.pauseForRestore()) {
+                            call.respondText(
+                                "Restore refused — move the car away from the hotspot first.",
+                                ContentType.Text.Plain
+                            )
+                        } else {
+                            val body = run {
+                            val ch = call.receiveChannel()
+                            val out = java.io.ByteArrayOutputStream()
+                            val buf = ByteArray(8 * 1024)
+                            while (true) {
+                                val n = ch.readAvailable(buf, 0, buf.size)
+                                if (n == -1) break
+                                out.write(buf, 0, n)
+                            }
+                            out.toByteArray()
+                        }
+                            val tmp = File(app.cacheDir, "uploaded-backup.db")
+                            tmp.writeBytes(body)
+                            val result = runCatching { OdographDb.replaceWith(app, tmp) }
+                            `in`.odograph.tracker.record.TripRecorderService.resumeAfterRestore()
+                            call.respondText(
+                                if (result.isSuccess) "restored"
+                                else "restore failed: ${result.exceptionOrNull()?.message}",
+                                ContentType.Text.Plain
+                            )
+                        }
+                    }
                     post("/places") {
                         val params = call.receiveParameters()
                         val id = params["id"]?.toLongOrNull()
@@ -165,6 +204,74 @@ object DashboardServer {
                             ),
                             ContentType.Text.Html
                         )
+                    }
+                    get("/api/live") {
+                        api(call, settings) {
+                            ApiJson.live(TripRecorderService.state.value)
+                        }
+                    }
+                    get("/api/trips") {
+                        api(call, settings) {
+                            val dao = OdographDb.get(app).dao()
+                            ApiJson.trips(dao.allTrips())
+                        }
+                    }
+                    get("/api/charges") {
+                        api(call, settings) {
+                            ApiJson.charges(OdographDb.get(app).dao().allChargeEvents())
+                        }
+                    }
+                    get("/api/places") {
+                        api(call, settings) {
+                            ApiJson.places(OdographDb.get(app).dao().allPlaces())
+                        }
+                    }
+                    get("/api/routes") {
+                        api(call, settings) {
+                            val dao = OdographDb.get(app).dao()
+                            val places = dao.allPlaces().associateBy { it.id }
+                            ApiJson.routes(dao.routeTripsForEfficiency(), places)
+                        }
+                    }
+                    get("/api/cost") {
+                        api(call, settings) {
+                            val bucket = call.request.queryParameters["bucket"] ?: "30d"
+                            val now = System.currentTimeMillis()
+                            val dao = OdographDb.get(app).dao()
+                            val fromMs = when (bucket) {
+                                "today" -> {
+                                    val cal = java.util.Calendar.getInstance(settings.zone)
+                                    cal.set(java.util.Calendar.HOUR_OF_DAY, 0)
+                                    cal.set(java.util.Calendar.MINUTE, 0)
+                                    cal.set(java.util.Calendar.SECOND, 0)
+                                    cal.set(java.util.Calendar.MILLISECOND, 0)
+                                    cal.timeInMillis
+                                }
+                                "7d" -> now - 7 * 24 * 3_600_000L
+                                else -> now - 30 * 24 * 3_600_000L
+                            }
+                            ApiJson.cost(
+                                bucket,
+                                dao.periodCost(fromMs),
+                                dao.periodCharges(fromMs)
+                            )
+                        }
+                    }
+                    get("/api/range") {
+                        api(call, settings) {
+                            val from = System.currentTimeMillis() - 366 * 24 * 3_600_000L
+                            ApiJson.range(OdographDb.get(app).dao().dailyEfficiency(from))
+                        }
+                    }
+                    get("/api/drain") {
+                        api(call, settings) {
+                            ApiJson.drain(OdographDb.get(app).dao().parkedBatteryFrames())
+                        }
+                    }
+                    get("/api/telemetry") {
+                        api(call, settings) {
+                            ApiJson.telemetry(OdographDb.get(app).dao().allTelemetryDays())
+                        }
                     }
                     get("/config") {
                         call.respondText(
@@ -344,6 +451,40 @@ object DashboardServer {
         } else {
             call.respondText(
                 "LAN export is off.\nTurn it on under SETUP → LAN DATA on the device.\n",
+                ContentType.Text.Plain
+            )
+        }
+    }
+
+    /** Serves the SPA assets, which live in the APK's assets folder. */
+    private suspend fun respondWeb(
+        call: io.ktor.server.application.ApplicationCall,
+        ctx: Context,
+        asset: String,
+        contentType: ContentType
+    ) {
+        val bytes = runCatching { ctx.assets.open("web/$asset").use { it.readBytes() } }.getOrNull()
+        if (bytes != null) {
+            call.respondBytes(bytes, contentType)
+        } else {
+            call.respond(HttpStatusCode.NotFound, "not found")
+        }
+    }
+
+    /**
+     * Gated JSON for the REST API. Same LAN-only rule as [exportResponse]: the toggle is re-read
+     * per call, so enabling/disabling applies immediately.
+     */
+    private suspend fun api(
+        call: io.ktor.server.application.ApplicationCall,
+        settings: Settings,
+        block: suspend () -> String
+    ) {
+        if (settings.lanExportEnabled) {
+            call.respondText(block(), ContentType.Application.Json)
+        } else {
+            call.respondText(
+                "LAN export is off.\nTurn it on under SETUP → LAN DATA.\n",
                 ContentType.Text.Plain
             )
         }

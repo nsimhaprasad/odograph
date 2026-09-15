@@ -2,9 +2,11 @@ package `in`.odograph.tracker.geocode
 
 import android.util.Log
 import `in`.odograph.tracker.data.OdographDao
+import org.json.JSONArray
 import org.json.JSONObject
 import java.net.HttpURLConnection
 import java.net.URL
+import java.net.URLEncoder
 
 /**
  * Gives a place a human-readable default name.
@@ -20,6 +22,10 @@ object PlaceNamer {
 
     private const val TAG = "PlaceNamer"
     private const val ENDPOINT = "https://nominatim.openstreetmap.org/reverse"
+    private const val SEARCH_ENDPOINT = "https://nominatim.openstreetmap.org/search"
+
+    /** One pick from a [search] forward-geocode round-trip. */
+    data class GeocodedSuggestion(val name: String, val lat: Double, val lon: Double)
 
     /**
      * Picks the most locally-meaningful part of a Nominatim response.
@@ -61,6 +67,61 @@ object PlaceNamer {
         } finally {
             conn.disconnect()
         }
+    }
+
+    /**
+     * Forward-geocodes a free-text query (restaurant name, area, landmark) so the driver can pin
+     * a place without driving there. Same policy-clean agent and the same practical economy as
+     * reverse geocoding: a handful of searches, each answer remembered in the places table.
+     *
+     * Best-effort, never on the capture path. Returns nothing rather than throwing, so the UI
+     * can show "check the hotspot" instead of failing.
+     */
+    suspend fun search(query: String): List<GeocodedSuggestion> {
+        val term = query.trim()
+        if (term.isEmpty()) return emptyList()
+        return runCatching {
+            val url = URL(
+                "$SEARCH_ENDPOINT?format=jsonv2&limit=5&accept-language=en&q=" +
+                    URLEncoder.encode(term, "UTF-8")
+            )
+            val conn = (url.openConnection() as HttpURLConnection).apply {
+                requestMethod = "GET"
+                connectTimeout = 12_000
+                readTimeout = 15_000
+                // Nominatim's policy requires an identifying agent.
+                setRequestProperty("User-Agent", "Odograph/0.1 (personal drive tracker)")
+                setRequestProperty("Accept", "application/json")
+            }
+            try {
+                if (conn.responseCode !in 200..299) emptyList()
+                else parseSearchBody(conn.inputStream.bufferedReader().use { it.readText() })
+            } finally {
+                conn.disconnect()
+            }
+        }.getOrElse { e ->
+            Log.w(TAG, "forward geocode failed for '$term'", e)
+            emptyList()
+        }
+    }
+
+    /**
+     * Turns a Nominatim search response into suggestions. The leftover of the huge reverse-style
+     * display_name is kept short: those strings are postal addresses, too long for a pin picker.
+     */
+    fun parseSearchBody(body: String): List<GeocodedSuggestion> = runCatching {
+        val arr = JSONArray(body.trim().ifEmpty { "[]" })
+        (0 until arr.length()).mapNotNull { i ->
+            val o = arr.optJSONObject(i) ?: return@mapNotNull null
+            val lat = o.optDouble("lat", Double.NaN)
+            val lon = o.optDouble("lon", Double.NaN)
+            val name = o.optString("display_name", "")
+            if (lat.isNaN() || lon.isNaN() || name.isBlank()) null
+            else GeocodedSuggestion(name, lat, lon)
+        }
+    }.getOrElse { e ->
+        Log.w(TAG, "search response unreadable", e)
+        emptyList()
     }
 
     /**

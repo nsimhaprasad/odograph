@@ -22,6 +22,7 @@ import `in`.odograph.tracker.core.BatteryMath
 import `in`.odograph.tracker.data.OdographDb
 import `in`.odograph.tracker.data.BatteryEntity
 import `in`.odograph.tracker.data.PointEntity
+import `in`.odograph.tracker.data.PriceReminderEntity
 import `in`.odograph.tracker.diag.Diagnostics
 import `in`.odograph.tracker.geocode.PlaceNamer
 import `in`.odograph.tracker.server.DashboardServer
@@ -133,6 +134,13 @@ class TripRecorderService : Service() {
         /** How often the guard re-evaluates. A local tick, no network involved. */
         private const val TELEMATICS_WAKE_MS = 1_000L
 
+        /**
+         * Frames older than this since the box last saw the car move are "parked": the parker is
+         * still wearing the battery down overnight, so those frames meter the vampire drain a
+         * parked window is made of. Shorter than a traffic-light wait survives this test.
+         */
+        private const val PARKED_MOVE_GAP_MS = 10 * 60_000L
+
         private val _state = MutableStateFlow(LiveState())
         val state: StateFlow<LiveState> = _state
 
@@ -152,10 +160,75 @@ class TripRecorderService : Service() {
             telematicsRefresh.value = true
         }
 
+        @Volatile
+        private var restoring = false
+
+        fun isRestoring(): Boolean = restoring
+
+        /** Pauses capture so a restore can swap the database. Refuses if a moving trip is open. */
+        fun pauseForRestore(): Boolean {
+            val state = _state.value
+            if (state.tripId >= 0 && state.distanceM > 50.0) return false
+            restoring = true
+            return true
+        }
+
+        fun resumeAfterRestore() { restoring = false }
+
         /** The dialog that shows a charge prompt clears it once handled. */
         fun clearChargePrompt() {
             _state.update { it.copy(pendingChargePrompt = null) }
         }
+
+        /**
+         * Surfaces the newest unpriced fast charge, if the driver never priced or ignored it. The
+         * live prompt is transient — this re-arms it from the durable reminder row the poller
+         * left, so an ask dismissed at the car after a locked-door session comes back at the next
+         * drive start or app open instead of silently dying.
+         */
+        fun raisePendingPriceReminder(dao: `in`.odograph.tracker.data.OdographDao?) {
+            if (dao == null) return
+            val state = _state.value
+            if (state.pendingChargePrompt != null) return
+            runCatching {
+                val pending = dao.newestPendingReminder() ?: return
+                val event = dao.chargeEvent(pending.eventId) ?: return
+                _state.update {
+                    if (it.pendingChargePrompt == null) {
+                        it.copy(
+                            pendingChargePrompt = ChargePrompt(
+                                sessionId = event.id,
+                                energyKwh = event.energyKwh,
+                                isOpen = false,
+                                currentCostInr = event.costInr
+                            )
+                        )
+                    } else it
+                }
+            }
+        }
+
+        /** Accepted a persistent reminder: the session is priced, so the ask is answered. */
+        fun acceptChargePrompt(sessionId: Long, dao: `in`.odograph.tracker.data.OdographDao?) {
+            _state.update { it.copy(pendingChargePrompt = null) }
+            if (dao == null) return
+            io.launch {
+                runCatching {
+                    dao.deleteReminder(PriceReminderEntity(eventId = sessionId, raisedAt = 0L))
+                }
+            }
+        }
+
+        /** Declined a persistent reminder for now: it will not nag again. */
+        fun ignoreChargePrompt(sessionId: Long, dao: `in`.odograph.tracker.data.OdographDao?) {
+            _state.update { it.copy(pendingChargePrompt = null) }
+            if (dao == null) return
+            io.launch {
+                runCatching { dao.ignoreReminder(sessionId, System.currentTimeMillis()) }
+            }
+        }
+
+        private val io = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     }
 
     private lateinit var source: LocationSource
@@ -163,6 +236,8 @@ class TripRecorderService : Service() {
     private var tripId: Long = -1
     private var lastFix: Fix? = null
     private var startedAt: Long? = null
+    /** Wall-clock the car last moved over a fix. When stale, the car is parked and may be draining. */
+    private var lastMovedAt = Long.MIN_VALUE
     private var track = LiveTrack()
     private lateinit var settings: Settings
     private lateinit var alertSound: AlertSound
@@ -195,6 +270,8 @@ class TripRecorderService : Service() {
             )
             Diagnostics.crumb("recovery done trip=$tripId")
             _state.value = LiveState(tripId = tripId)
+            // A charge owed an answer is the first thing a boot should ask again.
+            raisePendingPriceReminder(dao)
             source.start { fix -> io.launch { record(fix) } }
 
             // Everything below is best-effort and entirely optional. The hotspot is usually up,
@@ -317,20 +394,29 @@ class TripRecorderService : Service() {
                 // A snapshot without a SOC reading is not charge data — it is noise that would
                 // make a battery-less trip look instrumented. The car can cut power any moment,
                 // so every frame that does carry a SOC is written to disk immediately and never
-                // held in memory: while a trip is open the row lands under it; while parked it
-                // carries trip -1, invisible to every trip-scoped query but never lost.
+                // held in memory. It also never lingers under the wrong owner: while the car is
+                // moving it lands under the open trip, and once it has been parked (unplugged,
+                // no motion for [PARKED_MOVE_GAP_MS]) it carries trip -1 instead — invisible to
+                // every trip-scoped query but never lost, and source of the overnight drain read.
                 if (ch != null && ch.soc != null) {
                     val t = lastFix?.t ?: now
+                    val parked = ch.isCharging == false &&
+                        (now - lastMovedAt) > PARKED_MOVE_GAP_MS
                     dao.insertBattery(
                         BatteryEntity(
-                            tripId = tripId,
+                            tripId = if (parked) -1 else tripId,
                             t = t,
                             socPercent = ch.soc,
                             charging = ch.isCharging,
                             rangeKm = ch.rangeKm,
                             chargingPowerKw = powerKw,
                             workingVoltage = ch.workingVoltage?.let { it * 0.25 },
-                            workingCurrent = ch.workingCurrent?.let { (it - 1000) * 0.05 }
+                            workingCurrent = ch.workingCurrent?.let { (it - 1000) * 0.05 },
+                            odometerKm = ch.odometerKm,
+                            batteryEnergyKwh = ch.batteryEnergyKwh,
+                            chargeTimeRemainingMin = ch.chargeTimeRemainingMin,
+                            distanceSinceLastChargeKm = ch.distanceSinceLastChargeKm,
+                            powerUsageSinceLastChargeKwh = ch.powerUsageSinceLastChargeKwh
                         )
                     )
                 }
@@ -357,6 +443,16 @@ class TripRecorderService : Service() {
                     is ChargeLedger.Change.Closed -> {
                         val e = change.event
                         if (e.kind == `in`.odograph.tracker.core.BatteryMath.ChargeKind.FAST.ordinal) {
+                            // Never silence the ask twice: a fast session that closes unpriced gets
+                            // a durable reminder row the moment it closes, so a charge made after
+                            // locking the car can surface at the next drive instead of vanishing.
+                            if (e.enteredRateInr == null && e.enteredBillInr == null) {
+                                dao.upsertReminder(
+                                    PriceReminderEntity(
+                                        eventId = e.id, raisedAt = System.currentTimeMillis()
+                                    )
+                                )
+                            }
                             _state.update {
                                 if (it.pendingChargePrompt == null) {
                                     it.copy(
@@ -500,9 +596,13 @@ class TripRecorderService : Service() {
         } else {
             dao.setTelemetryDayLast(day, now)
         }
+        // Parked frames are meter records, not history: anything past 60 days is unneeded for a
+        // drain read and would otherwise pile up forever under trip -1. Indexed, so this is cheap.
+        runCatching { dao.pruneParkedFrames(now - 60L * 24 * 3_600_000L) }
     }
 
     private fun record(fix: Fix) {
+        if (restoring) return
         val dao = OdographDb.get(this).dao()
         dao.appendPoint(
             PointEntity(
@@ -527,6 +627,7 @@ class TripRecorderService : Service() {
         val effectiveSpeedMps = track.speedMps
 
         val speedKmh = effectiveSpeedMps * 3.6f
+        if (effectiveSpeedMps > 0.5f) lastMovedAt = fix.t
         val limit = settings.speedLimitKmh
         if (limit != configuredLimit) {
             configuredLimit = limit

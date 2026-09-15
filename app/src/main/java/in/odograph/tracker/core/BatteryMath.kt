@@ -53,6 +53,18 @@ object BatteryMath {
     /** Consumptions this small are SOC-quantisation noise; quoting efficiency from them is nonsense. */
     const val MIN_EFFICIENCY_ENERGY_KWH = 0.5
 
+    /**
+     * A route needs this much total distance (metres — the spec name says KM, the value is 30 km)
+     * and this many drives before it can be ranked.
+     */
+    const val MIN_ROUTE_KM = 30_000.0
+
+    /** Drives this many times minimum before a route earns a spot on the best/worst board. */
+    const val MIN_ROUTE_DRIVES = 3
+
+    /** Parked windows shorter than this are a nap, not an overnight vampire-drain observation. */
+    const val MIN_DRAIN_WINDOW_MS = 12 * 3_600_000L
+
     /** Where the energy for a charge session came from, which picks which electricity rate applies. */
     enum class ChargeKind { SLOW, FAST }
 

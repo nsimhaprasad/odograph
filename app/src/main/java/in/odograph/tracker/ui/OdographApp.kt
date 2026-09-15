@@ -47,7 +47,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-private enum class Tab { DRIVE, TRIPS, ROUTES, CHARGE, SETUP }
+private enum class Tab { DRIVE, TRIPS, ROUTES, CHARGE, INSIGHTS, SETUP }
 
 @Composable
 fun OdographApp() {
@@ -116,6 +116,14 @@ fun OdographApp() {
         if (tab == Tab.DRIVE) TripRecorderService.requestTelematicsRefresh()
     }
 
+    // A charge the car locked and nobody priced comes back here, the moment the app is open
+    // again. The durable reminder row (raised on the fast session's unpriced close) surfaces
+    // as a prompt until the driver APPLYs or IGNOREs it — a dismissal at the car no longer
+    // erases the debt silently.
+    LaunchedEffect(Unit) {
+        TripRecorderService.raisePendingPriceReminder(OdographDb.get(ctx).dao())
+    }
+
     BoxWithConstraints(Modifier.fillMaxSize().background(palette.ground)) {
       val m = rememberMetrics(maxWidth, maxHeight)
       Box(Modifier.fillMaxSize()) {
@@ -135,6 +143,7 @@ fun OdographApp() {
                 Chip("TRIPS", tab == Tab.TRIPS, palette, m) { tab = Tab.TRIPS }
                 Chip("ROUTES", tab == Tab.ROUTES, palette, m) { tab = Tab.ROUTES }
                 Chip("CHARGE", tab == Tab.CHARGE, palette, m) { tab = Tab.CHARGE }
+                Chip("INSIGHTS", tab == Tab.INSIGHTS, palette, m) { tab = Tab.INSIGHTS }
                 Chip("SETUP", tab == Tab.SETUP, palette, m) { tab = Tab.SETUP }
                 if (tab == Tab.DRIVE) {
                     Chip(if (detailed) "DETAILED" else "DRIVER", true, palette, m) {
@@ -164,6 +173,7 @@ fun OdographApp() {
             Tab.TRIPS -> TripListScreen(showTiles, palette)
             Tab.ROUTES -> RoutesScreen(palette)
             Tab.CHARGE -> ChargingScreen(palette)
+            Tab.INSIGHTS -> InsightsScreen(palette)
             Tab.SETUP -> SetupScreen(
                 direction = direction,
                 themeMode = themeMode,
@@ -199,7 +209,6 @@ fun OdographApp() {
                     palette = palette,
                     m = m,
                     onSave = { rate, bill ->
-                        TripRecorderService.clearChargePrompt()
                         scope.launch {
                             withContext(Dispatchers.IO) {
                                 val dao = OdographDb.get(ctx).dao()
@@ -208,10 +217,23 @@ fun OdographApp() {
                                 } else {
                                     saveChargeCost(dao, prompt.sessionId, rate, bill, gstRatePct)
                                 }
+                                // Priced, so the durable ask is officially answered: delete the
+                                // reminder row and clear the prompt.
+                                TripRecorderService.acceptChargePrompt(prompt.sessionId, dao)
                             }
                         }
                     },
-                    onDismiss = { TripRecorderService.clearChargePrompt() }
+                    onDismiss = {
+                        scope.launch {
+                            withContext(Dispatchers.IO) {
+                                // Declined for now: the ask stops resurfacing, but the session's
+                                // default pricing is untouched.
+                                TripRecorderService.ignoreChargePrompt(
+                                    prompt.sessionId, OdographDb.get(ctx).dao()
+                                )
+                            }
+                        }
+                    }
                 )
             }
         }

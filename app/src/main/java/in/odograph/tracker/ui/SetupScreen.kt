@@ -28,14 +28,18 @@ import `in`.odograph.tracker.export.Exporters
 import `in`.odograph.tracker.export.shareFile
 import `in`.odograph.tracker.export.writeExport
 import `in`.odograph.tracker.probe.DeviceProbe
+import `in`.odograph.tracker.record.TripRecorderService
 import `in`.odograph.tracker.server.DashboardServer
 import `in`.odograph.tracker.server.LanInfo
 import `in`.odograph.tracker.ui.theme.Direction
 import `in`.odograph.tracker.ui.theme.Palette
 import `in`.odograph.tracker.ui.theme.Settings
 import `in`.odograph.tracker.ui.theme.ThemeMode
+import java.io.File
 import java.util.Locale
 import kotlinx.coroutines.delay
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -58,6 +62,32 @@ fun SetupScreen(
     var zoneId by remember { mutableStateOf(settings.timeZoneId) }
     var alertMode by remember { mutableStateOf(settings.alertMode) }
     var lanExport by remember { mutableStateOf(settings.lanExportEnabled) }
+
+    val restoreLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        uri ?: return@rememberLauncherForActivityResult
+        Thread {
+            runCatching {
+                val input = ctx.contentResolver.openInputStream(uri) ?: return@Thread
+                val tmp = File(ctx.cacheDir, "uploaded-backup.db")
+                tmp.outputStream().use { out -> input.copyTo(out) }
+                input.close()
+                if (!TripRecorderService.pauseForRestore()) {
+                    note = "Restore refused — a moving trip is open. Try again after parking."
+                    return@Thread
+                }
+                try {
+                    OdographDb.replaceWith(ctx, tmp)
+                    note = "Restored successfully."
+                } catch (e: Exception) {
+                    note = "Restore failed: ${e.message ?: e.javaClass.simpleName}"
+                } finally {
+                    TripRecorderService.resumeAfterRestore()
+                }
+            }.onFailure { note = "Restore failed: ${it.message}" }
+        }.start()
+    }
 
     LaunchedEffect(Unit) {
         probe = runCatching { DeviceProbe.collect(ctx).asText() }
@@ -277,6 +307,22 @@ fun SetupScreen(
                     }
                     Chip("SHARE PROBE", false, palette, m) {
                         shareFile(ctx, writeExport(ctx, "odograph-probe.txt", probe), "text/plain")
+                    }
+                }
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(m.gap / 2)) {
+                    Chip("BACKUP DB", false, palette, m) {
+                        Thread {
+                            runCatching {
+                                val dir = ctx.getExternalFilesDir(null) ?: return@Thread
+                                val dest = File(dir, "odograph-backup-${System.currentTimeMillis()}.db")
+                                OdographDb.snapshotTo(ctx, dest)
+                                shareFile(ctx, dest, "application/octet-stream")
+                            }
+                        }.start()
+                        note = "Backup saved — the share dialog is opening."
+                    }
+                    Chip("RESTORE DB", false, palette, m) {
+                        restoreLauncher.launch(arrayOf("application/octet-stream"))
                     }
                 }
                 Text(

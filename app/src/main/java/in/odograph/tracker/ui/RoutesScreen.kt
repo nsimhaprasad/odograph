@@ -72,6 +72,7 @@ fun RoutesScreen(palette: Palette) {
     var editingId by remember { mutableStateOf<Long?>(null) }
     var draft by remember { mutableStateOf("") }
     var reloadToken by remember { mutableStateOf(0) }
+    var showPlaces by remember { mutableStateOf(false) }
 
     LaunchedEffect(period, reloadToken) {
         val range = Periods.rangeFor(period, System.currentTimeMillis(), Settings(ctx).zone)
@@ -116,8 +117,17 @@ fun RoutesScreen(palette: Palette) {
 
             FlowRow(horizontalArrangement = Arrangement.spacedBy(m.gap / 2)) {
                 Period.entries.forEach { p ->
-                    Chip(p.label, p == period, palette, m) { period = p }
+                    Chip(p.label, p == period && !showPlaces, palette, m) {
+                        period = p
+                        showPlaces = false
+                    }
                 }
+                Chip("PLACES", showPlaces, palette, m) { showPlaces = true }
+            }
+
+            if (showPlaces) {
+                PlacesScreen(palette)
+                return@BoxWithConstraints
             }
 
             Row(

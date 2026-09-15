@@ -70,7 +70,17 @@ data class BatteryEntity(
     val rangeKm: Double? = null,
     val chargingPowerKw: Double? = null,
     val workingVoltage: Double? = null,
-    val workingCurrent: Double? = null
+    val workingCurrent: Double? = null,
+    /** Odometer the car quoted on this frame, km. The fill book's distance context. */
+    val odometerKm: Double? = null,
+    /** Energy stored in the traction battery per the car, kW·h — the charge-status cross-check. */
+    val batteryEnergyKwh: Double? = null,
+    /** Minutes until the car considers the session complete, when plug-in charging. */
+    val chargeTimeRemainingMin: Int? = null,
+    /** km driven since the last charge finished, per the car. Null while actually charging. */
+    val distanceSinceLastChargeKm: Double? = null,
+    /** kW·h used since the last charge, per the car. Null while actually charging. */
+    val powerUsageSinceLastChargeKwh: Double? = null
 )
 
 /**
@@ -144,4 +154,21 @@ data class DailyTelemetryEntity(
     @PrimaryKey val day: Int,
     val firstPollAt: Long,
     val lastPollAt: Long
+)
+
+/**
+ * A fast charge the driver never priced, carried until they APPLY (priced → the row is deleted)
+ * or IGNORE (ignoredAt is set).
+ *
+ * The live prompt only exists while the app is open; a charge the car locked and nobody priced
+ * would otherwise be lost forever the moment the prompt is dismissed. This row is the durable
+ * form of that ask: it resurfaces at the next drive start or app open, until one verdict is made.
+ */
+@Entity(tableName = "price_reminders")
+data class PriceReminderEntity(
+    /** The closed charge session this reminder asks the driver to price. */
+    @PrimaryKey val eventId: Long,
+    val raisedAt: Long,
+    /** Set when the driver declines (IGNORE); null means still owed an answer. */
+    val ignoredAt: Long? = null
 )

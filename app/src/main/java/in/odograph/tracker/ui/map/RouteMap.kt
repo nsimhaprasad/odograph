@@ -11,7 +11,6 @@ import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.viewinterop.AndroidView
 import `in`.odograph.tracker.ui.normaliseRoute
 import `in`.odograph.tracker.ui.theme.Palette
-import org.osmdroid.config.Configuration
 import org.osmdroid.tileprovider.tilesource.TileSourceFactory
 import org.osmdroid.util.BoundingBox
 import org.osmdroid.util.GeoPoint
@@ -37,21 +36,7 @@ fun RouteMap(
         // period chips, or anything else sharing the screen.
         modifier = modifier.clipToBounds(),
         factory = { ctx ->
-            Configuration.getInstance().apply {
-                // OSM's tile policy requires an identifying agent. Personal use, low volume.
-                userAgentValue = "Odograph/0.1 (personal drive tracker)"
-                osmdroidBasePath = ctx.getExternalFilesDir("osmdroid")
-                osmdroidTileCache = ctx.getExternalFilesDir("osmdroid/tiles")
-            }
-            MapView(ctx).apply {
-                setTileSource(TileSourceFactory.MAPNIK)
-                // The projection link returns single touches only, so pinch zoom is unusable.
-                setMultiTouchControls(false)
-                setUseDataConnection(true)
-                zoomController.setVisibility(
-                    org.osmdroid.views.CustomZoomButtonsController.Visibility.NEVER
-                )
-            }
+            configuredMap(ctx)
         },
         update = { map ->
             map.overlays.clear()
@@ -76,6 +61,58 @@ fun RouteMap(
             }
             map.invalidate()
         }
+    )
+}
+
+/**
+ * The pin the PLACES search drops on the tile map. A bare MapView with one marker, re-centreable
+ * every time the selection changes, so a driver only needs to recognise a location she typed.
+ */
+@Composable
+fun PlacePin(
+    pin: Pair<Double, Double>?,
+    palette: Palette,
+    modifier: Modifier = Modifier
+) {
+    AndroidView(
+        modifier = modifier.clipToBounds(),
+        factory = { ctx -> configuredMap(ctx) },
+        update = { map ->
+            map.overlays.clear()
+            map.setBackgroundColor(palette.ground.toArgb())
+            if (pin != null) {
+                val point = GeoPoint(pin.first, pin.second)
+                map.overlays.add(org.osmdroid.views.overlay.Marker(map).apply {
+                    position = point
+                    setAnchor(org.osmdroid.views.overlay.Marker.ANCHOR_CENTER,
+                        org.osmdroid.views.overlay.Marker.ANCHOR_CENTER)
+                    icon = map.context.getDrawable(android.R.drawable.ic_menu_mylocation)
+                })
+                map.post {
+                    map.controller.setZoom(17.0)
+                    map.controller.setCenter(point)
+                    map.invalidate()
+                }
+            }
+            map.invalidate()
+        }
+    )
+}
+
+/** One shared osmdroid pump, so every map surface behaves and is identified identically. */
+private fun configuredMap(ctx: android.content.Context) = org.osmdroid.views.MapView(ctx).apply {
+    org.osmdroid.config.Configuration.getInstance().apply {
+        // OSM's tile policy requires an identifying agent. Personal use, low volume.
+        userAgentValue = "Odograph/0.1 (personal drive tracker)"
+        osmdroidBasePath = ctx.getExternalFilesDir("osmdroid")
+        osmdroidTileCache = ctx.getExternalFilesDir("osmdroid/tiles")
+    }
+    setTileSource(TileSourceFactory.MAPNIK)
+    // The projection link returns single touches only, so pinch zoom is unusable.
+    setMultiTouchControls(false)
+    setUseDataConnection(true)
+    zoomController.setVisibility(
+        org.osmdroid.views.CustomZoomButtonsController.Visibility.NEVER
     )
 }
 

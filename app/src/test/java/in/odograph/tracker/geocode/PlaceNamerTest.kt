@@ -62,4 +62,33 @@ class PlaceNamerTest {
         assertThat(name).doesNotContain("560095")
         assertThat(name.length).isLessThan(40)
     }
+
+    @Test
+    fun `search extracts the result name and coordinates`() {
+        val s = PlaceNamer.parseSearchBody(
+            """[{"display_name":"Bengaluru, Karnataka, India","lat":"12.9716","lon":"77.5946"},
+                {"display_name":"Bengaluru Rural, Karnataka, India","lat":"13.1","lon":"77.6"}]"""
+        )
+        assertThat(s).hasSize(2)
+        assertThat(s[0].name).isEqualTo("Bengaluru, Karnataka, India")
+        assertThat(s[0].lat).isCloseTo(12.9716, within(1e-4))
+        assertThat(s[0].lon).isCloseTo(77.5946, within(1e-4))
+        assertThat(s[1].name).startsWith("Bengaluru Rural")
+    }
+
+    @Test
+    fun `search with nothing useful is empty rather than a panic`() {
+        assertThat(PlaceNamer.parseSearchBody("")).isEmpty()
+        assertThat(PlaceNamer.parseSearchBody("not json at all")).isEmpty()
+        assertThat(PlaceNamer.parseSearchBody("[]")).isEmpty()
+        assertThat(PlaceNamer.parseSearchBody("""[{"display_name":""}]""")).isEmpty()
+    }
+
+    @Test
+    fun `search rows without coordinates are skipped`() {
+        val s = PlaceNamer.parseSearchBody("""[{"display_name":"No lat here"}]""")
+        assertThat(s).isEmpty()
+    }
+
+    private fun within(tolerance: Double) = org.assertj.core.data.Offset.offset(tolerance)
 }

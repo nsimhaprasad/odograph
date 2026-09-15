@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Odograph</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<header>
+  <h1>Odograph</h1>
+  <div id="live" class="live">
+    <span class="stat" data-k="liveStatus">offline</span>
+    <span class="stat soc" data-k="soc"></span>
+    <span class="stat" data-k="range"></span>
+    <span class="stat charge" data-k="charge"></span>
+    <span class="stat" data-k="trip"></span>
+  </div>
+</header>
+
+<main>
+  <section id="cost">
+    <h2>Cost</h2>
+    <div class="cost-toolbar">
+      <button class="bucket on" data-bucket="today">Today</button>
+      <button class="bucket" data-bucket="7d">7 days</button>
+      <button class="bucket" data-bucket="30d">30 days</button>
+    </div>
+    <div class="cost-stats">
+      <span data-k="costTrip"></span>
+      <span data-k="costCharge"></span>
+      <span data-k="costKm"></span>
+    </div>
+    <canvas id="costChart" width="640" height="180"></canvas>
+  </section>
+
+  <section id="range">
+    <h2>Range at 100%</h2>
+    <canvas id="rangeChart" width="640" height="140"></canvas>
+    <p class="note" data-k="rangeNote"></p>
+  </section>
+
+  <section id="routes">
+    <h2>Route efficiency</h2>
+    <table>
+      <thead><tr><th>Route</th><th>Trips</th><th>km</th><th>kWh</th></tr></thead>
+      <tbody id="routeRows"></tbody>
+    </table>
+  </section>
+
+  <section id="drain">
+    <h2>Overnight drain</h2>
+    <p class="note" data-k="drainNote"></p>
+  </section>
+
+  <section id="places">
+    <h2>Places</h2>
+    <ul id="placeList"></ul>
+  </section>
+
+  <section id="telemetry">
+    <h2>Telemetry coverage</h2>
+    <div id="teleStrip" class="strip"></div>
+  </section>
+
+  <section id="backup">
+    <h2>Backup</h2>
+    <button id="backupBtn">Download backup</button>
+    <button id="restoreBtn">Restore backup</button>
+    <input id="restoreFile" type="file" accept=".db,.sqlite" hidden>
+    <p class="note" data-k="backupNote"></p>
+  </section>
+</main>
+
+<footer>Odograph · the box is the server · LAN only</footer>
+<script src="/app.js"></script>
+</body>
+</html>

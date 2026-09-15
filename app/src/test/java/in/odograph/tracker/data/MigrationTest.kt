@@ -153,6 +153,50 @@ class MigrationTest {
         return h.writableDatabase
     }
 
+    private val v6Battery = """
+        CREATE TABLE IF NOT EXISTS `battery` (
+            `id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+            `tripId` INTEGER NOT NULL, `t` INTEGER NOT NULL,
+            `socPercent` REAL, `charging` INTEGER, `rangeKm` REAL,
+            `chargingPowerKw` REAL, `workingVoltage` REAL, `workingCurrent` REAL)
+    """.trimIndent()
+
+    private val v6ChargeEvents = """
+        CREATE TABLE IF NOT EXISTS `charge_events` (
+            `id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+            `startTime` INTEGER NOT NULL, `startSoc` REAL,
+            `endTime` INTEGER, `endSoc` REAL, `energyKwh` REAL NOT NULL,
+            `peakPowerKw` REAL, `kind` INTEGER, `costInr` REAL,
+            `samplesTotal` INTEGER NOT NULL DEFAULT 0,
+            `samplesAbove` INTEGER NOT NULL DEFAULT 0,
+            `enteredRateInr` REAL, `enteredBillInr` REAL, `gstRatePct` REAL)
+    """.trimIndent()
+
+    /** The v6 shape: v5 plus the charge evidence 5->6 added, and the battery table from 2->3. */
+    private fun openV6(): SupportSQLiteDatabase {
+        val ctx = ApplicationProvider.getApplicationContext<android.content.Context>()
+        ctx.deleteDatabase("migration-test.db")
+        val h = FrameworkSQLiteOpenHelperFactory().create(
+            SupportSQLiteOpenHelper.Configuration.builder(ctx)
+                .name("migration-test.db")
+                .callback(object : SupportSQLiteOpenHelper.Callback(6) {
+                    override fun onCreate(db: SupportSQLiteDatabase) {
+                        db.execSQL(
+                            v2Trips.replace("`energyKwh` REAL)", "`energyKwh` REAL, `costInr` REAL, `elevGainM` REAL NOT NULL DEFAULT 0, `elevLossM` REAL NOT NULL DEFAULT 0)")
+                        )
+                        db.execSQL(v6ChargeEvents)
+                        db.execSQL(v6Battery)
+                        db.execSQL(v2Points)
+                        db.execSQL(v2Places)
+                    }
+                    override fun onUpgrade(db: SupportSQLiteDatabase, old: Int, new: Int) = Unit
+                })
+                .build()
+        )
+        helper = h
+        return h.writableDatabase
+    }
+
     @After
     fun tearDown() {
         helper?.close()
@@ -304,5 +348,45 @@ class MigrationTest {
             assertThat(c.getInt(2)).isEqualTo(1)
             assertThat(c.getDouble(3)).isEqualTo(210.0)
         }
+    }
+
+    @Test
+    fun `migrating from v6 adds the reminder table and the richer battery columns`() {
+        val db = openV6()
+        db.execSQL(
+            """INSERT INTO battery (tripId, t, socPercent, charging, rangeKm, workingVoltage, workingCurrent)
+               VALUES (1, 1500, 82.0, 1, 210, 178.5, 40)"""
+        )
+        db.execSQL(
+            """INSERT INTO charge_events (startTime, energyKwh, kind, costInr, samplesTotal, samplesAbove)
+               VALUES (1000, 14.76, 0, 118.08, 42, 40)"""
+        )
+
+        OdographDb.MIGRATION_6_7.migrate(db)
+
+        // The parked frame keeps its values, and the new MG charge fields accept what the poller
+        // writes: odometer, stored energy, minutes remaining, and the since-last-charge pair.
+        db.execSQL(
+            """INSERT INTO battery (tripId, t, socPercent, charging, rangeKm,
+                                    odometerKm, batteryEnergyKwh, chargeTimeRemainingMin,
+                                    distanceSinceLastChargeKm, powerUsageSinceLastChargeKwh)
+               VALUES (-1, 2000, 78.0, 0, 130, 31042.7, 38.5, NULL, 4.2, 1.7)"""
+        )
+        db.query("SELECT socPercent, odometerKm, powerUsageSinceLastChargeKwh FROM battery WHERE tripId = -1").use { c ->
+            assertThat(c.moveToFirst()).isTrue()
+            assertThat(c.getDouble(0)).isEqualTo(78.0)
+            assertThat(c.getDouble(1)).isEqualTo(31042.7)
+            assertThat(c.getDouble(2)).isEqualTo(1.7)
+        }
+        // The reminder table accepts the durable ask the poller writes on an unpriced fast close.
+        db.execSQL("INSERT INTO price_reminders (eventId, raisedAt) VALUES (1, 5000)")
+        db.query("SELECT eventId, raisedAt, ignoredAt FROM price_reminders").use { c ->
+            assertThat(c.moveToFirst()).isTrue()
+            assertThat(c.getLong(0)).isEqualTo(1L)
+            assertThat(c.getLong(1)).isEqualTo(5000L)
+            assertThat(c.isNull(2)).isTrue()
+        }
+        // The reminder row updates the way the dialog writes its decline.
+        db.execSQL("UPDATE price_reminders SET ignoredAt = 9000 WHERE eventId = 1")
     }
 }

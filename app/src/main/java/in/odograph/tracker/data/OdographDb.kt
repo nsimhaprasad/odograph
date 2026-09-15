@@ -6,10 +6,11 @@ import androidx.room.Room
 import androidx.room.RoomDatabase
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
+import java.io.File
 
 @Database(
-    entities = [TripEntity::class, PointEntity::class, PlaceEntity::class, BatteryEntity::class, ChargeEventEntity::class, DailyTelemetryEntity::class],
-    version = 6,
+    entities = [TripEntity::class, PointEntity::class, PlaceEntity::class, BatteryEntity::class, ChargeEventEntity::class, DailyTelemetryEntity::class, PriceReminderEntity::class],
+    version = 7,
     exportSchema = true
 )
 abstract class OdographDb : RoomDatabase() {
@@ -111,6 +112,27 @@ abstract class OdographDb : RoomDatabase() {
             }
         }
 
+        /**
+         * Persistent fast-charge price reminders and richer MG charge capture into battery rows.
+         * The reminder survives whatever the app did with its live prompt: it is the durable "you
+         * still owe this answer" record that surfaces at the next drive until APPLY or IGNORE.
+         */
+        val MIGRATION_6_7 = object : Migration(6, 7) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """CREATE TABLE IF NOT EXISTS `price_reminders` (
+                        `eventId` INTEGER NOT NULL PRIMARY KEY,
+                        `raisedAt` INTEGER NOT NULL,
+                        `ignoredAt` INTEGER)"""
+                )
+                db.execSQL("ALTER TABLE `battery` ADD COLUMN `odometerKm` REAL")
+                db.execSQL("ALTER TABLE `battery` ADD COLUMN `batteryEnergyKwh` REAL")
+                db.execSQL("ALTER TABLE `battery` ADD COLUMN `chargeTimeRemainingMin` INTEGER")
+                db.execSQL("ALTER TABLE `battery` ADD COLUMN `distanceSinceLastChargeKm` REAL")
+                db.execSQL("ALTER TABLE `battery` ADD COLUMN `powerUsageSinceLastChargeKwh` REAL")
+            }
+        }
+
         private const val NAME = "odograph.db"
 
         @Volatile
@@ -134,9 +156,46 @@ abstract class OdographDb : RoomDatabase() {
                 // The car cuts power without warning. Write-ahead logging means a torn write
                 // costs one in-flight row, never the database.
                 .setJournalMode(JournalMode.WRITE_AHEAD_LOGGING)
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7)
                 .build()
                 .also { instance = it }
+        }
+
+        /**
+         * WAL-checkpointed copy of the live database. Call on IO; do not use while the service
+         * writes. TRUNCATE folds the WAL into the main file so the copy is a single .db.
+         */
+        fun snapshotTo(ctx: Context, target: File) {
+            val db = get(ctx).openHelper.writableDatabase
+            db.query("PRAGMA wal_checkpoint(TRUNCATE)").close()
+            val src = ctx.getDatabasePath(NAME)
+            src.copyTo(target, overwrite = true)
+        }
+
+        /**
+         * Swaps the live database for a backup file. The original is kept as .prev for debugging.
+         * Must be called while [in.odograph.tracker.record.TripRecorderService] is paused.
+         * The swap is validated by reopening the database, so a corrupt upload fails here rather
+         * than poisoning the next read.
+         */
+        fun replaceWith(ctx: Context, backup: File) {
+            val bytes = backup.readBytes()
+            require(bytes.size >= 16) { "not a SQLite database: ${backup.name}" }
+            require(String(bytes, 0, 15, Charsets.US_ASCII) == "SQLite format 3") {
+                "not a SQLite database: ${backup.name}"
+            }
+            val dbFile = ctx.getDatabasePath(NAME)
+            val prev = File(dbFile.parentFile, NAME + ".prev")
+            synchronized(this) {
+                instance?.close()
+                instance = null
+                if (dbFile.exists()) dbFile.copyTo(prev, overwrite = true)
+                backup.copyTo(dbFile, overwrite = true)
+                File(dbFile.parentFile, NAME + "-wal").delete()
+                File(dbFile.parentFile, NAME + "-shm").delete()
+                val opened = get(ctx)
+                opened
+            }
         }
     }
 }

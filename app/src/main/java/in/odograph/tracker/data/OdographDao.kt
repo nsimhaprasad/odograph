@@ -1,7 +1,9 @@
 package `in`.odograph.tracker.data
 
 import androidx.room.Dao
+import androidx.room.Delete
 import androidx.room.Insert
+import androidx.room.OnConflictStrategy
 import androidx.room.Query
 
 @Dao
@@ -69,6 +71,36 @@ interface OdographDao {
 
     @Query("DELETE FROM battery WHERE tripId = :id")
     fun deleteBatteryFor(id: Long)
+
+    // ---- parked battery frames (the drain window's source) ----
+
+    /**
+     * SOC snapshots taken while no trip was open, so a drive never owns them. These are what a
+     * parked-night vampire-drain reading is computed from; charging frames are excluded upstream.
+     */
+    @Query("SELECT t, socPercent FROM battery WHERE tripId = -1 ORDER BY t ASC")
+    fun parkedBatteryFrames(): List<ParkedBatteryRow>
+
+    /** The -1 parked frames are meter records, not history: rows older than this are unneeded. */
+    @Query("DELETE FROM battery WHERE tripId = -1 AND t < :olderThanMs")
+    fun pruneParkedFrames(olderThanMs: Long)
+
+    // ---- price reminders ----
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    fun upsertReminder(reminder: PriceReminderEntity)
+
+    /** The newest fast charge still owed an answer, oldest ask down to the newest one. */
+    @Query("SELECT * FROM price_reminders WHERE ignoredAt IS NULL ORDER BY raisedAt DESC LIMIT 1")
+    fun newestPendingReminder(): PriceReminderEntity?
+
+    /** Marks the driver's decline; the reminder stops resurfacing. */
+    @Query("UPDATE price_reminders SET ignoredAt = :at WHERE eventId = :eventId AND ignoredAt IS NULL")
+    fun ignoreReminder(eventId: Long, at: Long)
+
+    /** The driver priced it: the ask is answered, so the durable row goes away. */
+    @Delete
+    fun deleteReminder(reminder: PriceReminderEntity)
 
     // ---- charge sessions ----
 
@@ -278,6 +310,59 @@ interface OdographDao {
            ORDER BY month DESC"""
     )
     fun monthlyTotals(): List<MonthTotal>
+
+    // ---- cost buckets ----
+
+    /** Drive side of a cost bucket: distance, energy, paid money and drive count since [fromMs]. */
+    @Query(
+        """SELECT COUNT(*) AS drives,
+                  COALESCE(SUM(distanceM), 0) AS distanceM,
+                  COALESCE(SUM(energyKwh), 0) AS energyKwh,
+                  COALESCE(SUM(costInr), 0) AS costInr
+           FROM trips
+           WHERE endedAt IS NOT NULL AND startedAt >= :fromMs"""
+    )
+    fun periodCost(fromMs: Long): PeriodCost
+
+    /** Recharge side of a cost bucket: sessions, energy and paid money since [fromMs]. */
+    @Query(
+        """SELECT COUNT(*) AS sessions,
+                  COALESCE(SUM(energyKwh), 0) AS energyKwh,
+                  COALESCE(SUM(costInr), 0) AS costInr
+           FROM charge_events
+           WHERE kind IS NOT NULL AND startTime >= :fromMs"""
+    )
+    fun periodCharges(fromMs: Long): PeriodCharges
+
+    // ---- range@100 ----
+
+    /** Per calendar day: distance and energy for closed, instrumented drives. RANGE@100 source. */
+    @Query(
+        """SELECT CAST(strftime('%Y%m%d', startedAt / 1000, 'unixepoch', 'localtime') AS INTEGER) AS day,
+                  COUNT(*) AS drives,
+                  COALESCE(SUM(distanceM), 0) AS distanceM,
+                  COALESCE(SUM(energyKwh), 0) AS energyKwh
+           FROM trips
+           WHERE endedAt IS NOT NULL AND energyKwh IS NOT NULL AND startedAt >= :fromMs
+           GROUP BY day
+           ORDER BY day ASC"""
+    )
+    fun dailyEfficiency(fromMs: Long): List<DailyEffRow>
+
+    // ---- route efficiency ----
+
+    /**
+     * Every placed, energy-instrumented closed drive, newest first. The BEST/WORST ROUTES table
+     * is computed from these in Analytics, where the per-trip quality bars live next to the math.
+     */
+    @Query(
+        """SELECT startPlaceId AS startId, endPlaceId AS endId, distanceM, energyKwh
+           FROM trips
+           WHERE endedAt IS NOT NULL AND startPlaceId IS NOT NULL AND endPlaceId IS NOT NULL
+             AND energyKwh IS NOT NULL
+           ORDER BY startedAt DESC"""
+    )
+    fun routeTripsForEfficiency(): List<RouteTripEff>
 }
 
 data class RouteSummary(
@@ -309,4 +394,41 @@ data class MonthTotal(
     val drives: Int,
     val distanceM: Double,
     val durationS: Long
+)
+
+/** A parked (no open drive) battery frame, source of the overnight vampire-drain window. */
+data class ParkedBatteryRow(
+    val t: Long,
+    val socPercent: Double?
+)
+
+/** Drive totals for a cost bucket. */
+data class PeriodCost(
+    val drives: Int,
+    val distanceM: Double,
+    val energyKwh: Double,
+    val costInr: Double
+)
+
+/** Recharge totals for a cost bucket. */
+data class PeriodCharges(
+    val sessions: Int,
+    val energyKwh: Double,
+    val costInr: Double
+)
+
+/** One calendar day's closeable drive totals, feeding the RANGE@100 regression of efficiency. */
+data class DailyEffRow(
+    val day: Int,
+    val drives: Int,
+    val distanceM: Double,
+    val energyKwh: Double
+)
+
+/** One closeable, placed drive with the raw ingredients of route efficiency. */
+data class RouteTripEff(
+    val startId: Long,
+    val endId: Long,
+    val distanceM: Double,
+    val energyKwh: Double
 )
