@@ -187,15 +187,32 @@ fun SetupScreen(
                     Chip("OFF", !lanExport, palette, m) { lanExport = false; settings.lanExportEnabled = false }
                 }
                 val ip = remember { LanInfo.lanIpv4() }
+                val base = ip?.let { "http://$it:${DashboardServer.PORT}" }
+                    ?: "http://<this device>:${DashboardServer.PORT}"
+                Text(
+                    "LAN address — open this from your laptop on the same Wi-Fi:",
+                    color = palette.dim, fontSize = m.body,
+                    modifier = Modifier.padding(top = m.gap / 2)
+                )
+                Text(
+                    base,
+                    fontFamily = FontFamily.Monospace,
+                    color = palette.accent, fontSize = m.body,
+                    modifier = Modifier.padding(top = m.gap / 4)
+                )
+                Text(
+                    "Stats & CSVs: $base/export",
+                    fontFamily = FontFamily.Monospace,
+                    color = palette.dim, fontSize = m.body,
+                    modifier = Modifier.padding(top = m.gap / 4)
+                )
                 Text(
                     if (lanExport) {
-                        val base = ip?.let { "http://$it:${DashboardServer.PORT}" }
-                            ?: "http://<this device>:${DashboardServer.PORT}"
-                        "Every drive, point, charge and coverage row is published at $base/export " +
-                            "— open it from your Mac on the same network, or pull the CSVs with curl."
+                        "Every drive, point, charge and coverage row is published at that /export " +
+                            "page — open it from your Mac, or pull the CSVs with curl."
                     } else {
-                        "Off. Nothing machine-readable is served; the dashboard HTML stays up for " +
-                            "the touchscreen."
+                        "The /export stats endpoint is OFF, so only the dashboard homepage is " +
+                            "served. Turn ON above to publish machine-readable data."
                     },
                     color = palette.dim, fontSize = m.body,
                     modifier = Modifier.padding(top = m.gap / 2)

@@ -175,7 +175,7 @@ object DashboardServer {
                     post("/config") {
                         val params = call.receiveParameters()
                         params["webhook"]?.let { settings.webhookUrl = it }
-                        params["twice"]?.let { settings.docsSyncTwiceDaily = it == "2x" }
+                        params["hours"]?.toIntOrNull()?.let { settings.docsSyncHours = it }
                         params["device"]?.let { if (it.isNotBlank()) settings.deviceId = it }
                         params["capacity"]?.toDoubleOrNull()?.let { settings.batteryCapacityKwh = it }
                         params["home_rate"]?.toDoubleOrNull()?.let { settings.homeRateInr = it }
@@ -323,7 +323,7 @@ object DashboardServer {
             batteryCapacityKwh = "%.2f".format(settings.batteryCapacityKwh),
             homeRateInr = "%.2f".format(settings.homeRateInr),
             outsideRateInr = "%.2f".format(settings.outsideRateInr),
-            syncTwiceDaily = settings.docsSyncTwiceDaily,
+            docsSyncHours = settings.docsSyncHours,
             lastDocsSyncAt = settings.lastDocsSyncAt
         )
 

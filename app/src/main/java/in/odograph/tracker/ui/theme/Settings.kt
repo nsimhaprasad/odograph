@@ -42,10 +42,10 @@ class Settings(ctx: Context) {
         get() = prefs.getString(KEY_WEBHOOK, "").orEmpty().ifBlank { DEFAULT_DOCS_URL }
         set(value) = prefs.edit().putString(KEY_WEBHOOK, value.trim()).apply()
 
-    /** Whether the daily whole-dataset export runs once or twice a day. */
-    var docsSyncTwiceDaily: Boolean
-        get() = prefs.getBoolean(KEY_DOCS_TWICE, true)
-        set(value) = prefs.edit().putBoolean(KEY_DOCS_TWICE, value).apply()
+    /** How often the whole-dataset export to the docs link runs, in hours (1, 12 or 24). */
+    var docsSyncHours: Int
+        get() = prefs.getInt(KEY_DOCS_HOURS, 1).coerceIn(1, 24)
+        set(value) = prefs.edit().putInt(KEY_DOCS_HOURS, value.coerceIn(1, 24)).apply()
 
     /** When the last whole-dataset export to the docs link succeeded, so restarts don't spam. */
     var lastDocsSyncAt: Long
@@ -146,7 +146,7 @@ class Settings(ctx: Context) {
         const val KEY_DIRECTION = "direction"
         const val KEY_THEME = "theme_mode"
         const val KEY_WEBHOOK = "webhook_url"
-        const val KEY_DOCS_TWICE = "docs_sync_twice_daily"
+        const val KEY_DOCS_HOURS = "docs_sync_hours"
         const val KEY_DOCS_LAST = "docs_last_sync_at"
         const val KEY_DEVICE = "device_id"
         const val KEY_TL_PHONE = "tl_phone"

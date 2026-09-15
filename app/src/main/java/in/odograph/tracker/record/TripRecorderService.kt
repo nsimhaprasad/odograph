@@ -461,7 +461,8 @@ class TripRecorderService : Service() {
     }
 
     /**
-     * Scheduled whole-dataset export to the Google Docs link, once or twice a day.
+     * Scheduled whole-dataset export to the Google Docs link, on a selectable hourly cadence
+     * (default: every hour).
      *
      * Unlike the old per-drive pending sync this replaces the whole sheet from the complete local
      * state, so the workbook can never drift from the box. A run is due when none has succeeded
@@ -473,11 +474,7 @@ class TripRecorderService : Service() {
         while (true) {
             delay(2 * 60_000L)
             val s = Settings(this)
-            val periodMs = if (s.docsSyncTwiceDaily) {
-                12 * 3_600_000L
-            } else {
-                24 * 3_600_000L
-            }
+            val periodMs = s.docsSyncHours * 3_600_000L
             if (s.webhookUrl.isBlank()) continue
             if (System.currentTimeMillis() - s.lastDocsSyncAt < periodMs) continue
             val r = SheetsSync.exportAll(this, s.webhookUrl, s.deviceId)

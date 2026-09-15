@@ -432,18 +432,21 @@ a{color:#3DE1FF}
         batteryCapacityKwh: String = "49.2",
         homeRateInr: String = "8.0",
         outsideRateInr: String = "25.0",
-        syncTwiceDaily: Boolean = false,
+        docsSyncHours: Int = 1,
         lastDocsSyncAt: Long = 0
     ): String {
         val messageHtml = message?.let {
             "<div class=\"msg" + (if (error) " err" else "") + "\">" + esc(it) + "</div>"
         } ?: ""
-        val cadenceHtml = listOf("1x" to "Once a day", "2x" to "Twice a day").joinToString("") {
-            (value, label) ->
-            val checked = if ((value == "2x") == syncTwiceDaily) " checked" else ""
+        val cadenceHtml = listOf(
+            1 to "Every hour",
+            12 to "Every 12 hours",
+            24 to "Once a day"
+        ).joinToString("") { (value, label) ->
+            val checked = if (value == docsSyncHours) " checked" else ""
             """<label style="display:inline-flex;gap:7px;align-items:center;margin:0 18px 0 0;
             font-size:12px;letter-spacing:.04em;text-transform:none">
-            <input type="radio" name="twice" value="$value"$checked>$label</label>"""
+            <input type="radio" name="hours" value="$value"$checked>$label</label>"""
         }
         val lastSync = if (lastDocsSyncAt > 0) {
             SimpleDateFormat("d MMM, HH:mm", Locale.US).format(Date(lastDocsSyncAt))
@@ -492,7 +495,8 @@ a{color:#3DE1FF}
     <div style="margin-top:18px">
       $cadenceHtml
     </div>
-    <div class="hint">Export cadence for the whole-dataset sync. Last export: $lastSync.
+    <div class="hint">How often the box re-exports its whole dataset to the sheet (default: every
+      hour). Last export: $lastSync.
       <a href="/sync">Export now</a> &middot; <a href="/import">Import now</a>.</div>
     <label for="d" style="margin-top:26px">Device name</label>
     <input id="d" name="device" value="${deviceId.replace("\"", "&quot;")}">
