@@ -1,7 +1,5 @@
 package `in`.odograph.tracker.sync
 
-import android.content.Context
-import `in`.odograph.tracker.data.OdographDb
 import java.io.OutputStreamWriter
 import java.net.HttpURLConnection
 import java.net.URL
@@ -9,11 +7,11 @@ import java.net.URL
 /**
  * Optional off-device delivery.
  *
- * The whole feature is inert until a webhook URL is configured, and every failure is swallowed:
+ * The whole feature is inert until a docs URL is configured, and every failure is swallowed:
  * recording must work identically with the hotspot off, in a tunnel, or with the endpoint
  * deleted. Nothing here is ever called from the capture path.
  *
- * The URL is a capability token — typically a Google Apps Script web app that appends to a
+ * The URL is a capability token — typically a Google Apps Script web app that rewrites a
  * spreadsheet the owner controls. Holding a URL rather than a credential means the device stores
  * nothing that grants access to an account, and revoking is a single click.
  */
@@ -21,25 +19,35 @@ object Outbound {
 
     data class Result(val attempted: Int, val delivered: Int, val error: String? = null)
 
-    fun syncPending(ctx: Context, url: String, deviceId: String, limit: Int = 200): Result {
-        if (url.isBlank()) return Result(0, 0, "no webhook configured")
+    /** Shared HTTP POST for every sync path. */
+    fun postJson(url: String, body: String): Int = post(url, body)
 
-        val dao = OdographDb.get(ctx).dao()
-        val pending = dao.unsyncedTrips().take(limit)
-        if (pending.isEmpty()) return Result(0, 0)
-
-        return runCatching {
-            val body = """{"trips":${TripJson.encodeBatch(pending, deviceId)}}"""
-            val code = post(url, body)
-            if (code in 200..299) {
-                val now = System.currentTimeMillis()
-                pending.forEach { dao.markSynced(it.id, now) }
-                Result(pending.size, pending.size)
-            } else {
-                Result(pending.size, 0, "endpoint returned HTTP $code")
+    /** Reads a body over HTTP GET, used by the docs link import. Throws on transport failure. */
+    fun getBody(url: String): String {
+        val conn = (URL(url).openConnection() as HttpURLConnection).apply {
+            requestMethod = "GET"
+            connectTimeout = 15_000
+            readTimeout = 20_000
+            instanceFollowRedirects = true
+            setRequestProperty("User-Agent", "Odograph/0.1")
+        }
+        return try {
+            if (conn.responseCode !in 200..299) {
+                throw IllegalStateException("endpoint returned HTTP ${conn.responseCode}")
             }
-        }.getOrElse { Result(pending.size, 0, it.message ?: it::class.java.simpleName) }
+            conn.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
+        } finally {
+            conn.disconnect()
+        }
     }
+
+    /** A shareable spreadsheet link, not a script endpoint. It cannot receive POSTs. */
+    fun isSpreadsheetLink(url: String): Boolean =
+        url.contains("docs.google.com") && url.contains("/spreadsheets/")
+
+    /** The spreadsheet id out of a docs link, for the config hint. Null for non-sheet URLs. */
+    fun docsSheetId(url: String): String? =
+        Regex("""spreadsheets/d/([A-Za-z0-9_-]+)""").find(url)?.groupValues?.get(1)
 
     private fun post(url: String, body: String): Int {
         val conn = (URL(url).openConnection() as HttpURLConnection).apply {

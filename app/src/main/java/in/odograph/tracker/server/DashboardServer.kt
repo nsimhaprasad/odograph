@@ -21,6 +21,7 @@ import `in`.odograph.tracker.data.OdographDb
 import `in`.odograph.tracker.data.TripEnergy
 import `in`.odograph.tracker.export.Exporters
 import `in`.odograph.tracker.sync.Outbound
+import `in`.odograph.tracker.sync.SheetsSync
 import `in`.odograph.tracker.ui.theme.Settings
 import io.windsor.telematics.TelematicsClient
 import kotlinx.coroutines.Dispatchers
@@ -167,19 +168,14 @@ object DashboardServer {
                     }
                     get("/config") {
                         call.respondText(
-                            DashboardHtml.configPage(
-                                settings.webhookUrl, settings.deviceId,
-                                settings.telematicsPhone, settings.telematicsPassword, settings.telematicsVin,
-                                batteryCapacityKwh = "%.2f".format(settings.batteryCapacityKwh),
-                                homeRateInr = "%.2f".format(settings.homeRateInr),
-                                outsideRateInr = "%.2f".format(settings.outsideRateInr)
-                            ),
+                            configPageView(settings),
                             ContentType.Text.Html
                         )
                     }
                     post("/config") {
                         val params = call.receiveParameters()
                         params["webhook"]?.let { settings.webhookUrl = it }
+                        params["twice"]?.let { settings.docsSyncTwiceDaily = it == "2x" }
                         params["device"]?.let { if (it.isNotBlank()) settings.deviceId = it }
                         params["capacity"]?.toDoubleOrNull()?.let { settings.batteryCapacityKwh = it }
                         params["home_rate"]?.toDoubleOrNull()?.let { settings.homeRateInr = it }
@@ -213,7 +209,14 @@ object DashboardServer {
                             if (phone.isNotEmpty()) settings.telematicsPhone = phone
                             if (password.isNotEmpty()) settings.telematicsPassword = password
                             if (vin.isNotEmpty()) settings.telematicsVin = vin
-                            message = "Saved." to false
+                            val sheetId = Outbound.docsSheetId(settings.webhookUrl)
+                            message = if (sheetId != null) {
+                                "Saved. This is a spreadsheet link ($sheetId) — it imports, but cannot " +
+                                    "receive exports until the bundled Apps Script is deployed (Extensions → Apps " +
+                                    "Script, paste tools/odograph_sheets_apps_script.js, Deploy → Web app)." to false
+                            } else {
+                                "Saved." to false
+                            }
                         }
                         call.respondText(
                             configPageView(
@@ -223,16 +226,16 @@ object DashboardServer {
                         )
                     }
                     get("/sync") {
-                        val r = Outbound.syncPending(app, settings.webhookUrl, settings.deviceId)
+                        val r = SheetsSync.exportAll(app, settings.webhookUrl, settings.deviceId)
                         val msg = when {
-                            r.error != null -> "Sync failed: ${r.error}"
-                            r.attempted == 0 -> "Nothing to send."
-                            else -> "Delivered ${r.delivered} of ${r.attempted} drives."
+                            r.error != null -> "Export failed: ${r.error}"
+                            else -> "Exported ${r.delivered} of ${r.attempted} rows to the docs workbook."
                         }
-                        call.respondText(
-                            configPageView(settings, msg),
-                            ContentType.Text.Html
-                        )
+                        call.respondText(configPageView(settings, msg), ContentType.Text.Html)
+                    }
+                    get("/import") {
+                        val (msg, error) = SheetsSync.importControl(settings, settings.webhookUrl)
+                        call.respondText(configPageView(settings, msg, error), ContentType.Text.Html)
                     }
                     get("/planner") {
                         val dao = OdographDb.get(app).dao()
@@ -319,7 +322,9 @@ object DashboardServer {
             message, error,
             batteryCapacityKwh = "%.2f".format(settings.batteryCapacityKwh),
             homeRateInr = "%.2f".format(settings.homeRateInr),
-            outsideRateInr = "%.2f".format(settings.outsideRateInr)
+            outsideRateInr = "%.2f".format(settings.outsideRateInr),
+            syncTwiceDaily = settings.docsSyncTwiceDaily,
+            lastDocsSyncAt = settings.lastDocsSyncAt
         )
 
     /**

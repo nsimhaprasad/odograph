@@ -8,6 +8,9 @@ import `in`.odograph.tracker.data.PlaceEntity
 import `in`.odograph.tracker.data.PointEntity
 import `in`.odograph.tracker.data.RouteSummary
 import `in`.odograph.tracker.data.TripEntity
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 object DashboardHtml {
 
@@ -428,11 +431,25 @@ a{color:#3DE1FF}
         error: Boolean = false,
         batteryCapacityKwh: String = "49.2",
         homeRateInr: String = "8.0",
-        outsideRateInr: String = "25.0"
+        outsideRateInr: String = "25.0",
+        syncTwiceDaily: Boolean = false,
+        lastDocsSyncAt: Long = 0
     ): String {
         val messageHtml = message?.let {
             "<div class=\"msg" + (if (error) " err" else "") + "\">" + esc(it) + "</div>"
         } ?: ""
+        val cadenceHtml = listOf("1x" to "Once a day", "2x" to "Twice a day").joinToString("") {
+            (value, label) ->
+            val checked = if ((value == "2x") == syncTwiceDaily) " checked" else ""
+            """<label style="display:inline-flex;gap:7px;align-items:center;margin:0 18px 0 0;
+            font-size:12px;letter-spacing:.04em;text-transform:none">
+            <input type="radio" name="twice" value="$value"$checked>$label</label>"""
+        }
+        val lastSync = if (lastDocsSyncAt > 0) {
+            SimpleDateFormat("d MMM, HH:mm", Locale.US).format(Date(lastDocsSyncAt))
+        } else {
+            "never yet"
+        }
         return """<!doctype html>
 <title>Odograph Setup</title>
 <style>
@@ -464,11 +481,20 @@ a{color:#3DE1FF}
   <p class="sub">Paste from your Mac. Typing a secret URL on a car touchscreen is miserable, so this form exists instead.</p>
   $messageHtml
   <form method="post" action="/config">
-    <label for="u">Webhook URL &mdash; optional</label>
+    <label for="u">Google Docs link &mdash; the Odograph workbook</label>
     <input id="u" name="webhook" value="${webhookUrl.replace("\"", "&quot;")}"
            placeholder="https://script.google.com/macros/s/..../exec">
-    <div class="hint">A Google Apps Script web app URL. Leave blank to keep everything on the device &mdash; nothing here is required for recording.</div>
-    <label for="d">Device name</label>
+    <div class="hint">This box exports its entire dataset here, once or twice a day, and imports
+      control values back. Paste either the spreadsheet link or its deployed Apps Script
+      <code>/exec</code> URL. The sheet link is read-only until you deploy the bundled script
+      (in the repo: <code>tools/odograph_sheets_apps_script.js</code>) &mdash; open the sheet,
+      Extensions &rarr; Apps Script, paste it, Deploy &rarr; Web app &rarr; Anyone.</div>
+    <div style="margin-top:18px">
+      $cadenceHtml
+    </div>
+    <div class="hint">Export cadence for the whole-dataset sync. Last export: $lastSync.
+      <a href="/sync">Export now</a> &middot; <a href="/import">Import now</a>.</div>
+    <label for="d" style="margin-top:26px">Device name</label>
     <input id="d" name="device" value="${deviceId.replace("\"", "&quot;")}">
     <label for="t">iSMART phone number &mdash; optional</label>
     <input id="t" name="tl_phone" value="${telematicsPhone.replace("\"", "&quot;")}" placeholder="10-digit mobile on the iSmart account">
@@ -496,7 +522,8 @@ a{color:#3DE1FF}
   </p>
   <p class="hint" style="margin-top:30px">
     <a href="/">Dashboard</a> &middot; <a href="/places">Places &amp; routes</a> &middot; <a href="/archive.html">Offline archive</a>
-    &middot; <a href="/planner">Trip planner</a> &middot; <a href="/trips.csv">trips.csv</a> &middot; <a href="/sync">Sync now</a>
+    &middot; <a href="/planner">Trip planner</a> &middot; <a href="/trips.csv">trips.csv</a>
+    &middot; <a href="/sync">Export now</a> &middot; <a href="/import">Import now</a>
   </p>
 </div>"""
     }

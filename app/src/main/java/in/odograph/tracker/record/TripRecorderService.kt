@@ -27,6 +27,7 @@ import `in`.odograph.tracker.geocode.PlaceNamer
 import `in`.odograph.tracker.server.DashboardServer
 import `in`.odograph.tracker.server.RawFrames
 import `in`.odograph.tracker.sync.Outbound
+import `in`.odograph.tracker.sync.SheetsSync
 import `in`.odograph.tracker.ui.theme.Settings
 import io.windsor.telematics.TelematicsClient
 import kotlinx.coroutines.CoroutineScope
@@ -208,14 +209,9 @@ class TripRecorderService : Service() {
             runCatching { PlaceNamer.nameMissing(dao) }
                 .onFailure { Diagnostics.crumb("place naming failed: $it") }
 
-            runCatching {
-                val settings = Settings(this@TripRecorderService)
-                if (settings.webhookUrl.isNotBlank()) {
-                    Outbound.syncPending(
-                        this@TripRecorderService, settings.webhookUrl, settings.deviceId
-                    )
-                }
-            }
+            // Whole-dataset export to the Google Docs link, on its own clock so it can never
+            // hold up telematics or recording.
+            io.launch { sheetsSyncLoop() }
 
             telematicsLoop()
         }
@@ -461,6 +457,34 @@ class TripRecorderService : Service() {
                 runCatching { c.login() }
             }
             lastCallElapsed = SystemClock.elapsedRealtime()
+        }
+    }
+
+    /**
+     * Scheduled whole-dataset export to the Google Docs link, once or twice a day.
+     *
+     * Unlike the old per-drive pending sync this replaces the whole sheet from the complete local
+     * state, so the workbook can never drift from the box. A run is due when none has succeeded
+     * for the configured period; a failed run (no network, script not deployed yet) simply retries
+     * on the next loop rather than ever exporting partially. Runs immediately after service start
+     * when one is overdue.
+     */
+    private suspend fun sheetsSyncLoop() {
+        while (true) {
+            delay(2 * 60_000L)
+            val s = Settings(this)
+            val periodMs = if (s.docsSyncTwiceDaily) {
+                12 * 3_600_000L
+            } else {
+                24 * 3_600_000L
+            }
+            if (s.webhookUrl.isBlank()) continue
+            if (System.currentTimeMillis() - s.lastDocsSyncAt < periodMs) continue
+            val r = SheetsSync.exportAll(this, s.webhookUrl, s.deviceId)
+            Diagnostics.crumb(
+                "docs export: " + (r.error ?: "${r.delivered}/${r.attempted} rows")
+            )
+            if (r.error == null) s.lastDocsSyncAt = System.currentTimeMillis()
         }
     }
 

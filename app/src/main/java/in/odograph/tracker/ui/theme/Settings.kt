@@ -26,13 +26,31 @@ class Settings(ctx: Context) {
         set(value) = prefs.edit().putString(KEY_THEME, value.name).apply()
 
     /**
-     * A capability token, not a credential. Typically a Google Apps Script web app URL that
-     * appends to a spreadsheet the owner controls; revoking it is one click and it grants
-     * nothing else. Blank means off-device delivery is entirely disabled.
+     * The Google Docs link the whole-dataset daily export lands in, and the source the import
+     * reads back from.
+     *
+     * Two forms are accepted:
+     *  - a spreadsheet link (docs.google.com/spreadsheets/d/<id>) — the shareable one below, so
+     *    a fresh box is already aimed at the right file;
+     *  - the /exec URL of the bundled Apps Script deployed on that sheet, which is what actually
+     *    receives exports and serves imports. A spreadsheet link alone cannot receive posts (that
+     *    would need OAuth), so the config page explains the one-time deploy.
+     *
+     * Blank resets to [DEFAULT_DOCS_URL].
      */
     var webhookUrl: String
-        get() = prefs.getString(KEY_WEBHOOK, "").orEmpty()
+        get() = prefs.getString(KEY_WEBHOOK, "").orEmpty().ifBlank { DEFAULT_DOCS_URL }
         set(value) = prefs.edit().putString(KEY_WEBHOOK, value.trim()).apply()
+
+    /** Whether the daily whole-dataset export runs once or twice a day. */
+    var docsSyncTwiceDaily: Boolean
+        get() = prefs.getBoolean(KEY_DOCS_TWICE, true)
+        set(value) = prefs.edit().putBoolean(KEY_DOCS_TWICE, value).apply()
+
+    /** When the last whole-dataset export to the docs link succeeded, so restarts don't spam. */
+    var lastDocsSyncAt: Long
+        get() = prefs.getLong(KEY_DOCS_LAST, 0L)
+        set(value) = prefs.edit().putLong(KEY_DOCS_LAST, value).apply()
 
     var deviceId: String
         get() = prefs.getString(KEY_DEVICE, "").orEmpty().ifBlank { "windsor" }
@@ -128,6 +146,8 @@ class Settings(ctx: Context) {
         const val KEY_DIRECTION = "direction"
         const val KEY_THEME = "theme_mode"
         const val KEY_WEBHOOK = "webhook_url"
+        const val KEY_DOCS_TWICE = "docs_sync_twice_daily"
+        const val KEY_DOCS_LAST = "docs_last_sync_at"
         const val KEY_DEVICE = "device_id"
         const val KEY_TL_PHONE = "tl_phone"
         const val KEY_TL_PASSWORD = "tl_password"
@@ -138,6 +158,10 @@ class Settings(ctx: Context) {
         const val KEY_OUTSIDE_RATE = "outside_rate_inr"
         const val KEY_GST_RATE = "gst_rate_pct"
         const val KEY_LAN_EXPORT = "lan_export_enabled"
+
+        /** The Odograph analytics workbook the drive box pushes to. */
+        const val DEFAULT_DOCS_URL =
+            "https://docs.google.com/spreadsheets/d/1N-R5vy5lMhHZ3kyAPJMt3OwbFAj010IYc1vLOJ6YhxE/edit?usp=sharing"
     }
 }
 
