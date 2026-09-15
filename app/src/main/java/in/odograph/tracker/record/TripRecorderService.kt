@@ -63,6 +63,13 @@ class TripRecorderService : Service() {
         val batteryRangeAtFullKm: Double? = null,
         /** Lifetime energy the car has consumed over instrumented drives, kW·h. */
         val batteryTotalKwh: Double = 0.0,
+        /** Energy this drive has consumed so far, kW·h. Null until a usable SOC swing is known. */
+        val tripEnergyKwh: Double? = null,
+        /**
+         * What this drive's energy costs, billed the same way the closing trip will be: the
+         * blended rate of the fills that began before it. Null when nothing has priced it yet.
+         */
+        val tripCostInr: Double? = null,
         /** Metres climbed this drive, deadbanded — the context battery consumption depends on. */
         val elevGainM: Double = 0.0,
         /** Metres descended this drive, never netted against the climb because descent regenerates. */
@@ -353,24 +360,42 @@ class TripRecorderService : Service() {
                         val kmPerKwh = BatteryMath.kmPerKwh(energy, state.distanceM)
                         val effs = dao.tripEnergies()
                             .mapNotNull { BatteryMath.kwhPer100Km(it.energyKwh, it.distanceM) }
-                        val rolling = BatteryMath.rollingKwhPer100Km(effs)
+                        // Feed this drive's live efficiency into the rolling window too, so RANGE@100
+                        // and MILEAGE move on every poll instead of freezing until more trips close,
+                        // and a long single drive keeps correcting the estimate on the drive screen.
+                        val liveEff = kmPerKwh?.let { 100.0 / it }
+                        val rollingEffs = if (liveEff != null) listOf(liveEff) + effs else effs
+                        val rolling = BatteryMath.rollingKwhPer100Km(rollingEffs)
                         val rangeAtFull = if (
-                            effs.size >= BatteryMath.MIN_TRIPS_FOR_REAL_ESTIMATE &&
+                            rollingEffs.size >= BatteryMath.MIN_TRIPS_FOR_REAL_ESTIMATE &&
                             rolling != null
                         ) {
                             BatteryMath.rangeAtFullKwh(capacity, rolling)
                         } else {
                             ch.rangeKm?.let { r -> if (soc > 0) r / soc * 100.0 else null }
                         }
+                        // "The total for this ride" is billed exactly like the closing trip will be —
+                        // the same blended fill rate, so what the screen quotes is what shows up next
+                        // week in the archive. No fills yet, no price yet — the honest unknown.
+                        val tripCost = TripRecovery.driveCost(
+                            dao, energy, dao.tripById(tripId)?.startedAt ?: 0L
+                        )
                         _state.value = state.copy(
                             batterySocPercent = soc,
                             batteryCharging = ch.isCharging,
                             batteryMileageKmPerKwh = kmPerKwh,
                             batteryRangeAtFullKm = rangeAtFull,
-                            batteryTotalKwh = dao.totalEnergyKwh()
+                            batteryTotalKwh = dao.totalEnergyKwh(),
+                            tripEnergyKwh = energy,
+                            tripCostInr = tripCost
                         )
                     } else {
-                        _state.value = _state.value.copy(batterySocPercent = soc, batteryCharging = ch.isCharging)
+                        _state.value = _state.value.copy(
+                            batterySocPercent = soc,
+                            batteryCharging = ch.isCharging,
+                            tripEnergyKwh = null,
+                            tripCostInr = null
+                        )
                     }
                 } else {
                     _state.value = _state.value.copy(batterySocPercent = null, batteryCharging = null)

@@ -1,18 +1,32 @@
 package `in`.odograph.tracker.ui
 
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.TextUnit
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import `in`.odograph.tracker.record.TripRecorderService
 import `in`.odograph.tracker.ui.gauge.Gauge
 import `in`.odograph.tracker.ui.theme.Direction
@@ -91,10 +105,8 @@ private fun TallLayout(
                 SmallStat("${live.speedLimitKmh}", "LIMIT", palette, m)
             }
             live.batterySocPercent?.let {
-                SmallStat(
-                    "${it.roundToInt()}",
-                    if (live.batteryCharging == true) "CHARGING" else "BATTERY",
-                    palette, m,
+                BatteryMeter(
+                    it, live.batteryCharging, palette, m,
                     onClick = { TripRecorderService.requestTelematicsRefresh() }
                 )
             }
@@ -103,11 +115,17 @@ private fun TallLayout(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceEvenly
         ) {
-            live.batteryMileageKmPerKwh?.let {
-                SmallStat("%.2f km/kWh".format(it), "MILEAGE", palette, m)
+            live.tripEnergyKwh?.let {
+                SmallStat("%.2f kWh".format(it), "THIS RIDE", palette, m)
+            }
+            live.tripCostInr?.let {
+                SmallStat("₹%.2f".format(it), "THIS RIDE", palette, m)
             }
             live.batteryRangeAtFullKm?.let {
                 SmallStat("%.0f km".format(it), "RANGE@100", palette, m)
+            }
+            live.batteryMileageKmPerKwh?.let {
+                SmallStat("%.2f km/kWh".format(it), "MILEAGE", palette, m)
             }
             SmallStat("%.2f kWh".format(live.batteryTotalKwh), "LIFETIME", palette, m)
             if (live.elevGainM > 0 || live.elevLossM > 0) {
@@ -142,13 +160,10 @@ private fun WideLayout(
         Stat(formatHhMm(live.movingS), "H:MM   MOVING", palette, m, size = m.stat,
             modifier = Modifier.weight(1f))
         live.batterySocPercent?.let {
-            Stat(
-                "${it.roundToInt()}",
-                if (live.batteryCharging == true) "SOC   CHARGING" else "SOC   BATTERY",
-                palette, m, size = m.stat,
-                modifier = Modifier
-                    .weight(1f)
-                    .clickable { TripRecorderService.requestTelematicsRefresh() }
+            BatteryMeter(
+                it, live.batteryCharging, palette, m,
+                modifier = Modifier.weight(1f),
+                onClick = { TripRecorderService.requestTelematicsRefresh() }
             )
         }
         live.batteryRangeAtFullKm?.let {
@@ -159,7 +174,15 @@ private fun WideLayout(
             Stat("%.1f".format(it), "KM/KWH", palette, m, size = m.stat,
                 modifier = Modifier.weight(1f))
         }
-        Stat("%.1f".format(live.batteryTotalKwh), "KWH  LIFETIME", palette, m, size = m.stat,
+        live.tripEnergyKwh?.let {
+            Stat("%.1f".format(it), "KWH   THIS RIDE", palette, m, size = m.stat,
+                modifier = Modifier.weight(1f))
+        }
+        live.tripCostInr?.let {
+            Stat("₹%.1f".format(it), "RS   THIS RIDE", palette, m, size = m.stat,
+                modifier = Modifier.weight(1f))
+        }
+        Stat("%.1f".format(live.batteryTotalKwh), "KWH   TOTAL", palette, m, size = m.stat,
             modifier = Modifier.weight(1f))
         if (live.elevGainM > 0 || live.elevLossM > 0) {
             Stat(
@@ -205,10 +228,8 @@ private fun BalancedLayout(
                     SmallStat("${live.speedLimitKmh}", "LIMIT", palette, m)
                 }
                 live.batterySocPercent?.let {
-                    SmallStat(
-                        "${it.roundToInt()}",
-                        if (live.batteryCharging == true) "CHARGING" else "BATTERY",
-                        palette, m,
+                    BatteryMeter(
+                        it, live.batteryCharging, palette, m,
                         onClick = { TripRecorderService.requestTelematicsRefresh() }
                     )
                 }
@@ -217,11 +238,17 @@ private fun BalancedLayout(
                 modifier = Modifier.fillMaxWidth().padding(top = m.gap),
                 horizontalArrangement = Arrangement.spacedBy(m.gap)
             ) {
-                live.batteryMileageKmPerKwh?.let {
-                    SmallStat("%.2f km/kWh".format(it), "MILEAGE", palette, m)
+                live.tripEnergyKwh?.let {
+                    SmallStat("%.2f kWh".format(it), "THIS RIDE", palette, m)
+                }
+                live.tripCostInr?.let {
+                    SmallStat("₹%.2f".format(it), "THIS RIDE", palette, m)
                 }
                 live.batteryRangeAtFullKm?.let {
                     SmallStat("%.0f km".format(it), "RANGE@100", palette, m)
+                }
+                live.batteryMileageKmPerKwh?.let {
+                    SmallStat("%.2f km/kWh".format(it), "MILEAGE", palette, m)
                 }
                 SmallStat("%.2f kWh".format(live.batteryTotalKwh), "LIFETIME", palette, m)
                 if (live.elevGainM > 0 || live.elevLossM > 0) {
@@ -231,5 +258,82 @@ private fun BalancedLayout(
                 }
             }
         }
+    }
+}
+
+/**
+ * The battery the drive screen now shows SOC against: a phone-style fill that animates to the
+ * current charge level on every poll, turning green when there is enough charge, red when there
+ * is little, and glowing the accent colour while a charger is plugged in. The percentage rides
+ * beside the fill, and the little bolt marks the charging state. Sized from the same metrics as
+ * everything else, so the split-screen band and the full panel get the same treatment.
+ */
+@Composable
+private fun BatteryMeter(
+    socPercent: Double,
+    charging: Boolean?,
+    palette: Palette,
+    m: Metrics,
+    size: TextUnit = m.stat,
+    modifier: Modifier = Modifier,
+    onClick: (() -> Unit)? = null
+) {
+    val target = (socPercent / 100.0).coerceIn(0.0, 1.0).toFloat()
+    val fill by animateFloatAsState(
+        targetValue = target,
+        animationSpec = tween(durationMillis = 900),
+        label = "batteryFill"
+    )
+    val fillColor = when {
+        charging == true -> palette.accent
+        fill > 0.30f -> Color(0xFF2ECC71)
+        else -> Color(0xFFE74C3C)
+    }
+    val click = if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier
+    Column(
+        modifier = modifier.then(click),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(m.gap / 3)
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    Modifier
+                        .width(m.gap * 4f)
+                        .height(m.pad * 1.7f)
+                        .border(1.5.dp, fillColor, RoundedCornerShape(2.dp))
+                        .padding(1.dp)
+                ) {
+                    Box(
+                        Modifier
+                            .fillMaxHeight()
+                            .fillMaxWidth(fill)
+                            .background(fillColor)
+                    )
+                }
+                Box(
+                    Modifier
+                        .width(3.dp)
+                        .height(m.pad * 0.85f)
+                        .background(fillColor.copy(alpha = 0.9f), RoundedCornerShape(1.dp))
+                )
+            }
+            Text(
+                text = if (charging == true) "⚡ ${socPercent.roundToInt()}%" else "${socPercent.roundToInt()}%",
+                color = fillColor,
+                fontSize = size,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1
+            )
+        }
+        Text(
+            text = if (charging == true) "BATTERY CHARGING" else "BATTERY",
+            color = palette.label,
+            fontSize = m.label,
+            letterSpacing = 1.1.sp,
+            maxLines = 1
+        )
     }
 }

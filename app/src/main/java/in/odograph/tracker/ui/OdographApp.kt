@@ -3,6 +3,7 @@ package `in`.odograph.tracker.ui
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -12,6 +13,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -120,17 +122,24 @@ fun OdographApp() {
       Column(Modifier.fillMaxSize()) {
         Row(
             modifier = Modifier.fillMaxWidth().padding(horizontal = m.pad, vertical = m.gap / 2),
-            horizontalArrangement = Arrangement.spacedBy(m.gap / 2),
             verticalAlignment = androidx.compose.ui.Alignment.CenterVertically
         ) {
-            Chip("DRIVE", tab == Tab.DRIVE, palette, m) { tab = Tab.DRIVE }
-            Chip("TRIPS", tab == Tab.TRIPS, palette, m) { tab = Tab.TRIPS }
-            Chip("ROUTES", tab == Tab.ROUTES, palette, m) { tab = Tab.ROUTES }
-            Chip("CHARGE", tab == Tab.CHARGE, palette, m) { tab = Tab.CHARGE }
-            Chip("SETUP", tab == Tab.SETUP, palette, m) { tab = Tab.SETUP }
-            if (tab == Tab.DRIVE) {
-                Chip(if (detailed) "DETAILED" else "DRIVER", true, palette, m) {
-                    detailed = !detailed
+            // The tab chips scroll if the width demands it, so a narrow phone never clips them.
+            // REC and the MG link stay pinned to the far corner regardless.
+            Row(
+                modifier = Modifier.horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(m.gap / 2),
+                verticalAlignment = androidx.compose.ui.Alignment.CenterVertically
+            ) {
+                Chip("DRIVE", tab == Tab.DRIVE, palette, m) { tab = Tab.DRIVE }
+                Chip("TRIPS", tab == Tab.TRIPS, palette, m) { tab = Tab.TRIPS }
+                Chip("ROUTES", tab == Tab.ROUTES, palette, m) { tab = Tab.ROUTES }
+                Chip("CHARGE", tab == Tab.CHARGE, palette, m) { tab = Tab.CHARGE }
+                Chip("SETUP", tab == Tab.SETUP, palette, m) { tab = Tab.SETUP }
+                if (tab == Tab.DRIVE) {
+                    Chip(if (detailed) "DETAILED" else "DRIVER", true, palette, m) {
+                        detailed = !detailed
+                    }
                 }
             }
             Spacer(Modifier.weight(1f))

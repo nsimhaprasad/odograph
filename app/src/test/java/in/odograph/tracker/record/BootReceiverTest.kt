@@ -1,5 +1,6 @@
 package `in`.odograph.tracker.record
 
+import android.Manifest
 import android.app.Application
 import android.content.Intent
 import androidx.test.core.app.ApplicationProvider
@@ -16,6 +17,7 @@ class BootReceiverTest {
 
     @Test
     fun `boot completed starts the recorder service`() {
+        shadowOf(app).grantPermissions(Manifest.permission.ACCESS_FINE_LOCATION)
         BootReceiver().onReceive(app, Intent(Intent.ACTION_BOOT_COMPLETED))
 
         val started = shadowOf(app).nextStartedService
@@ -26,8 +28,15 @@ class BootReceiverTest {
 
     @Test
     fun `the vendor quickboot broadcast also starts it`() {
+        shadowOf(app).grantPermissions(Manifest.permission.ACCESS_FINE_LOCATION)
         BootReceiver().onReceive(app, Intent("android.intent.action.QUICKBOOT_POWERON"))
         assertThat(shadowOf(app).nextStartedService).isNotNull()
+    }
+
+    @Test
+    fun `without the location grant boot starts nothing`() {
+        BootReceiver().onReceive(app, Intent(Intent.ACTION_BOOT_COMPLETED))
+        assertThat(shadowOf(app).nextStartedService).isNull()
     }
 
     @Test

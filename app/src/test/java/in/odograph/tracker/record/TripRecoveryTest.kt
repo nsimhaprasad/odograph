@@ -2,6 +2,7 @@ package `in`.odograph.tracker.record
 
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
+import `in`.odograph.tracker.data.ChargeEventEntity
 import `in`.odograph.tracker.data.OdographDb
 import `in`.odograph.tracker.data.PointEntity
 import org.assertj.core.api.Assertions.assertThat
@@ -104,5 +105,37 @@ class TripRecoveryTest {
 
         assertThat(dao.openTrip()?.id).isEqualTo(id)
         assertThat(dao.tripById(id)!!.startLat).isNull()
+    }
+
+    @Test
+    fun `a ride is billed at the blended rate of the fills that began before it`() {
+        val dao = db.dao()
+        // Two fills before the drive: 10 kWh at ₹8 (cost 80) and 5 kWh at ₹12 (cost 60). The
+        // blended rate is 140/15, so a 4.5 kWh ride costs 4.5 * 140/15 = 42.0.
+        dao.insertChargeEvent(ChargeEventEntity(startTime = 1_000L, energyKwh = 10.0, kind = 0, costInr = 80.0))
+        dao.insertChargeEvent(ChargeEventEntity(startTime = 2_000L, energyKwh = 5.0, kind = 1, costInr = 60.0))
+
+        val cost = TripRecovery.driveCost(dao, energy = 4.5, tripStart = 10_000L)
+
+        assertThat(cost).isEqualTo(42.0)
+    }
+
+    @Test
+    fun `a ride has no quoted cost until something priced the energy`() {
+        val dao = db.dao()
+
+        assertThat(TripRecovery.driveCost(dao, energy = 4.5, tripStart = 10_000L)).isNull()
+    }
+
+    @Test
+    fun `energy that a charging pause put back in is never billed as a ride cost`() {
+        val dao = db.dao()
+        dao.insertChargeEvent(ChargeEventEntity(startTime = 1_000L, energyKwh = 10.0, kind = 0, costInr = 80.0))
+
+        // A net-negative trip (charged more than it drove) finances nothing.
+        assertThat(TripRecovery.driveCost(dao, energy = -3.0, tripStart = 10_000L)).isEqualTo(0.0)
+
+        // Unknown energy is an honest null, not a zero.
+        assertThat(TripRecovery.driveCost(dao, energy = null, tripStart = 10_000L)).isNull()
     }
 }

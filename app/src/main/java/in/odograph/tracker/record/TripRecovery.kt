@@ -102,8 +102,11 @@ object TripRecovery {
      * respects [homeRateInr] and [outsideRateInr] snapshot at close, so a mix of slow home
      * refills and fast highway refills is blended by their energy into one honest rate. No fills,
      * or fills with no energy and thus no price, leave the cost unknown rather than a guess.
+     *
+     * Public because the same exact billing is what the drive screen quotes live while the drive
+     * is still running — "the total for this ride" must never disagree with the trip's final bill.
      */
-    private fun driveCost(dao: OdographDao, energy: Double?, tripStart: Long): Double? {
+    fun driveCost(dao: OdographDao, energy: Double?, tripStart: Long): Double? {
         val billable = energy?.coerceAtLeast(0.0) ?: return null
         if (billable <= 0.0) return 0.0
         val fills = dao.fillsBefore(tripStart).filter { it.energyKwh > 0 && it.costInr != null }
