@@ -10,7 +10,7 @@ import java.io.File
 
 @Database(
     entities = [TripEntity::class, PointEntity::class, PlaceEntity::class, BatteryEntity::class, ChargeEventEntity::class, DailyTelemetryEntity::class, PriceReminderEntity::class],
-    version = 7,
+    version = 8,
     exportSchema = true
 )
 abstract class OdographDb : RoomDatabase() {
@@ -133,6 +133,33 @@ abstract class OdographDb : RoomDatabase() {
             }
         }
 
+        /**
+         * Wall-meter kWh, charge location, and historical misclassification fix: the power
+         * calculation bug (v0.1.0) double-scaled already-decoded values, marking every 30 kW
+         * public session as SLOW. Historical sessions are reclassified from their stored
+         * energyKwh and time window (average power ≥ 10 kW → FAST), which is the closest we
+         * can get — the raw-frame log only keeps the last 24 captures and per-frame charging
+         * power was also corrupted.
+         */
+        val MIGRATION_7_8 = object : Migration(7, 8) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE `charge_events` ADD COLUMN `deliveredKwh` REAL")
+                db.execSQL("ALTER TABLE `charge_events` ADD COLUMN `placeId` INTEGER")
+                db.execSQL("ALTER TABLE `charge_events` ADD COLUMN `lat` REAL")
+                db.execSQL("ALTER TABLE `charge_events` ADD COLUMN `lon` REAL")
+                // Historical reclassification: sessions that have a valid time window and energy
+                // are re-evaluated from their average power alone (ignoring the corrupt per-frame
+                // samplesTotal/samplesAbove that the power bug miscalculated).
+                db.execSQL(
+                    """UPDATE charge_events
+                       SET kind = CASE WHEN energyKwh * 3600000.0 / ((endTime - startTime) + 1) >= 10
+                                       THEN 1 ELSE 0 END
+                       WHERE kind IS NOT NULL AND endTime IS NOT NULL
+                         AND endTime > startTime AND energyKwh > 0"""
+                )
+            }
+        }
+
         private const val NAME = "odograph.db"
 
         @Volatile
@@ -156,7 +183,7 @@ abstract class OdographDb : RoomDatabase() {
                 // The car cuts power without warning. Write-ahead logging means a torn write
                 // costs one in-flight row, never the database.
                 .setJournalMode(JournalMode.WRITE_AHEAD_LOGGING)
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8)
                 .build()
                 .also { instance = it }
         }

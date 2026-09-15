@@ -1,6 +1,7 @@
 package `in`.odograph.tracker.server
 
 import `in`.odograph.tracker.core.Period
+import `in`.odograph.tracker.core.BatteryMath
 import `in`.odograph.tracker.data.ChargeEventEntity
 import `in`.odograph.tracker.data.DailyEffRow
 import `in`.odograph.tracker.data.DailyTelemetryEntity
@@ -81,9 +82,12 @@ object ApiJson {
             append(kv("startTime", e.startTime.toString())).append(",")
             append(kv("endTime", e.endTime?.toString() ?: "null")).append(",")
             append(kv("energyKwh", num(e.energyKwh))).append(",")
+            append(kv("deliveredKwh", numOrNull(e.deliveredKwh))).append(",")
+            append(kv("lossPct", numOrNull(BatteryMath.lossPct(e.energyKwh, e.deliveredKwh)))).append(",")
             append(kv("kind", when(e.kind) { 1 -> "\"fast\""; 0 -> "\"slow\""; else -> "null" })).append(",")
             append(kv("costInr", numOrNull(e.costInr))).append(",")
-            append(kv("enteredRateInr", numOrNull(e.enteredRateInr)))
+            append(kv("enteredRateInr", numOrNull(e.enteredRateInr))).append(",")
+            append(kv("placeId", e.placeId?.toString() ?: "null"))
             append("}")
         }
         append("]")

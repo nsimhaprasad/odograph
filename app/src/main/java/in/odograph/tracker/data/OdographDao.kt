@@ -148,6 +148,31 @@ interface OdographDao {
     @Query("SELECT * FROM charge_events WHERE id = :id")
     fun chargeEvent(id: Long): ChargeEventEntity?
 
+    /** Attaches the resolved charge location to a session the moment it opens. */
+    @Query(
+        "UPDATE charge_events SET placeId = :placeId, lat = :lat, lon = :lon WHERE id = :id"
+    )
+    fun setChargePlace(id: Long, placeId: Long, lat: Double, lon: Double)
+
+    /** The driver's wall-meter kWh for a session; null clears it. */
+    @Query("UPDATE charge_events SET deliveredKwh = :deliveredKwh WHERE id = :id")
+    fun setChargeDelivered(id: Long, deliveredKwh: Double?)
+
+    /**
+     * Driver-corrections to a closed session, written wholesale when the edit dialog is applied:
+     * the battery-side kWh, the wall-meter kWh, a price (tariff + frozen GST, or a total bill —
+     * bill wins), and an explicit FAST/SLOW re-labelling. Cost is recomputed by the caller.
+     */
+    @Query(
+        "UPDATE charge_events SET energyKwh = :energyKwh, deliveredKwh = :deliveredKwh, " +
+            "kind = :kind, enteredRateInr = :enteredRateInr, enteredBillInr = :enteredBillInr, " +
+            "gstRatePct = :gstRatePct, costInr = :costInr WHERE id = :id"
+    )
+    fun setChargeEdit(
+        id: Long, energyKwh: Double, deliveredKwh: Double?, kind: Int,
+        enteredRateInr: Double?, enteredBillInr: Double?, gstRatePct: Double?, costInr: Double?
+    )
+
     /**
      * The most recent completed charge sessions that began before [ms] — the fills this drive
      * burned through. Priced-only, newest first, so a road trip where some refills were home and
@@ -260,6 +285,23 @@ interface OdographDao {
 
     @Query("UPDATE trips SET startPlaceId = :startId, endPlaceId = :endId WHERE id = :id")
     fun setTripPlaces(id: Long, startId: Long?, endId: Long?)
+
+    /**
+     * Per-place charge totals for the locations section: how many sessions, and the kWh and cost
+     * they carried, grouped by the place the session charged at. The join resolves the label the
+     * driver gave the spot; fallback coordinates live… on the charge row's own lat/lon.
+     */
+    @Query(
+        """SELECT c.placeId AS placeId, p.label AS label, p.autoName AS autoName,
+                  COUNT(*) AS sessions, COALESCE(SUM(c.energyKwh), 0) AS kwh,
+                  COALESCE(SUM(c.costInr), 0) AS costInr
+           FROM charge_events c
+           LEFT JOIN places p ON p.id = c.placeId
+           WHERE c.placeId IS NOT NULL
+           GROUP BY c.placeId
+           ORDER BY kwh DESC"""
+    )
+    fun chargePlaceStats(): List<ChargePlaceStatsRow>
 
     /** Most repeated origin-to-destination pairs. Direction matters: the return leg is its own route. */
     @Query(
@@ -431,4 +473,14 @@ data class RouteTripEff(
     val endId: Long,
     val distanceM: Double,
     val energyKwh: Double
+)
+
+/** One charge location's totals: sessions, kWh delivered to the battery, and its cost. */
+data class ChargePlaceStatsRow(
+    val placeId: Long,
+    val label: String?,
+    val autoName: String?,
+    val sessions: Int,
+    val kwh: Double,
+    val costInr: Double
 )

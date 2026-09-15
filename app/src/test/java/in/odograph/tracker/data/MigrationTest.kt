@@ -197,6 +197,44 @@ class MigrationTest {
         return h.writableDatabase
     }
 
+    /** The v7 shape: v6 plus the reminder table and the richer battery columns 6->7 added. */
+    private fun openV7(): SupportSQLiteDatabase {
+        val ctx = ApplicationProvider.getApplicationContext<android.content.Context>()
+        ctx.deleteDatabase("migration-test.db")
+        val h = FrameworkSQLiteOpenHelperFactory().create(
+            SupportSQLiteOpenHelper.Configuration.builder(ctx)
+                .name("migration-test.db")
+                .callback(object : SupportSQLiteOpenHelper.Callback(7) {
+                    override fun onCreate(db: SupportSQLiteDatabase) {
+                        db.execSQL(
+                            v2Trips.replace("`energyKwh` REAL)", "`energyKwh` REAL, `costInr` REAL, `elevGainM` REAL NOT NULL DEFAULT 0, `elevLossM` REAL NOT NULL DEFAULT 0)")
+                        )
+                        db.execSQL(v6ChargeEvents)
+                        db.execSQL(v2Points)
+                        db.execSQL(v2Places)
+                        db.execSQL(
+                            """CREATE TABLE IF NOT EXISTS `battery` (
+                                `id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                                `tripId` INTEGER NOT NULL, `t` INTEGER NOT NULL,
+                                `socPercent` REAL, `charging` INTEGER, `rangeKm` REAL,
+                                `chargingPowerKw` REAL, `workingVoltage` REAL, `workingCurrent` REAL,
+                                `odometerKm` REAL, `batteryEnergyKwh` REAL, `chargeTimeRemainingMin` INTEGER,
+                                `distanceSinceLastChargeKm` REAL, `powerUsageSinceLastChargeKwh` REAL)"""
+                        )
+                        db.execSQL(
+                            """CREATE TABLE IF NOT EXISTS `price_reminders` (
+                                `eventId` INTEGER NOT NULL PRIMARY KEY,
+                                `raisedAt` INTEGER NOT NULL, `ignoredAt` INTEGER)"""
+                        )
+                    }
+                    override fun onUpgrade(db: SupportSQLiteDatabase, old: Int, new: Int) = Unit
+                })
+                .build()
+        )
+        helper = h
+        return h.writableDatabase
+    }
+
     @After
     fun tearDown() {
         helper?.close()
@@ -388,5 +426,45 @@ class MigrationTest {
         }
         // The reminder row updates the way the dialog writes its decline.
         db.execSQL("UPDATE price_reminders SET ignoredAt = 9000 WHERE eventId = 1")
+    }
+
+    @Test
+    fun `migrating from v7 adds wall-meter, location columns and reclassifies mislabelled fast sessions`() {
+        val db = openV7()
+        // A 30 kW public charger that the v0.1.0 power bug mislabelled SLOW (0): 15.5 kWh in
+        // roughly half an hour is ~30 kW average — the reclassification must flip it to FAST.
+        db.execSQL(
+            """INSERT INTO charge_events (startTime, endTime, energyKwh, peakPowerKw, kind, costInr)
+               VALUES (1000, 1900000, 15.5, 0.0, 0, 124.0)"""
+        )
+        // A genuine overnight home charge stays SLOW: 15 kWh across 6 h is ~2.5 kW.
+        db.execSQL(
+            """INSERT INTO charge_events (startTime, endTime, energyKwh, peakPowerKw, kind, costInr)
+               VALUES (2000000, 6000000 + 2000000, 15.0, 0.0, 0, 120.0)"""
+        )
+
+        OdographDb.MIGRATION_7_8.migrate(db)
+
+        // The new columns exist and accept what the poller and driver write.
+        db.execSQL(
+            "UPDATE charge_events SET deliveredKwh = 17.4, placeId = 1, lat = 12.97, lon = 77.59 WHERE startTime = 1000"
+        )
+        db.query(
+            "SELECT startTime, kind, deliveredKwh, placeId, lat, lon FROM charge_events WHERE startTime = 1000"
+        ).use { c ->
+            assertThat(c.moveToFirst()).isTrue()
+            assertThat(c.getInt(1)).isEqualTo(1) // FAST after reclassification.
+            assertThat(c.getDouble(2)).isEqualTo(17.4)
+            assertThat(c.getLong(3)).isEqualTo(1L)
+            assertThat(c.getDouble(4)).isEqualTo(12.97)
+            assertThat(c.getDouble(5)).isEqualTo(77.59)
+        }
+        // The long slow home session was not touched.
+        db.query(
+            "SELECT kind FROM charge_events WHERE startTime = 2000000"
+        ).use { c ->
+            assertThat(c.moveToFirst()).isTrue()
+            assertThat(c.getInt(0)).isEqualTo(0) // SLOW stays SLOW.
+        }
     }
 }

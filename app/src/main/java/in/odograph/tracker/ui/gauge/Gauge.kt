@@ -16,7 +16,7 @@ import kotlin.math.cos
 import kotlin.math.min
 import kotlin.math.sin
 
-const val GAUGE_MAX_KMH = 120f
+const val GAUGE_MAX_KMH = 160f
 
 /**
  * Every dimension is a fraction of the drawn size and nothing is a bitmap, because the resolution

@@ -215,7 +215,7 @@ fun OdographApp() {
                                 if (prompt.isOpen) {
                                     dao.setChargeCostLedger(prompt.sessionId, rate, bill, gstRatePct)
                                 } else {
-                                    saveChargeCost(dao, prompt.sessionId, rate, bill, gstRatePct)
+                                    saveChargeCost(dao, prompt.sessionId, null, rate, bill, gstRatePct)
                                 }
                                 // Priced, so the durable ask is officially answered: delete the
                                 // reminder row and clear the prompt.

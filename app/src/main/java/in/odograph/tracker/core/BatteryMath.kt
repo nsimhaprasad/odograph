@@ -15,8 +15,12 @@ import `in`.odograph.tracker.data.BatteryEntity
  */
 object BatteryMath {
 
-    /** Default usable capacity for the Windsor EV, kWh. Overridable on /config. */
-    const val DEFAULT_CAPACITY_KWH = 49.2
+    /**
+     * Default usable capacity for the MG Windsor EV Pro, kWh — the 52.9 kWh nominal prismatic
+     * pack. Overridable on /config. Older (non-Pro) Windsors use a 38 kWh pack; that needs its
+     * own /config override because it shares this default.
+     */
+    const val DEFAULT_CAPACITY_KWH = 52.9
 
     /** Trips up to this distance are "city"; anything beyond is a long/outstation drive. */
     const val CITY_MAX_DISTANCE_M = 50_000.0
@@ -176,18 +180,33 @@ object BatteryMath {
     /**
      * The driver-entered price of a charge session, from whichever way they entered it:
      * a total bill already includes GST and is final; a per-kWh tariff gets GST added on top.
-     * Null when neither was entered, meaning the configured default rate applies.
+     * The tariff is applied to the wall-meter reading when present (you pay for what the wall
+     * delivered), falling back to the battery's own SOC-swing kWh. Null when neither was entered,
+     * meaning the configured default rate applies.
      */
     fun sessionCostInr(
         energyKwh: Double,
+        deliveredKwh: Double?,
         enteredRateInr: Double?,
         enteredBillInr: Double?,
         gstRatePct: Double?
     ): Double? {
         enteredBillInr?.let { return it.coerceIn(0.0, Double.MAX_VALUE) }
         if (enteredRateInr != null && gstRatePct != null) {
-            return energyKwh * enteredRateInr.coerceAtLeast(0.0) * (1.0 + gstRatePct / 100.0)
+            val basis = deliveredKwh ?: energyKwh
+            return basis * enteredRateInr.coerceAtLeast(0.0) * (1.0 + gstRatePct / 100.0)
         }
         return null
+    }
+
+    /**
+     * Charging loss percentage from the wall-meter versus the battery-side SOC-swing reading.
+     * Positive when the wall delivered more than the battery absorbed — the normal state.
+     * Null when either number is missing or zero (loss is meaningless for a home plug reading
+     * that entered the same kWh on both sides).
+     */
+    fun lossPct(carKwh: Double, deliveredKwh: Double?): Double? {
+        if (deliveredKwh == null || deliveredKwh <= 0.0 || carKwh <= 0.0) return null
+        return (1.0 - carKwh / deliveredKwh) * 100.0
     }
 }

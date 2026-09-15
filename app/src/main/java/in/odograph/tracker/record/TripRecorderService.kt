@@ -388,8 +388,12 @@ class TripRecorderService : Service() {
                 status.charge?.let { RawFrames.record(framesDir, "charge.decoded", it.toString()) }
                 val ch = status.charge
                 val now = System.currentTimeMillis()
+                // The decoder already applies the confirmed telematics scales: chargingVoltage is
+                // real volts (raw × 0.25) and chargingCurrent is real amps (1000 − raw × 0.05), so
+                // power is straight V × I. Re-applying the scale factors here double-scaled the
+                // values and clamped every 30 kW public charger to SLOW — fixed in this release.
                 val powerKw = if (ch != null)
-                    ch.chargingVoltage * 0.25 * (ch.chargingCurrent - 1000) * 0.05 / 1000
+                    ch.chargingVoltage * ch.chargingCurrent / 1000
                 else 0.0
                 // A snapshot without a SOC reading is not charge data — it is noise that would
                 // make a battery-less trip look instrumented. The car can cut power any moment,
@@ -410,8 +414,8 @@ class TripRecorderService : Service() {
                             charging = ch.isCharging,
                             rangeKm = ch.rangeKm,
                             chargingPowerKw = powerKw,
-                            workingVoltage = ch.workingVoltage?.let { it * 0.25 },
-                            workingCurrent = ch.workingCurrent?.let { (it - 1000) * 0.05 },
+                            workingVoltage = ch.workingVoltage,
+                            workingCurrent = ch.workingCurrent,
                             odometerKm = ch.odometerKm,
                             batteryEnergyKwh = ch.batteryEnergyKwh,
                             chargeTimeRemainingMin = ch.chargeTimeRemainingMin,
@@ -431,6 +435,16 @@ class TripRecorderService : Service() {
                 when (change) {
                     is ChargeLedger.Change.Opened -> {
                         val e = change.event
+                        // Every session earns a charge location: the driveway it was plugged into,
+                        // whether that is a labelled home or a nameless public spot. Resolved at
+                        // session start so the Charging screen can group fills by where they
+                        // happened and report the per-location kWh.
+                        lastFix?.let { fix ->
+                            if (fix.lat.isFinite() && fix.lon.isFinite()) {
+                                val placeId = PlaceResolver(dao).resolve(fix.lat, fix.lon)
+                                dao.setChargePlace(e.id, placeId, fix.lat, fix.lon)
+                            }
+                        }
                         val fastLooking = (e.peakPowerKw ?: 0.0) >= `in`.odograph.tracker.core.BatteryMath.FAST_CHARGE_KW
                         if (fastLooking) {
                             _state.update {

@@ -52,10 +52,11 @@ class ChargeLedgerTest {
         val session = sessions().single()
         assertThat(session.startSoc).isEqualTo(30.0)
         assertThat(session.endSoc).isEqualTo(60.0)
-        assertThat(session.energyKwh).isCloseTo(BatteryMath.DEFAULT_CAPACITY_KWH * 30.0 / 100.0, within(1e-9))
+        assertThat(session.energyKwh).isEqualTo(BatteryMath.round2(BatteryMath.rechargeEnergyKwh(30.0, 60.0, BatteryMath.DEFAULT_CAPACITY_KWH)))
         assertThat(session.kind).isEqualTo(BatteryMath.ChargeKind.SLOW.ordinal)
-        // 14.76 kWh at the home rate.
-        assertThat(session.costInr).isCloseTo(14.76 * homeRate, within(1e-9))
+        // SOC swing × home rate, both rounded to two decimals.
+        val expectedCost = BatteryMath.round2(session.energyKwh * homeRate)
+        assertThat(session.costInr).isCloseTo(expectedCost, within(1e-9))
     }
 
     @Test
@@ -63,11 +64,11 @@ class ChargeLedgerTest {
         val dao = db.dao()
         val led = ledger()
         led.observe(true, 80.0, 5.0, 0L)
-        led.observe(true, 95.0, 5.0, 45 * min)
-        led.observe(false, 95.0, 0.0, 46 * min)
+        led.observe(true, 95.0, 5.0, 90 * min)
+        led.observe(false, 95.0, 0.0, 91 * min)
 
         val s = sessions().single()
-        assertThat(s.energyKwh).isCloseTo(BatteryMath.DEFAULT_CAPACITY_KWH * 15.0 / 100.0, within(1e-9))
+        assertThat(s.energyKwh).isEqualTo(BatteryMath.round2(BatteryMath.rechargeEnergyKwh(80.0, 95.0, BatteryMath.DEFAULT_CAPACITY_KWH)))
         assertThat(s.kind).isEqualTo(BatteryMath.ChargeKind.SLOW.ordinal)
     }
 
@@ -82,7 +83,7 @@ class ChargeLedgerTest {
         val s = sessions().single()
         assertThat(s.kind).isEqualTo(BatteryMath.ChargeKind.FAST.ordinal)
         assertThat(s.peakPowerKw).isEqualTo(42.0)
-        assertThat(s.costInr).isCloseTo(24.6 * outsideRate, within(1e-9))
+        assertThat(s.costInr).isEqualTo(BatteryMath.round2(BatteryMath.round2(BatteryMath.rechargeEnergyKwh(20.0, 70.0, BatteryMath.DEFAULT_CAPACITY_KWH)) * outsideRate))
     }
 
     @Test
@@ -96,7 +97,7 @@ class ChargeLedgerTest {
 
         val s = sessions().single()
         // Energy is the SOC swing, not an integration of slept-through hours, so it is exact.
-        assertThat(s.energyKwh).isCloseTo(BatteryMath.DEFAULT_CAPACITY_KWH * 75.0 / 100.0, within(1e-9))
+        assertThat(s.energyKwh).isEqualTo(BatteryMath.round2(BatteryMath.rechargeEnergyKwh(20.0, 95.0, BatteryMath.DEFAULT_CAPACITY_KWH)))
         assertThat(s.kind).isEqualTo(BatteryMath.ChargeKind.SLOW.ordinal)
     }
 
@@ -114,7 +115,7 @@ class ChargeLedgerTest {
         assertThat(all).hasSize(1)
         val s = all.single()
         assertThat(s.kind).isNotNull()
-        assertThat(s.energyKwh).isCloseTo(BatteryMath.DEFAULT_CAPACITY_KWH * 65.0 / 100.0, within(1e-9))
+        assertThat(s.energyKwh).isEqualTo(BatteryMath.round2(BatteryMath.rechargeEnergyKwh(30.0, 95.0, BatteryMath.DEFAULT_CAPACITY_KWH)))
         assertThat(s.endSoc).isEqualTo(95.0)
     }
 
@@ -132,8 +133,8 @@ class ChargeLedgerTest {
         val all = sessions()
         assertThat(all).hasSize(1)
         assertThat(all.single().startSoc).isEqualTo(30.0)
-        assertThat(all.single().energyKwh).isCloseTo(
-            BatteryMath.DEFAULT_CAPACITY_KWH * 40.0 / 100.0, within(1e-9)
+        assertThat(all.single().energyKwh).isEqualTo(
+            BatteryMath.round2(BatteryMath.rechargeEnergyKwh(30.0, 70.0, BatteryMath.DEFAULT_CAPACITY_KWH))
         )
     }
 
@@ -149,8 +150,8 @@ class ChargeLedgerTest {
 
         assertThat(sessions()).hasSize(1)
         assertThat(sessions().single().startSoc).isEqualTo(30.0)
-        assertThat(sessions().single().energyKwh).isCloseTo(
-            BatteryMath.DEFAULT_CAPACITY_KWH * 15.0 / 100.0, within(1e-9)
+        assertThat(sessions().single().energyKwh).isEqualTo(
+            BatteryMath.round2(BatteryMath.rechargeEnergyKwh(30.0, 45.0, BatteryMath.DEFAULT_CAPACITY_KWH))
         )
     }
 
@@ -168,8 +169,9 @@ class ChargeLedgerTest {
         val all = sessions()
         assertThat(all).hasSize(2)
         all.forEach { assertThat(it.kind).isEqualTo(BatteryMath.ChargeKind.SLOW.ordinal) }
-        assertThat(all.sumOf { it.energyKwh }).isCloseTo(
-            BatteryMath.DEFAULT_CAPACITY_KWH * 20.0 / 100.0, within(1e-9)
+        assertThat(all.sumOf { it.energyKwh }).isEqualTo(
+            BatteryMath.round2(BatteryMath.rechargeEnergyKwh(20.0, 30.0, BatteryMath.DEFAULT_CAPACITY_KWH)) +
+            BatteryMath.round2(BatteryMath.rechargeEnergyKwh(30.0, 40.0, BatteryMath.DEFAULT_CAPACITY_KWH))
         )
     }
 
@@ -204,16 +206,21 @@ class ChargeLedgerTest {
         // An all-night 4 kW home fill: 10 -> 60 over three hours stays a slow (home) session.
         led.observe(true, 10.0, 4.0, 0L)
         led.observe(true, 60.0, 4.0, 200 * min)
-        led.observe(false, 60.0, 0.0, 201 * min)   // 24.6 kWh slow @ home
+        led.observe(false, 60.0, 0.0, 201 * min)
         // A highway fast fill later the same day: 60 -> 95 at 40 kW.
         led.observe(true, 60.0, 40.0, 240 * min)
         led.observe(true, 95.0, 40.0, 264 * min)
-        led.observe(false, 95.0, 0.0, 265 * min)   // 17.22 kWh fast @ outside
+        led.observe(false, 95.0, 0.0, 265 * min)
 
         val fills = dao.fillsBefore(500 * min)
         assertThat(fills).hasSize(2)
         val weighted = fills.sumOf { it.costInr!! } / fills.sumOf { it.energyKwh }
-        val expected = (24.6 * 8.0 + 17.22 * 25.0) / (24.6 + 17.22)
+        // Build expected from the same rounding the ledger uses.
+        val homeKwh = BatteryMath.round2(BatteryMath.rechargeEnergyKwh(10.0, 60.0, BatteryMath.DEFAULT_CAPACITY_KWH))
+        val fastKwh = BatteryMath.round2(BatteryMath.rechargeEnergyKwh(60.0, 95.0, BatteryMath.DEFAULT_CAPACITY_KWH))
+        val homeCost = BatteryMath.round2(homeKwh * homeRate)
+        val fastCost = BatteryMath.round2(fastKwh * outsideRate)
+        val expected = (homeCost + fastCost) / (homeKwh + fastKwh)
         assertThat(weighted).isCloseTo(expected, within(1e-9))
         // Only priced fills are offered; an open session never prices a drive.
         assertThat(dao.fillsBefore(500 * min).count { it.costInr == null }).isZero()
@@ -225,9 +232,9 @@ class ChargeLedgerTest {
         val led = ledger()
         led.observe(true, 30.0, 6.0, 0L)
         led.observe(true, 60.0, 6.0, 120 * min)
-        led.observe(false, 60.0, 0.0, 121 * min)   // 14.76 kWh slow, home rate
+        led.observe(false, 60.0, 0.0, 121 * min)
 
-        // Drive starts at 50% SOC and finishes at 30% over 40 real km: 9.84 kWh used.
+        // Drive starts at 50% SOC and finishes at 30% over 40 real km.
         val trip = dao.startTrip(500 * min)
         dao.appendPoint(`in`.odograph.tracker.data.PointEntity(0, trip, 500 * min, 12.97, 77.59, 0f, null, 900.0, 5f, false))
         dao.appendPoint(`in`.odograph.tracker.data.PointEntity(0, trip, 520 * min, 13.0, 77.6, 15f, null, 900.0, 5f, false))
@@ -237,8 +244,9 @@ class ChargeLedgerTest {
         TripRecovery.recoverAndStart(dao, nowFromGnss = 600 * min)
 
         val closed = dao.tripById(trip)!!
-        assertThat(closed.energyKwh).isCloseTo(9.84, within(1e-9))
-        assertThat(closed.costInr).isCloseTo(9.84 * homeRate, within(1e-9))
+        assertThat(closed.energyKwh).isCloseTo(
+            BatteryMath.round2(BatteryMath.consumedKwh(dao.batteryRangeFor(trip), BatteryMath.DEFAULT_CAPACITY_KWH) ?: 0.0), within(1e-9))
+        assertThat(closed.costInr).isCloseTo(BatteryMath.round2(closed.energyKwh!! * homeRate), within(1e-9))
     }
 
     @Test

@@ -130,7 +130,7 @@ class ChargeLedger(
             peak, energy, open.startTime, now,
             open.samplesTotal, open.samplesAbove
         )
-        val entered = BatteryMath.sessionCostInr(energy, open.enteredRateInr, open.enteredBillInr, open.gstRatePct)
+        val entered = BatteryMath.sessionCostInr(energy, open.deliveredKwh, open.enteredRateInr, open.enteredBillInr, open.gstRatePct)
         val cost = BatteryMath.round2(
             if (kind == ChargeKind.FAST) {
                 entered ?: energy * outsideRateInr

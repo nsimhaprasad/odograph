@@ -74,7 +74,7 @@ object Exporters {
     fun chargesCsv(charges: List<ChargeEventEntity>): String = buildString {
         appendLine(
             "id,start_time,end_time,start_soc_pct,end_soc_pct,energy_kwh,peak_power_kw," +
-                "kind,entered_rate_inr,entered_bill_inr,gst_rate_pct,cost_inr"
+                "kind,entered_rate_inr,entered_bill_inr,gst_rate_pct,cost_inr,delivered_kwh,loss_pct"
         )
         charges.forEach { c ->
             appendLine(
@@ -85,7 +85,9 @@ object Exporters {
                             if (it == BatteryMath.ChargeKind.FAST.ordinal) "fast" else "slow"
                         } ?: "open",
                     c.enteredRateInr ?: "", c.enteredBillInr ?: "", c.gstRatePct ?: "",
-                    c.costInr?.let { num(it) } ?: ""
+                    c.costInr?.let { num(it) } ?: "",
+                    c.deliveredKwh?.let { num(it) } ?: "",
+                    BatteryMath.lossPct(c.energyKwh, c.deliveredKwh)?.let { "%.1f".format(it) } ?: ""
                 ).joinToString(",")
             )
         }

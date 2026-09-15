@@ -139,7 +139,20 @@ data class ChargeEventEntity(
     /** Ordinal of BatteryMath.ChargeKind. Null while the session is still open. */
     val kind: Int? = null,
     /** Rupees for the session's energy, snapshot at close with the rates then configured. */
-    val costInr: Double? = null
+    val costInr: Double? = null,
+    /**
+     * kW·h the wall meter actually delivered (charger company app, Qubo smart-plug, grid meter).
+     * Driver-entered from the external app after the fact; null until entered. Cost is billed on
+     * this when present because you pay for what the wall delivered, not what the battery
+     * absorbed; the gap to [energyKwh] is the charging loss the driver references.
+     */
+    val deliveredKwh: Double? = null,
+    /** The place this session charged at, resolved at session start. Null when unassigned. */
+    val placeId: Long? = null,
+    /** Latitude the box saw when the session opened; kept raw for a nameless public spot. */
+    val lat: Double? = null,
+    /** Longitude the box saw when the session opened; kept raw for a nameless public spot. */
+    val lon: Double? = null
 )
 
 /**

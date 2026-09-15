@@ -77,6 +77,22 @@ class ApiJsonTest {
         assertThat(json).contains("\"enteredRateInr\":15")
         assertThat(json).contains("\"kind\":null")
         assertThat(json).contains("\"startTime\":1000")
+        // Wall power and loss are null when neither was entered.
+        assertThat(json).contains("\"deliveredKwh\":null")
+        assertThat(json).contains("\"lossPct\":null")
+        assertThat(json).contains("\"placeId\":null")
+    }
+
+    @Test
+    fun `charges payload carries wall power and loss when the driver entered them`() {
+        val json = ApiJson.charges(
+            listOf(
+                ChargeEventEntity(id = 5, startTime = 1_000, energyKwh = 10.0, deliveredKwh = 12.0, placeId = 7)
+            )
+        )
+        assertThat(json).contains("\"deliveredKwh\":12")
+        assertThat(json).contains("\"lossPct\":16.6667")
+        assertThat(json).contains("\"placeId\":7")
     }
 
     @Test

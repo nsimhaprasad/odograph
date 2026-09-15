@@ -245,10 +245,25 @@ class BatteryMathTest {
 
     @Test
     fun `a total bill is the final price, a tariff gets gst added on top`() {
-        assertThat(BatteryMath.sessionCostInr(10.0, null, 250.0, 18.0)).isEqualTo(250.0)
-        assertThat(BatteryMath.sessionCostInr(10.0, 20.0, null, 18.0))
+        assertThat(BatteryMath.sessionCostInr(10.0, null, null, 250.0, 18.0)).isEqualTo(250.0)
+        assertThat(BatteryMath.sessionCostInr(10.0, null, 20.0, null, 18.0))
             .isCloseTo(10.0 * 20.0 * 1.18, within(1e-9))
-        assertThat(BatteryMath.sessionCostInr(10.0, null, null, 18.0)).isNull()
+        assertThat(BatteryMath.sessionCostInr(10.0, null, null, null, 18.0)).isNull()
+    }
+
+    @Test
+    fun `a tariff bills the wall meter when the driver entered one`() {
+        // 10 kWh absorbed but 12 kWh delivered at the wall: you pay for the 12.
+        assertThat(BatteryMath.sessionCostInr(10.0, 12.0, 20.0, null, 18.0))
+            .isCloseTo(12.0 * 20.0 * 1.18, within(1e-9))
+    }
+
+    @Test
+    fun `loss pct compares the battery reading to the wall meter`() {
+        assertThat(BatteryMath.lossPct(10.0, 12.0)).isCloseTo(16.6666667, within(1e-6))
+        assertThat(BatteryMath.lossPct(12.0, 12.0)).isCloseTo(0.0, within(1e-9))
+        assertThat(BatteryMath.lossPct(10.0, null)).isNull()
+        assertThat(BatteryMath.lossPct(10.0, 0.0)).isNull()
     }
 
     private fun within(tolerance: Double) = org.assertj.core.data.Offset.offset(tolerance)

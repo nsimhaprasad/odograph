@@ -1,0 +1,612 @@
+{
+  "formatVersion": 1,
+  "database": {
+    "version": 8,
+    "identityHash": "b542fda2633b6b86999c5446286573c2",
+    "entities": [
+      {
+        "tableName": "trips",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `startedAt` INTEGER NOT NULL, `endedAt` INTEGER, `distanceM` REAL NOT NULL, `durationS` INTEGER NOT NULL, `movingS` INTEGER NOT NULL, `maxSpeedMps` REAL NOT NULL, `avgSpeedMps` REAL NOT NULL, `slowestKmMps` REAL NOT NULL, `startLat` REAL, `startLon` REAL, `endLat` REAL, `endLon` REAL, `clusterId` INTEGER, `startPlaceId` INTEGER, `endPlaceId` INTEGER, `syncedAt` INTEGER, `socStart` REAL, `socEnd` REAL, `energyKwh` REAL, `costInr` REAL, `elevGainM` REAL NOT NULL, `elevLossM` REAL NOT NULL)",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "startedAt",
+            "columnName": "startedAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "endedAt",
+            "columnName": "endedAt",
+            "affinity": "INTEGER",
+            "notNull": false
+          },
+          {
+            "fieldPath": "distanceM",
+            "columnName": "distanceM",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "durationS",
+            "columnName": "durationS",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "movingS",
+            "columnName": "movingS",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "maxSpeedMps",
+            "columnName": "maxSpeedMps",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "avgSpeedMps",
+            "columnName": "avgSpeedMps",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "slowestKmMps",
+            "columnName": "slowestKmMps",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "startLat",
+            "columnName": "startLat",
+            "affinity": "REAL",
+            "notNull": false
+          },
+          {
+            "fieldPath": "startLon",
+            "columnName": "startLon",
+            "affinity": "REAL",
+            "notNull": false
+          },
+          {
+            "fieldPath": "endLat",
+            "columnName": "endLat",
+            "affinity": "REAL",
+            "notNull": false
+          },
+          {
+            "fieldPath": "endLon",
+            "columnName": "endLon",
+            "affinity": "REAL",
+            "notNull": false
+          },
+          {
+            "fieldPath": "clusterId",
+            "columnName": "clusterId",
+            "affinity": "INTEGER",
+            "notNull": false
+          },
+          {
+            "fieldPath": "startPlaceId",
+            "columnName": "startPlaceId",
+            "affinity": "INTEGER",
+            "notNull": false
+          },
+          {
+            "fieldPath": "endPlaceId",
+            "columnName": "endPlaceId",
+            "affinity": "INTEGER",
+            "notNull": false
+          },
+          {
+            "fieldPath": "syncedAt",
+            "columnName": "syncedAt",
+            "affinity": "INTEGER",
+            "notNull": false
+          },
+          {
+            "fieldPath": "socStart",
+            "columnName": "socStart",
+            "affinity": "REAL",
+            "notNull": false
+          },
+          {
+            "fieldPath": "socEnd",
+            "columnName": "socEnd",
+            "affinity": "REAL",
+            "notNull": false
+          },
+          {
+            "fieldPath": "energyKwh",
+            "columnName": "energyKwh",
+            "affinity": "REAL",
+            "notNull": false
+          },
+          {
+            "fieldPath": "costInr",
+            "columnName": "costInr",
+            "affinity": "REAL",
+            "notNull": false
+          },
+          {
+            "fieldPath": "elevGainM",
+            "columnName": "elevGainM",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "elevLossM",
+            "columnName": "elevLossM",
+            "affinity": "REAL",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [],
+        "foreignKeys": []
+      },
+      {
+        "tableName": "points",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `tripId` INTEGER NOT NULL, `t` INTEGER NOT NULL, `lat` REAL NOT NULL, `lon` REAL NOT NULL, `speedMps` REAL NOT NULL, `bearingDeg` REAL, `altitudeM` REAL, `accuracyM` REAL NOT NULL, `interpolated` INTEGER NOT NULL)",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "tripId",
+            "columnName": "tripId",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "t",
+            "columnName": "t",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "lat",
+            "columnName": "lat",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "lon",
+            "columnName": "lon",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "speedMps",
+            "columnName": "speedMps",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "bearingDeg",
+            "columnName": "bearingDeg",
+            "affinity": "REAL",
+            "notNull": false
+          },
+          {
+            "fieldPath": "altitudeM",
+            "columnName": "altitudeM",
+            "affinity": "REAL",
+            "notNull": false
+          },
+          {
+            "fieldPath": "accuracyM",
+            "columnName": "accuracyM",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "interpolated",
+            "columnName": "interpolated",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_points_tripId_t",
+            "unique": false,
+            "columnNames": [
+              "tripId",
+              "t"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_points_tripId_t` ON `${TABLE_NAME}` (`tripId`, `t`)"
+          }
+        ],
+        "foreignKeys": []
+      },
+      {
+        "tableName": "places",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `lat` REAL NOT NULL, `lon` REAL NOT NULL, `visits` INTEGER NOT NULL, `label` TEXT, `autoName` TEXT, `geocodedAt` INTEGER)",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "lat",
+            "columnName": "lat",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "lon",
+            "columnName": "lon",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "visits",
+            "columnName": "visits",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "label",
+            "columnName": "label",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "autoName",
+            "columnName": "autoName",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "geocodedAt",
+            "columnName": "geocodedAt",
+            "affinity": "INTEGER",
+            "notNull": false
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [],
+        "foreignKeys": []
+      },
+      {
+        "tableName": "battery",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `tripId` INTEGER NOT NULL, `t` INTEGER NOT NULL, `socPercent` REAL, `charging` INTEGER, `rangeKm` REAL, `chargingPowerKw` REAL, `workingVoltage` REAL, `workingCurrent` REAL, `odometerKm` REAL, `batteryEnergyKwh` REAL, `chargeTimeRemainingMin` INTEGER, `distanceSinceLastChargeKm` REAL, `powerUsageSinceLastChargeKwh` REAL)",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "tripId",
+            "columnName": "tripId",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "t",
+            "columnName": "t",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "socPercent",
+            "columnName": "socPercent",
+            "affinity": "REAL",
+            "notNull": false
+          },
+          {
+            "fieldPath": "charging",
+            "columnName": "charging",
+            "affinity": "INTEGER",
+            "notNull": false
+          },
+          {
+            "fieldPath": "rangeKm",
+            "columnName": "rangeKm",
+            "affinity": "REAL",
+            "notNull": false
+          },
+          {
+            "fieldPath": "chargingPowerKw",
+            "columnName": "chargingPowerKw",
+            "affinity": "REAL",
+            "notNull": false
+          },
+          {
+            "fieldPath": "workingVoltage",
+            "columnName": "workingVoltage",
+            "affinity": "REAL",
+            "notNull": false
+          },
+          {
+            "fieldPath": "workingCurrent",
+            "columnName": "workingCurrent",
+            "affinity": "REAL",
+            "notNull": false
+          },
+          {
+            "fieldPath": "odometerKm",
+            "columnName": "odometerKm",
+            "affinity": "REAL",
+            "notNull": false
+          },
+          {
+            "fieldPath": "batteryEnergyKwh",
+            "columnName": "batteryEnergyKwh",
+            "affinity": "REAL",
+            "notNull": false
+          },
+          {
+            "fieldPath": "chargeTimeRemainingMin",
+            "columnName": "chargeTimeRemainingMin",
+            "affinity": "INTEGER",
+            "notNull": false
+          },
+          {
+            "fieldPath": "distanceSinceLastChargeKm",
+            "columnName": "distanceSinceLastChargeKm",
+            "affinity": "REAL",
+            "notNull": false
+          },
+          {
+            "fieldPath": "powerUsageSinceLastChargeKwh",
+            "columnName": "powerUsageSinceLastChargeKwh",
+            "affinity": "REAL",
+            "notNull": false
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_battery_tripId_t",
+            "unique": false,
+            "columnNames": [
+              "tripId",
+              "t"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_battery_tripId_t` ON `${TABLE_NAME}` (`tripId`, `t`)"
+          }
+        ],
+        "foreignKeys": []
+      },
+      {
+        "tableName": "charge_events",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `startTime` INTEGER NOT NULL, `startSoc` REAL, `endTime` INTEGER, `endSoc` REAL, `energyKwh` REAL NOT NULL, `peakPowerKw` REAL, `samplesTotal` INTEGER NOT NULL, `samplesAbove` INTEGER NOT NULL, `enteredRateInr` REAL, `enteredBillInr` REAL, `gstRatePct` REAL, `kind` INTEGER, `costInr` REAL, `deliveredKwh` REAL, `placeId` INTEGER, `lat` REAL, `lon` REAL)",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "startTime",
+            "columnName": "startTime",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "startSoc",
+            "columnName": "startSoc",
+            "affinity": "REAL",
+            "notNull": false
+          },
+          {
+            "fieldPath": "endTime",
+            "columnName": "endTime",
+            "affinity": "INTEGER",
+            "notNull": false
+          },
+          {
+            "fieldPath": "endSoc",
+            "columnName": "endSoc",
+            "affinity": "REAL",
+            "notNull": false
+          },
+          {
+            "fieldPath": "energyKwh",
+            "columnName": "energyKwh",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "peakPowerKw",
+            "columnName": "peakPowerKw",
+            "affinity": "REAL",
+            "notNull": false
+          },
+          {
+            "fieldPath": "samplesTotal",
+            "columnName": "samplesTotal",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "samplesAbove",
+            "columnName": "samplesAbove",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "enteredRateInr",
+            "columnName": "enteredRateInr",
+            "affinity": "REAL",
+            "notNull": false
+          },
+          {
+            "fieldPath": "enteredBillInr",
+            "columnName": "enteredBillInr",
+            "affinity": "REAL",
+            "notNull": false
+          },
+          {
+            "fieldPath": "gstRatePct",
+            "columnName": "gstRatePct",
+            "affinity": "REAL",
+            "notNull": false
+          },
+          {
+            "fieldPath": "kind",
+            "columnName": "kind",
+            "affinity": "INTEGER",
+            "notNull": false
+          },
+          {
+            "fieldPath": "costInr",
+            "columnName": "costInr",
+            "affinity": "REAL",
+            "notNull": false
+          },
+          {
+            "fieldPath": "deliveredKwh",
+            "columnName": "deliveredKwh",
+            "affinity": "REAL",
+            "notNull": false
+          },
+          {
+            "fieldPath": "placeId",
+            "columnName": "placeId",
+            "affinity": "INTEGER",
+            "notNull": false
+          },
+          {
+            "fieldPath": "lat",
+            "columnName": "lat",
+            "affinity": "REAL",
+            "notNull": false
+          },
+          {
+            "fieldPath": "lon",
+            "columnName": "lon",
+            "affinity": "REAL",
+            "notNull": false
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_charge_events_startTime",
+            "unique": false,
+            "columnNames": [
+              "startTime"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_charge_events_startTime` ON `${TABLE_NAME}` (`startTime`)"
+          }
+        ],
+        "foreignKeys": []
+      },
+      {
+        "tableName": "daily_telemetry",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`day` INTEGER NOT NULL, `firstPollAt` INTEGER NOT NULL, `lastPollAt` INTEGER NOT NULL, PRIMARY KEY(`day`))",
+        "fields": [
+          {
+            "fieldPath": "day",
+            "columnName": "day",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "firstPollAt",
+            "columnName": "firstPollAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "lastPollAt",
+            "columnName": "lastPollAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "day"
+          ]
+        },
+        "indices": [],
+        "foreignKeys": []
+      },
+      {
+        "tableName": "price_reminders",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`eventId` INTEGER NOT NULL, `raisedAt` INTEGER NOT NULL, `ignoredAt` INTEGER, PRIMARY KEY(`eventId`))",
+        "fields": [
+          {
+            "fieldPath": "eventId",
+            "columnName": "eventId",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "raisedAt",
+            "columnName": "raisedAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "ignoredAt",
+            "columnName": "ignoredAt",
+            "affinity": "INTEGER",
+            "notNull": false
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "eventId"
+          ]
+        },
+        "indices": [],
+        "foreignKeys": []
+      }
+    ],
+    "views": [],
+    "setupQueries": [
+      "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, 'b542fda2633b6b86999c5446286573c2')"
+    ]
+  }
+}
