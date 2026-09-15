@@ -34,6 +34,8 @@ import `in`.odograph.tracker.ui.theme.Direction
 import `in`.odograph.tracker.ui.theme.Palette
 import `in`.odograph.tracker.ui.theme.Settings
 import `in`.odograph.tracker.ui.theme.ThemeMode
+import java.util.Locale
+import kotlinx.coroutines.delay
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -60,6 +62,14 @@ fun SetupScreen(
     LaunchedEffect(Unit) {
         probe = runCatching { DeviceProbe.collect(ctx).asText() }
             .getOrElse { "Probe unavailable: ${it.message}" }
+    }
+
+    var memory by remember { mutableStateOf(memorySnapshot(ctx)) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            memory = memorySnapshot(ctx)
+            delay(5_000)
+        }
     }
 
     BoxWithConstraints(Modifier.fillMaxSize().background(palette.ground)) {
@@ -219,6 +229,28 @@ fun SetupScreen(
                 )
             }
 
+            Section("MEMORY", palette, m) {
+                Text(
+                    String.format(Locale.US, "Heap: %.1f MB used of %.1f MB max",
+                        memory.heapUsedMb, memory.heapMaxMb),
+                    fontFamily = FontFamily.Monospace,
+                    color = palette.accent, fontSize = m.body
+                )
+                Text(
+                    String.format(Locale.US, "App data on disk: %.1f MB", memory.diskMb),
+                    fontFamily = FontFamily.Monospace,
+                    color = palette.dim, fontSize = m.body,
+                    modifier = Modifier.padding(top = m.gap / 4)
+                )
+                Text(
+                    "Live heap the box is using now, plus everything it keeps in private " +
+                        "storage (database, tile cache, raw frames). Readable steady growth as " +
+                        "drives pile up is normal; a climb that never settles back is worth chasing.",
+                    color = palette.dim, fontSize = m.body,
+                    modifier = Modifier.padding(top = m.gap / 2)
+                )
+            }
+
             Section("EXPORT", palette, m) {
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(m.gap / 2)) {
                     Chip("SHARE CSV", false, palette, m) {
@@ -270,6 +302,24 @@ fun SetupScreen(
             }
         }
     }
+}
+
+private data class MemorySnapshot(val heapUsedMb: Double, val heapMaxMb: Double, val diskMb: Double)
+
+/**
+ * Heap the process is currently using, what it could grow to, and everything it has written to
+ * private storage. The disk walk also covers the tile cache and raw-frames log, so this is the
+ * real footprint, not just the database file.
+ */
+private fun memorySnapshot(ctx: android.content.Context): MemorySnapshot {
+    val runtime = Runtime.getRuntime()
+    val mb = 1024.0 * 1024.0
+    val heapUsedMb = (runtime.totalMemory() - runtime.freeMemory()) / mb
+    val heapMaxMb = runtime.maxMemory() / mb
+    val diskMb = ctx.filesDir.walkBottomUp()
+        .filter { it.isFile }
+        .sumOf { it.length() }.toDouble() / mb
+    return MemorySnapshot(heapUsedMb, heapMaxMb, diskMb)
 }
 
 @Composable
