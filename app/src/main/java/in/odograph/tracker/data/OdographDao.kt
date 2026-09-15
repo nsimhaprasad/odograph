@@ -185,6 +185,24 @@ interface OdographDao {
     @Query("DELETE FROM points WHERE tripId = :id")
     fun deletePointsFor(id: Long)
 
+    // ---- docs export deltas ----
+
+    /**
+     * Closed trips the docs export has not yet uploaded. [beforeMs] is the settle grace: a trip's
+     * energy/cost is finalised by the battery poller a moment after it closes, so exporting
+     * something still settling would freeze an incomplete row on the workbook forever.
+     */
+    @Query("SELECT * FROM trips WHERE endedAt IS NOT NULL AND endedAt < :beforeMs AND id > :fromId ORDER BY id ASC")
+    fun docsNewTrips(fromId: Long, beforeMs: Long): List<TripEntity>
+
+    /** Charge sessions the docs export has not yet uploaded. Closed means stable. */
+    @Query("SELECT * FROM charge_events WHERE kind IS NOT NULL AND id > :fromId ORDER BY id ASC")
+    fun docsNewCharges(fromId: Long): List<ChargeEventEntity>
+
+    /** Coverage days newer than the watermark, oldest first (today's mutable row included). */
+    @Query("SELECT * FROM daily_telemetry WHERE day > :fromDay ORDER BY day ASC")
+    fun telemetryDaysAfter(fromDay: Int): List<DailyTelemetryEntity>
+
     // ---- places ----
 
     @Insert

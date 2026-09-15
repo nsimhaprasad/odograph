@@ -23,6 +23,8 @@ class SheetsJsonTest {
         assertThat(out).contains("\"kind\":\"odograph\"")
         assertThat(out).contains("\"device\":\"windsor\"")
         assertThat(out).contains("\"capacityKwh\":49.2")
+        assertThat(out).contains("\"homeRateInr\":8")
+        assertThat(out).doesNotContain("totalEnergyKwh")
         assertThat(out).contains("\"trips\":[")
         assertThat(out).contains("\"points\":[")
         assertThat(out).contains("\"charges\":[")

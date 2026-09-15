@@ -461,14 +461,14 @@ class TripRecorderService : Service() {
     }
 
     /**
-     * Scheduled whole-dataset export to the Google Docs link, on a selectable hourly cadence
+     * Scheduled incremental export to the Google Docs link, on a selectable hourly cadence
      * (default: every hour).
      *
-     * Unlike the old per-drive pending sync this replaces the whole sheet from the complete local
-     * state, so the workbook can never drift from the box. A run is due when none has succeeded
+     * Only what has appeared since the last successful export is uploaded, so the payload stays
+     * constant-sized no matter how much history the workbook holds; the workbook is the archive,
+     * not a mirror that must be re-uploaded to keep existing. A run is due when none has succeeded
      * for the configured period; a failed run (no network, script not deployed yet) simply retries
-     * on the next loop rather than ever exporting partially. Runs immediately after service start
-     * when one is overdue.
+     * the same delta on the next loop.
      */
     private suspend fun sheetsSyncLoop() {
         while (true) {
@@ -477,7 +477,7 @@ class TripRecorderService : Service() {
             val periodMs = s.docsSyncHours * 3_600_000L
             if (s.webhookUrl.isBlank()) continue
             if (System.currentTimeMillis() - s.lastDocsSyncAt < periodMs) continue
-            val r = SheetsSync.exportAll(this, s.webhookUrl, s.deviceId)
+            val r = SheetsSync.exportDocs(this, s.webhookUrl, s.deviceId)
             Diagnostics.crumb(
                 "docs export: " + (r.error ?: "${r.delivered}/${r.attempted} rows")
             )

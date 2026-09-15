@@ -226,10 +226,11 @@ object DashboardServer {
                         )
                     }
                     get("/sync") {
-                        val r = SheetsSync.exportAll(app, settings.webhookUrl, settings.deviceId)
+                        val r = SheetsSync.exportDocs(app, settings.webhookUrl, settings.deviceId)
                         val msg = when {
                             r.error != null -> "Export failed: ${r.error}"
-                            else -> "Exported ${r.delivered} of ${r.attempted} rows to the docs workbook."
+                            r.attempted == 0 -> "Nothing new since the last export."
+                            else -> "Uploaded ${r.delivered} of ${r.attempted} new rows to the docs workbook."
                         }
                         call.respondText(configPageView(settings, msg), ContentType.Text.Html)
                     }

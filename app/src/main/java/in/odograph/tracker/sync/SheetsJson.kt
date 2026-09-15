@@ -31,9 +31,7 @@ object SheetsJson {
             "\"capacityKwh\":${num(capacityKwh)}," +
             "\"homeRateInr\":${num(homeRateInr)}," +
             "\"outsideRateInr\":${num(outsideRateInr)}," +
-            "\"gstRatePct\":${num(gstRatePct)}," +
-            "\"totalEnergyKwh\":${num(trips.sumOf { it.energyKwh ?: 0.0 })}," +
-            "\"totalCostInr\":${num(trips.sumOf { it.costInr ?: 0.0 })}" +
+            "\"gstRatePct\":${num(gstRatePct)}" +
             "}"
         return "{" +
             "\"kind\":\"odograph\"," +

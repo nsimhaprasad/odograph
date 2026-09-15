@@ -52,6 +52,20 @@ class Settings(ctx: Context) {
         get() = prefs.getLong(KEY_DOCS_LAST, 0L)
         set(value) = prefs.edit().putLong(KEY_DOCS_LAST, value).apply()
 
+    /**
+     * Docs-export watermarks: the last trip/charge ids and coverage day already uploaded. Only
+     * rows past these are new, so each sync stays tiny no matter how old the archive grows.
+     */
+    var lastDocsTripId: Long
+        get() = prefs.getLong(KEY_DOCS_TRIP, 0L)
+        set(value) = prefs.edit().putLong(KEY_DOCS_TRIP, value).apply()
+    var lastDocsChargeId: Long
+        get() = prefs.getLong(KEY_DOCS_CHARGE, 0L)
+        set(value) = prefs.edit().putLong(KEY_DOCS_CHARGE, value).apply()
+    var lastDocsDay: Int
+        get() = prefs.getInt(KEY_DOCS_DAY, 0)
+        set(value) = prefs.edit().putInt(KEY_DOCS_DAY, value).apply()
+
     var deviceId: String
         get() = prefs.getString(KEY_DEVICE, "").orEmpty().ifBlank { "windsor" }
         set(value) = prefs.edit().putString(KEY_DEVICE, value.trim()).apply()
@@ -148,6 +162,9 @@ class Settings(ctx: Context) {
         const val KEY_WEBHOOK = "webhook_url"
         const val KEY_DOCS_HOURS = "docs_sync_hours"
         const val KEY_DOCS_LAST = "docs_last_sync_at"
+        const val KEY_DOCS_TRIP = "docs_trip_watermark"
+        const val KEY_DOCS_CHARGE = "docs_charge_watermark"
+        const val KEY_DOCS_DAY = "docs_day_watermark"
         const val KEY_DEVICE = "device_id"
         const val KEY_TL_PHONE = "tl_phone"
         const val KEY_TL_PASSWORD = "tl_password"

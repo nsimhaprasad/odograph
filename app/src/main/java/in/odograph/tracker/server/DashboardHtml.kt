@@ -487,7 +487,8 @@ a{color:#3DE1FF}
     <label for="u">Google Docs link &mdash; the Odograph workbook</label>
     <input id="u" name="webhook" value="${webhookUrl.replace("\"", "&quot;")}"
            placeholder="https://script.google.com/macros/s/..../exec">
-    <div class="hint">This box exports its entire dataset here, once or twice a day, and imports
+    <div class="hint">This box uploads its data here on a schedule — only what's new since the last
+      upload, so the payload stays small no matter how old the archive gets — and imports
       control values back. Paste either the spreadsheet link or its deployed Apps Script
       <code>/exec</code> URL. The sheet link is read-only until you deploy the bundled script
       (in the repo: <code>tools/odograph_sheets_apps_script.js</code>) &mdash; open the sheet,
@@ -495,9 +496,9 @@ a{color:#3DE1FF}
     <div style="margin-top:18px">
       $cadenceHtml
     </div>
-    <div class="hint">How often the box re-exports its whole dataset to the sheet (default: every
-      hour). Last export: $lastSync.
-      <a href="/sync">Export now</a> &middot; <a href="/import">Import now</a>.</div>
+    <div class="hint">How often the box uploads anything new to the sheet (default: every hour).
+      Last upload: $lastSync.
+      <a href="/sync">Upload now</a> &middot; <a href="/import">Import now</a>.</div>
     <label for="d" style="margin-top:26px">Device name</label>
     <input id="d" name="device" value="${deviceId.replace("\"", "&quot;")}">
     <label for="t">iSMART phone number &mdash; optional</label>

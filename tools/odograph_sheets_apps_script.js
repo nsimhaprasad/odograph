@@ -8,10 +8,13 @@
  *   4. Copy the /exec URL and paste it into the box's configure page ("Google Docs link").
  *
  * What happens next:
- *   - The box POSTs its whole dataset once/twice a day (see doPost).
- *   - Tabs are REPLACED, not appended: Trips, Points, Charges, Telemetry, Analytics, SyncLog.
- *     A power cut can never leave the workbook half-written.
- *   - Analytics is rebuilt with derived numbers and charts for a non-technical viewer.
+ *   - The box uploads only what is NEW since its last successful upload (see doPost): closed
+ *     trips with their points, closed charge sessions and coverage days. Rows are APPENDED or
+ *     overwritten by key, never re-uploaded wholesale, so a payload never grows with history.
+ *   - The upload is idempotent: if the box retries a POST that partially failed, the same keys
+ *     are overwritten instead of duplicated.
+ *   - Analytics is rebuilt from the workbook's own accumulated history, with derived numbers and
+ *     charts for a non-technical viewer.
  *   - Editing the Control tab and importing (box "Import now", or any visit of /import) pushes
  *     rates and capacity back to the box.
  */
@@ -27,23 +30,22 @@ function doPost(e) {
     var meta = body.meta || {};
 
     var tripSheet = tab(ss, 'Trips');
-    writeRows(tripSheet, ['id','start','end','km','duration_s','moving_s',
-      'max_kmh','avg_kmh','slowest_kmh','start_lat','start_lon','end_lat','end_lon',
-      'soc_start','soc_end','energy_kwh','cost_inr','climb_m','descent_m'],
-      trips.map(tripRow));
+    var tripCols = ['id','start','end','km','duration_s','moving_s','max_kmh','avg_kmh',
+      'slowest_kmh','start_lat','start_lon','end_lat','end_lon','soc_start','soc_end',
+      'energy_kwh','cost_inr','climb_m','descent_m'];
+    upsertRows(tripSheet, tripCols, trips.map(tripRow), 0);
 
     var pointSheet = tab(ss, 'Points');
-    writeRows(pointSheet, ['trip_id','t_ms','lat','lon','speed_mps','altitude_m','interpolated'],
-      points.map(pointRow));
+    var pointCols = ['trip_id','t_ms','lat','lon','speed_mps','altitude_m','interpolated'];
+    appendNewPoints(pointSheet, pointCols, points.map(pointRow));
 
     var chargeSheet = tab(ss, 'Charges');
-    writeRows(chargeSheet, ['id','start','end','start_soc','end_soc','energy_kwh','peak_kw',
-      'kind','cost_inr'],
-      charges.map(chargeRow));
+    var chargeCols = ['id','start','end','start_soc','end_soc','energy_kwh','peak_kw','kind','cost_inr'];
+    upsertRows(chargeSheet, chargeCols, charges.map(chargeRow), 0);
 
     var teleSheet = tab(ss, 'Telemetry');
-    writeRows(teleSheet, ['day','first_poll_ms','last_poll_ms'],
-      days.map(function (d) { return [d.day, d.firstPollAt, d.lastPollAt]; }));
+    var teleCols = ['day','first_poll_ms','last_poll_ms'];
+    upsertRows(teleSheet, teleCols, days.map(function (d) { return [d.day, d.firstPollAt, d.lastPollAt]; }), 0);
 
     var logSheet = tab(ss, 'SyncLog');
     logSheet.appendRow([new Date(), body.device || '', trips.length, points.length,
@@ -52,7 +54,7 @@ function doPost(e) {
       logSheet.deleteRows(2, logSheet.getLastRow() - 250);
     }
 
-    buildAnalytics(ss, trips, charges, meta);
+    buildAnalytics(ss, meta);
 
     afterPost(ss);
 
@@ -88,12 +90,54 @@ function tab(ss, name) {
   return t;
 }
 
-function writeRows(sheet, header, rows) {
-  if (sheet.getLastRow() > 0) {
-    sheet.getRange(1, 1, sheet.getLastRow(), sheet.getLastColumn()).clear();
+/** First-column lookup: key -> sheet row number (1-based), header row excluded. */
+function indexByFirstColumn(sheet) {
+  var map = {};
+  var values = sheet.getDataRange().getValues();
+  for (var r = 1; r < values.length; r++) {
+    var key = String(values[r][0]);
+    if (key !== '' && !(key in map)) map[key] = r + 1;
   }
-  var all = [header].concat(rows);
-  if (all.length) sheet.getRange(1, 1, all.length, header.length).setValues(all);
+  return map;
+}
+
+/**
+ * Overwrite rows whose key already exists, append the rest. Retry-safe: the same key can be
+ * re-sent after a partial failure without turning into a duplicate row.
+ */
+function upsertRows(sheet, header, rows, keyCol) {
+  if (rows.length === 0) return;
+  ensureHeader(sheet, header);
+  var existing = indexByFirstColumn(sheet);
+  var fresh = [];
+  rows.forEach(function (row) {
+    var key = String(row[keyCol]);
+    if (key in existing) {
+      sheet.getRange(existing[key], 1, 1, header.length).setValues([row]);
+    } else {
+      fresh.push(row);
+    }
+  });
+  if (fresh.length) {
+    sheet.getRange(sheet.getLastRow() + 1, 1, fresh.length, header.length).setValues(fresh);
+  }
+}
+
+/** Append a trip's points once, and once only. */
+function appendNewPoints(sheet, header, rows) {
+  if (rows.length === 0) return;
+  ensureHeader(sheet, header);
+  var present = indexByFirstColumn(sheet);
+  var fresh = rows.filter(function (row) { return !(String(row[0]) in present); });
+  if (fresh.length) {
+    sheet.getRange(sheet.getLastRow() + 1, 1, fresh.length, header.length).setValues(fresh);
+  }
+}
+
+function ensureHeader(sheet, header) {
+  if (!sheet.getRange(1, 1, 1, header.length).getValues()[0].join('|').length) {
+    sheet.getRange(1, 1, 1, header.length).setValues([header]);
+  }
 }
 
 function tripRow(t) {
@@ -116,34 +160,44 @@ function epoch(ms) { return ms ? new Date(ms) : ''; }
 function toKmh(mps) { return mps == null ? '' : (mps * 3.6).toFixed(1); }
 
 /**
- * The viewer-facing tab: derived numbers first, then per-month tables and charts. The whole tab
- * is rebuilt every export, so charts always reflect the snapshot just written.
+ * The viewer-facing tab: derived numbers first, then per-month tables and charts. Rebuilt each
+ * upload from the workbook's own accumulated history, so totals stay right even though the box
+ * only ever sends the newest rows.
  */
-function buildAnalytics(ss, trips, charges, meta) {
+function buildAnalytics(ss, meta) {
   var sheet = tab(ss, 'Analytics');
   var charts = sheet.getCharts();
   for (var c = 0; c < charts.length; c++) sheet.removeChart(charts[c]);
   if (sheet.getLastRow() > 0) sheet.clear();
 
+  var capacityKwh = Number(meta.capacityKwh) || 0;
+
+  var trips = readTrips(ss);
+  var charges = readCharges(ss);
+
   var totalKm = 0, totalKwh = 0, totalCost = 0, effSum = 0, effN = 0;
   var months = {};
   trips.forEach(function (t) {
-    var km = t.distanceM / 1000;
+    var km = (Number(t.km) || 0);
     totalKm += km;
-    if (t.energyKwh && km > 0) { totalKwh += t.energyKwh; effSum += t.energyKwh * 100 / km; effN++; }
-    if (t.costInr) totalCost += t.costInr;
-    var m = monthOf(t.startedAt);
+    if (t.kwh != null && Number(t.kwh) > 0 && km > 0) {
+      totalKwh += Number(t.kwh);
+      effSum += Number(t.kwh) * 100 / km;
+      effN++;
+    }
+    if (t.cost != null) totalCost += Number(t.cost);
+    var m = monthOf(t.start);
     months[m] = months[m] || { drives: 0, km: 0, kwh: 0, cost: 0, minutes: 0 };
     months[m].drives++;
     months[m].km += km;
-    months[m].kwh += (t.energyKwh || 0);
-    months[m].cost += (t.costInr || 0);
-    months[m].minutes += (t.movingS || 0) / 60;
+    months[m].kwh += (Number(t.kwh) || 0);
+    months[m].cost += (Number(t.cost) || 0);
+    months[m].minutes += (Number(t.moving) || 0) / 60;
   });
 
-  var range100 = effN ? Math.round(100 * meta.capacityKwh / (effSum / effN)) : '';
+  var range100 = effN && capacityKwh ? Math.round(100 * capacityKwh / (effSum / effN)) : '';
   var per100 = effN ? (effSum / effN).toFixed(1) : '';
-  var costKwh = charges.reduce(function (a, c) { return a + (c.costInr || 0); }, 0);
+  var costKwh = charges.reduce(function (a, c) { return a + (Number(c.cost) || 0); }, 0);
 
   var r = 1;
   sheet.getRange(r, 1).setValue('ODOG RAPH — snapshot').setFontWeight('bold');
@@ -175,9 +229,8 @@ function buildAnalytics(ss, trips, charges, meta) {
 
   var bodyRows = r - headerRow - 1;
   if (bodyRows > 0) {
-    var monthRange = sheet.getRange(headerRow, 1, bodyRows + 1, 6);
     var colChart = sheet.newChart().asColumnChart()
-      .addRange(monthRange)
+      .addRange(sheet.getRange(headerRow, 1, bodyRows + 1, 6))
       .setPosition(bodyRows + 3, 8, 0, 0)
       .build();
     sheet.insertChart(colChart);
@@ -185,7 +238,8 @@ function buildAnalytics(ss, trips, charges, meta) {
 
   var byKind = {};
   charges.forEach(function (c) {
-    if (c.costInr) byKind[c.kind || 'open'] = (byKind[c.kind || 'open'] || 0) + c.costInr;
+    var kind = c.kind || 'open';
+    if (Number(c.cost) > 0) byKind[kind] = (byKind[kind] || 0) + Number(c.cost);
   });
   if (Object.keys(byKind).length) {
     var kr = sheet.getLastRow() + 3;
@@ -202,9 +256,41 @@ function buildAnalytics(ss, trips, charges, meta) {
   sheet.setFrozenRows(1);
 }
 
+function readTrips(ss) {
+  var sheet = ss.getSheetByName('Trips');
+  if (!sheet) return [];
+  var v = sheet.getDataRange().getValues();
+  if (v.length < 2) return [];
+  var h = v[0], out = [];
+  var col = function (name) { return h.indexOf(name); };
+  var iStart = col('start'), iKm = col('km'), iMoving = col('moving_s'),
+    iKwh = col('energy_kwh'), iCost = col('cost_inr');
+  for (var r = 1; r < v.length; r++) {
+    var s = v[r][iStart];
+    out.push({ start: s instanceof Date ? s.getTime() : s,
+      km: v[r][iKm], moving: v[r][iMoving], kwh: num(v[r][iKwh]), cost: num(v[r][iCost]) });
+  }
+  return out;
+}
+
+function readCharges(ss) {
+  var sheet = ss.getSheetByName('Charges');
+  if (!sheet) return [];
+  var v = sheet.getDataRange().getValues();
+  if (v.length < 2) return [];
+  var h = v[0], out = [];
+  var iKind = h.indexOf('kind'), iCost = h.indexOf('cost_inr');
+  for (var r = 1; r < v.length; r++) {
+    out.push({ kind: v[r][iKind], cost: num(v[r][iCost]) });
+  }
+  return out;
+}
+
+function num(x) { return x == null || x === '' ? null : Number(x); }
+
 function afterPost(ss) {
   // Fresh workbooks are usually a single "Sheet1" the user never asked for; hide it once the
-  // four owned tabs exist so the workbook reads cleanly. Harmless whenever it is already gone.
+  // owned tabs exist so the workbook reads cleanly. Harmless whenever it is already gone.
   var stray = ss.getSheetByName('Sheet1');
   if (stray && !stray.isSheetHidden() && ss.getSheets().length > 4) stray.hideSheet();
 }
