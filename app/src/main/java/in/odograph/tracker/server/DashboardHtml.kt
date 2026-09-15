@@ -502,6 +502,45 @@ a{color:#3DE1FF}
     }
 
     /**
+     * The raw-data hallway: which CSVs a laptop on the LAN can pull, and the exact URLs. Served
+     * only while the SETUP → LAN DATA toggle is on.
+     */
+    fun exportPage(baseUrl: String?, counts: List<Pair<String, String>>): String {
+        val host = baseUrl ?: "http://<this device>:${DashboardServer.PORT}"
+        val rows = buildString {
+            counts.forEach { (name, what) ->
+                append("""<a class="row" href="$name"><div>""")
+                append("<code>").append(name).append("</code>")
+                append("<span>").append(esc(what)).append("</span></div>")
+                append("<b>download</b></a>")
+            }
+        }
+        return """<!doctype html>
+<title>Odograph LAN Export</title>
+<style>
+:root{color-scheme:dark}
+body{margin:0;background:#08090C;color:#EAEEF4;padding:44px 28px;
+ font:14px/1.6 ui-sans-serif,system-ui,sans-serif}
+.wrap{max-width:660px;margin:0 auto}
+h1{font-size:24px;margin:0 0 6px}
+p.sub{color:#8B96A5;margin:0 0 26px}
+a.row{display:flex;justify-content:space-between;align-items:center;gap:16px;
+ padding:16px 18px;background:#0D1015;border:1px solid #1E2530;border-radius:4px;
+ text-decoration:none;color:#EAEEF4;margin-bottom:10px}
+a.row:hover{border-color:#3DE1FF}
+code{font:13px ui-monospace,monospace;color:#3DE1FF}
+span{color:#8B96A5;font-size:12.5px}
+b{font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:#5C6877}
+</style>
+<div class="wrap">
+<h1>LAN export</h1>
+<p class="sub">Pull everything the box records from <code>$host</code>.
+ Each row is one file a laptop on the same Wi-Fi can download straight into a notebook.</p>
+$rows
+</div>"""
+    }
+
+    /**
      * "How far can I go?" — a keyboard calculator over the same real numbers the box has been
      * learning: the city and outstation efficiencies it has actually achieved. Baked as a live
      * snapshot at request time (the box is offline), which is exactly honest for a planner.

@@ -7,6 +7,8 @@ import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import android.os.Build
 import android.os.IBinder
 import android.os.SystemClock
@@ -61,6 +63,13 @@ class TripRecorderService : Service() {
         val batteryMileageKmPerKwh: Double? = null,
         /** What a 100% charge would carry you, from real consumption (or the car's estimate). */
         val batteryRangeAtFullKm: Double? = null,
+        /**
+         * Range remaining at the current SOC, km, from the box's own consumption history. Null
+         * until enough instrumented drives exist to trust real-world efficiency over the car.
+         */
+        val batteryRangeKm: Double? = null,
+        /** Range remaining that the car itself quotes, km. The MG telematics cross-check. */
+        val mgBatteryRangeKm: Double? = null,
         /** Lifetime energy the car has consumed over instrumented drives, kW·h. */
         val batteryTotalKwh: Double = 0.0,
         /** Energy this drive has consumed so far, kW·h. Null until a usable SOC swing is known. */
@@ -93,6 +102,15 @@ class TripRecorderService : Service() {
     companion object {
         const val CHANNEL_ID = "odograph_recording"
         const val NOTIFICATION_ID = 1
+
+        /** The "MG is offline" heads-up, separate from the ongoing recording notice. */
+        private const val MG_ALERT_NOTIFICATION_ID = 2
+
+        /**
+         * How long a single outage may keep nagging before another heads-up fires: one reminder
+         * per sustained failure, never a bark on every failed poll.
+         */
+        private const val MG_LOST_NOTIFY_GAP_MS = 10 * 60_000L
         private const val ACCURACY_LIMIT_M = 25f
         private const val SPEED_ACCURACY_LIMIT_M = 15f
         /**
@@ -149,6 +167,7 @@ class TripRecorderService : Service() {
     private lateinit var alertSound: AlertSound
     private var speedAlert = SpeedAlert(AlertConfig(limitKmh = 0f))
     private var configuredLimit = -1
+    private var lastMgLostNotifyAt = Long.MIN_VALUE
 
     override fun onCreate() {
         super.onCreate()
@@ -246,6 +265,18 @@ class TripRecorderService : Service() {
                 client = null
                 creds = null
                 _state.value = _state.value.copy(batterySocPercent = null, batteryCharging = null, telematicsConnected = null)
+                // Deliberately off is not an outage; drop any reminder so it cannot nag on.
+                clearMgLostNotification()
+                continue
+            }
+            // No point calling a car server on a dead link, and it would cost us the account:
+            // a box blocked for hammering is a box with no range numbers at all. Skip the call,
+            // flag the connection down, and let the reminder nag — this is the one case the
+            // driver can actually do something about (switch the hotspot back on).
+            if (!hasValidatedNetwork()) {
+                Diagnostics.crumb("mg: no validated network, poll skipped")
+                _state.update { it.copy(telematicsConnected = false) }
+                notifyMgLost()
                 continue
             }
             val want = Triple(phone, password, settings.telematicsVin)
@@ -288,9 +319,11 @@ class TripRecorderService : Service() {
                     ch.chargingVoltage * 0.25 * (ch.chargingCurrent - 1000) * 0.05 / 1000
                 else 0.0
                 // A snapshot without a SOC reading is not charge data — it is noise that would
-                // make a battery-less trip look instrumented. Only rows from a real charging
-                // frame, on a trip that actually exists, are stored.
-                if (ch != null && ch.soc != null && tripId >= 0) {
+                // make a battery-less trip look instrumented. The car can cut power any moment,
+                // so every frame that does carry a SOC is written to disk immediately and never
+                // held in memory: while a trip is open the row lands under it; while parked it
+                // carries trip -1, invisible to every trip-scoped query but never lost.
+                if (ch != null && ch.soc != null) {
                     val t = lastFix?.t ?: now
                     dao.insertBattery(
                         BatteryEntity(
@@ -374,6 +407,13 @@ class TripRecorderService : Service() {
                         } else {
                             ch.rangeKm?.let { r -> if (soc > 0) r / soc * 100.0 else null }
                         }
+                        // Same gate as range-at-full: only real measured efficiency gets to quote a
+                        // remaining range. Before that the car's own number is the only honest one.
+                        val smartRange = if (
+                            rollingEffs.size >= BatteryMath.MIN_TRIPS_FOR_REAL_ESTIMATE && rolling != null
+                        ) {
+                            BatteryMath.rangeAtSocKwh(capacity, soc, rolling)
+                        } else null
                         // "The total for this ride" is billed exactly like the closing trip will be —
                         // the same blended fill rate, so what the screen quotes is what shows up next
                         // week in the archive. No fills yet, no price yet — the honest unknown.
@@ -385,6 +425,8 @@ class TripRecorderService : Service() {
                             batteryCharging = ch.isCharging,
                             batteryMileageKmPerKwh = kmPerKwh,
                             batteryRangeAtFullKm = rangeAtFull,
+                            batteryRangeKm = smartRange,
+                            mgBatteryRangeKm = ch.rangeKm,
                             batteryTotalKwh = dao.totalEnergyKwh(),
                             tripEnergyKwh = energy,
                             tripCostInr = tripCost
@@ -394,16 +436,24 @@ class TripRecorderService : Service() {
                             batterySocPercent = soc,
                             batteryCharging = ch.isCharging,
                             tripEnergyKwh = null,
-                            tripCostInr = null
+                            tripCostInr = null,
+                            batteryRangeAtFullKm = null,
+                            batteryRangeKm = null,
+                            mgBatteryRangeKm = ch.rangeKm
                         )
                     }
                 } else {
-                    _state.value = _state.value.copy(batterySocPercent = null, batteryCharging = null)
+                    _state.value = _state.value.copy(
+                        batterySocPercent = null, batteryCharging = null,
+                        batteryRangeAtFullKm = null, batteryRangeKm = null, mgBatteryRangeKm = null
+                    )
                 }
 
                 // Whatever the frame carried, a round-trip that returned without throwing means
-                // the MG link is up — the corner indicator can go green.
+                // the MG link is up — the corner indicator can go green, and any "MG is offline"
+                // reminder is cancelled: the connection it was nagging about is back.
                 _state.update { it.copy(telematicsConnected = true) }
+                clearMgLostNotification()
             }.onFailure {
                 Diagnostics.crumb("telematics poll failed: $it")
                 _state.update { it.copy(telematicsConnected = false) }
@@ -488,6 +538,50 @@ class TripRecorderService : Service() {
             startForeground(NOTIFICATION_ID, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION)
         } else {
             startForeground(NOTIFICATION_ID, n)
+        }
+    }
+
+    /**
+     * True when the device currently has an internet link the OS has validated — the exact test
+     * for "is the hotspot actually up". A network that is up but unvalidated (e.g. a captive
+     * portal) would burn a login attempt and could block the account, so it counts as down.
+     */
+    private fun hasValidatedNetwork(): Boolean = runCatching {
+        val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+        val active = cm.activeNetwork ?: return false
+        val caps = cm.getNetworkCapabilities(active) ?: return false
+        caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) &&
+            caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
+    }.getOrDefault(false)
+
+    /**
+     * One heads-up per sustained outage that the MG link is down, never a bark every poll. The
+     * driver's reminder: the car is fine, the hotspot just needs reconnecting. Deliberately
+     * silent when credentials are missing or telemetry is switched off — that is a choice, not
+     * an outage, and the corner pill already shows it.
+     */
+    private fun notifyMgLost() {
+        val now = System.currentTimeMillis()
+        if (now - lastMgLostNotifyAt < MG_LOST_NOTIFY_GAP_MS) return
+        lastMgLostNotifyAt = now
+        runCatching {
+            val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            nm.notify(
+                MG_ALERT_NOTIFICATION_ID,
+                Notification.Builder(this, CHANNEL_ID)
+                    .setContentTitle("Odograph")
+                    .setContentText("MG link is down — reconnect the hotspot")
+                    .setSmallIcon(android.R.drawable.ic_menu_compass)
+                    .setAutoCancel(true)
+                    .build()
+            )
+        }
+    }
+
+    private fun clearMgLostNotification() {
+        runCatching {
+            (getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager)
+                .cancel(MG_ALERT_NOTIFICATION_ID)
         }
     }
 

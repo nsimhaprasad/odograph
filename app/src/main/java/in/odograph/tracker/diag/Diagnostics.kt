@@ -29,9 +29,13 @@ object Diagnostics {
     private val trail = StringBuilder()
     private const val CRASH_FILE = "last-crash.txt"
 
+    /** Memory ceiling for the breadcrumb trail; past it, the oldest half is dropped. */
+    private const val TRAIL_MAX_CHARS = 16_384
+
     fun crumb(step: String) {
         synchronized(trail) {
             trail.append(System.currentTimeMillis()).append("  ").append(step).append('\n')
+            if (trail.length > TRAIL_MAX_CHARS) trail.delete(0, trail.length / 2)
         }
         android.util.Log.i("Odograph", "crumb: $step")
     }

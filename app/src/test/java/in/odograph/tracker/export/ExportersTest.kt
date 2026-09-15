@@ -1,5 +1,8 @@
 package `in`.odograph.tracker.export
 
+import `in`.odograph.tracker.core.BatteryMath
+import `in`.odograph.tracker.data.ChargeEventEntity
+import `in`.odograph.tracker.data.DailyTelemetryEntity
 import `in`.odograph.tracker.data.PointEntity
 import `in`.odograph.tracker.data.TripEntity
 import org.assertj.core.api.Assertions.assertThat
@@ -85,5 +88,34 @@ class ExportersTest {
     fun `trips csv leaves battery blanks when a trip was not instrumented`() {
         val line = Exporters.tripsCsv(listOf(trip)).trim().lines()[1]
         assertThat(line).endsWith(",,,,")
+    }
+
+    @Test
+    fun `charges csv names the kind and rounds money and energy to two decimals`() {
+        val lines = Exporters.chargesCsv(
+            listOf(
+                ChargeEventEntity(
+                    id = 3, startTime = 1000L, endTime = 2000L,
+                    startSoc = 30.0, endSoc = 70.0, energyKwh = 19.687,
+                    peakPowerKw = 11.2, kind = BatteryMath.ChargeKind.FAST.ordinal,
+                    enteredRateInr = 24.5, gstRatePct = 18.0, costInr = 569.23
+                ),
+                ChargeEventEntity(id = 4, startTime = 3000L, energyKwh = 2.5)
+            )
+        ).trim().lines()
+        assertThat(lines).hasSize(3)
+        assertThat(lines[0]).startsWith("id,start_time,end_time,")
+        assertThat(lines[1]).contains("fast").contains("19.69").contains("569.23")
+        assertThat(lines[2]).contains("open").contains("2.50")
+    }
+
+    @Test
+    fun `telemetry csv emits one row per captured day`() {
+        val lines = Exporters.telemetryCsv(
+            listOf(DailyTelemetryEntity(20250601, 100L, 500L))
+        ).trim().lines()
+        assertThat(lines).hasSize(2)
+        assertThat(lines[0]).startsWith("day,first_poll_at,last_poll_at")
+        assertThat(lines[1]).isEqualTo("20250601,100,500")
     }
 }

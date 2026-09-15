@@ -1,5 +1,8 @@
 package `in`.odograph.tracker.export
 
+import `in`.odograph.tracker.core.BatteryMath
+import `in`.odograph.tracker.data.ChargeEventEntity
+import `in`.odograph.tracker.data.DailyTelemetryEntity
 import `in`.odograph.tracker.data.PointEntity
 import `in`.odograph.tracker.data.TripEntity
 import java.text.SimpleDateFormat
@@ -64,6 +67,35 @@ object Exporters {
             }
             appendLine("  </trkseg></trk>")
             append("</gpx>")
+        }
+    }
+
+    /** One row per plugin charging session, for a laptop-side cost and charge analysis. */
+    fun chargesCsv(charges: List<ChargeEventEntity>): String = buildString {
+        appendLine(
+            "id,start_time,end_time,start_soc_pct,end_soc_pct,energy_kwh,peak_power_kw," +
+                "kind,entered_rate_inr,entered_bill_inr,gst_rate_pct,cost_inr"
+        )
+        charges.forEach { c ->
+            appendLine(
+                listOf(
+                    c.id, c.startTime, c.endTime ?: "", c.startSoc ?: "", c.endSoc ?: "",
+                    num(c.energyKwh), c.peakPowerKw ?: "",
+                    c.kind?.let {
+                            if (it == BatteryMath.ChargeKind.FAST.ordinal) "fast" else "slow"
+                        } ?: "open",
+                    c.enteredRateInr ?: "", c.enteredBillInr ?: "", c.gstRatePct ?: "",
+                    c.costInr?.let { num(it) } ?: ""
+                ).joinToString(",")
+            )
+        }
+    }
+
+    /** One row per local day the box was alive and polling. The raw form of the coverage chart. */
+    fun telemetryCsv(days: List<DailyTelemetryEntity>): String = buildString {
+        appendLine("day,first_poll_at,last_poll_at")
+        days.forEach { d ->
+            appendLine(listOf(d.day, d.firstPollAt, d.lastPollAt).joinToString(","))
         }
     }
 

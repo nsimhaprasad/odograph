@@ -12,6 +12,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -41,6 +43,19 @@ import java.util.Locale
 
 private enum class TripSort { RECENT, KM }
 
+/** What the right-hand pane shows for the selected drive: its route or its logged numbers. */
+private enum class TripView { MAP, DETAILS }
+
+/** Technical/functional facts about one drive, resolved off the UI thread. */
+private data class TripDetail(
+    val startPlace: String?,
+    val endPlace: String?,
+    val points: Int,
+    val kwhPer100: Double?,
+    val rangeAtFullKm: Double?,
+    val impliedRateInr: Double?
+)
+
 private sealed interface TripRowItem {
     data class Header(val date: Long, val label: String, val count: Int) : TripRowItem
     data class Drive(val trip: TripEntity) : TripRowItem
@@ -54,6 +69,8 @@ fun TripListScreen(showTiles: Boolean, palette: Palette) {
     var route by remember { mutableStateOf<List<Pair<Double, Double>>>(emptyList()) }
     var sort by remember { mutableStateOf(TripSort.RECENT) }
     var collapsed by remember { mutableStateOf<Set<String>>(emptySet()) }
+    var view by remember { mutableStateOf(TripView.DETAILS) }
+    var detail by remember { mutableStateOf<TripDetail?>(null) }
 
     // The box has no SIM and therefore no NITZ, so its own timezone may be UTC. Render against
     // the configured zone rather than trusting the device.
@@ -77,6 +94,26 @@ fun TripListScreen(showTiles: Boolean, palette: Palette) {
                 Fix(it.t, it.lat, it.lon, it.speedMps, it.accuracyM, it.interpolated, it.altitudeM)
             }
             buildSmoothRoute(fixes)
+        }
+        detail = withContext(Dispatchers.IO) {
+            val dao = OdographDb.get(ctx).dao()
+            val t = dao.tripById(id) ?: return@withContext null
+            val energyKwh = t.energyKwh
+            val kwhPer100 = BatteryMath.kwhPer100Km(energyKwh, t.distanceM)
+            TripDetail(
+                startPlace = t.startPlaceId?.let { dao.placeById(it)?.displayName },
+                endPlace = t.endPlaceId?.let { dao.placeById(it)?.displayName },
+                points = dao.pointsFor(t.id).size,
+                kwhPer100 = kwhPer100?.let { BatteryMath.round2(it) },
+                rangeAtFullKm = kwhPer100?.let {
+                    BatteryMath.round2(
+                        BatteryMath.rangeAtFullKwh(Settings(ctx).batteryCapacityKwh, it)
+                    )
+                },
+                impliedRateInr = if (energyKwh != null && energyKwh > 0 && t.costInr != null) {
+                    BatteryMath.round2(t.costInr!! / energyKwh)
+                } else null
+            )
         }
     }
     // A new sort mode resets the collapsible group state so nothing is hidden by surprise.
@@ -177,21 +214,41 @@ fun TripListScreen(showTiles: Boolean, palette: Palette) {
             }
         }
         Column(
-            Modifier.weight(0.66f).fillMaxHeight().background(palette.ground).clipToBounds(),
-            verticalArrangement = Arrangement.Center
+            Modifier.weight(0.66f).fillMaxHeight().background(palette.ground).clipToBounds()
         ) {
-            if (route.isEmpty()) {
-                Text(
-                    text = "Select a drive",
-                    color = palette.label,
-                    fontSize = m.body,
-                    modifier = Modifier.padding(m.pad),
-                    textAlign = androidx.compose.ui.text.style.TextAlign.Center
-                )
-            } else if (showTiles) {
-                RouteMap(route, palette, Modifier.fillMaxSize())
-            } else {
-                BareRouteTrace(route, palette, Modifier.fillMaxSize())
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(m.gap / 2),
+                modifier = Modifier.padding(start = m.pad, top = m.pad, bottom = m.gap / 2)
+            ) {
+                Chip("MAP", view == TripView.MAP, palette, m) { view = TripView.MAP }
+                Chip("DETAILS", view == TripView.DETAILS, palette, m) { view = TripView.DETAILS }
+            }
+            when {
+                view == TripView.DETAILS && (selected == null || detail != null) -> {
+                    TripDetailPane(
+                        trip = selected,
+                        detail = detail,
+                        palette = palette,
+                        m = m,
+                        fmt = fmt
+                    )
+                }
+                route.isEmpty() -> {
+                    Column(
+                        Modifier.fillMaxSize(),
+                        verticalArrangement = Arrangement.Center
+                    ) {
+                        Text(
+                            text = "Select a drive",
+                            color = palette.label,
+                            fontSize = m.body,
+                            modifier = Modifier.fillMaxWidth().padding(m.pad),
+                            textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                        )
+                    }
+                }
+                showTiles -> RouteMap(route, palette, Modifier.fillMaxSize())
+                else -> BareRouteTrace(route, palette, Modifier.fillMaxSize())
             }
         }
     }
@@ -262,4 +319,112 @@ private fun TripEntity.batteryLine(): String? {
     }
     costInr?.let { parts += "₹ %.2f".format(it) }
     return if (parts.isEmpty()) null else parts.joinToString("  ·  ")
+}
+
+/**
+ * The "details" face of the trip tab: no map, just the numbers a drive actually logged. Every
+ * row stays silent until the value is real — the same honesty the battery line uses.
+ */
+@Composable
+private fun TripDetailPane(
+    trip: TripEntity?,
+    detail: TripDetail?,
+    palette: Palette,
+    m: Metrics,
+    fmt: SimpleDateFormat
+) {
+    val t = trip
+    if (t == null || detail == null) {
+        Text(
+            text = "Select a drive",
+            color = palette.label,
+            fontSize = m.body,
+            modifier = Modifier.fillMaxSize().padding(m.pad),
+            textAlign = androidx.compose.ui.text.style.TextAlign.Center
+        )
+        return
+    }
+    Column(
+        Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = m.pad)
+    ) {
+        Text(
+            text = fmt.format(Date(t.startedAt)),
+            color = palette.numeral,
+            fontSize = m.stat,
+            fontWeight = FontWeight.SemiBold
+        )
+        Text(
+            text = if (t.endedAt != null) {
+                "to ${fmt.format(Date(t.endedAt))}  ·  ${formatHhMm(t.durationS)}"
+            } else {
+                "${formatHhMm(t.durationS)}  ·  ${formatKm(t.distanceM)} km"
+            },
+            color = palette.dim,
+            fontSize = m.body,
+            modifier = Modifier.padding(top = m.gap / 3)
+        )
+
+        SectionLabel("ROUTE", palette, m)
+        DetailRow("Start", detail.startPlace ?: coords(t.startLat, t.startLon), palette, m)
+        DetailRow("End", detail.endPlace ?: coords(t.endLat, t.endLon), palette, m)
+        DetailRow("Track", "${formatKm(t.distanceM)} km  ·  ${detail.points} points", palette, m)
+
+        SectionLabel("BATTERY", palette, m)
+        if (t.socStart != null && t.socEnd != null) {
+            DetailRow("Charge", "%.0f → %.0f %%".format(t.socStart, t.socEnd), palette, m)
+        }
+        t.energyKwh?.let { DetailRow("Energy", "%.2f kWh".format(it), palette, m) }
+        BatteryMath.kmPerKwh(t.energyKwh, t.distanceM)?.let {
+            DetailRow("Mileage", "%.2f km/kWh".format(it), palette, m)
+        }
+        detail.kwhPer100?.let { DetailRow("Consumption", "%.2f kWh/100km".format(it), palette, m) }
+        detail.rangeAtFullKm?.let { DetailRow("Range at 100%", "%.0f km".format(it), palette, m) }
+        t.costInr?.let { DetailRow("Cost", "₹ %.2f".format(it), palette, m) }
+        detail.impliedRateInr?.let {
+            DetailRow("Effective rate", "₹ %.2f /kWh".format(it), palette, m)
+        }
+
+        SectionLabel("SPEED", palette, m)
+        DetailRow("Max", "${mpsToKmh(t.maxSpeedMps).toInt()} km/h", palette, m)
+        DetailRow("Average", "${mpsToKmh(t.avgSpeedMps.toFloat()).toInt()} km/h", palette, m)
+        DetailRow("Moving", formatHhMm(t.movingS), palette, m)
+        DetailRow("Stationary", formatHhMm((t.durationS - t.movingS).coerceAtLeast(0L)), palette, m)
+        if (t.slowestKmMps > 0f) {
+            DetailRow("Slowest km", "${mpsToKmh(t.slowestKmMps.toFloat()).toInt()} km/h", palette, m)
+        }
+
+        SectionLabel("TERRAIN", palette, m)
+        if (t.elevGainM > 0 || t.elevLossM > 0) {
+            DetailRow("Climb / descend", "↑%.0f m  ·  ↓%.0f m".format(t.elevGainM, t.elevLossM), palette, m)
+        }
+    }
+}
+
+private fun coords(lat: Double?, lon: Double?): String =
+    if (lat != null && lon != null) "%.4f, %.4f".format(lat, lon) else "—"
+
+@Composable
+private fun SectionLabel(title: String, palette: Palette, m: Metrics) {
+    Text(
+        text = title,
+        color = palette.label,
+        fontSize = m.label,
+        letterSpacing = 2.2.sp,
+        modifier = Modifier.padding(top = m.gap, bottom = m.gap / 3)
+    )
+}
+
+@Composable
+private fun DetailRow(label: String, value: String, palette: Palette, m: Metrics) {
+    Row(
+        Modifier.fillMaxWidth().padding(vertical = m.gap / 4),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = androidx.compose.ui.Alignment.CenterVertically
+    ) {
+        Text(label, color = palette.dim, fontSize = m.body)
+        Text(value, color = palette.numeral, fontSize = m.body, fontWeight = FontWeight.Medium)
+    }
 }

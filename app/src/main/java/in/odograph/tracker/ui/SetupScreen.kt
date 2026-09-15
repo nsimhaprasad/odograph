@@ -29,6 +29,7 @@ import `in`.odograph.tracker.export.shareFile
 import `in`.odograph.tracker.export.writeExport
 import `in`.odograph.tracker.probe.DeviceProbe
 import `in`.odograph.tracker.server.DashboardServer
+import `in`.odograph.tracker.server.LanInfo
 import `in`.odograph.tracker.ui.theme.Direction
 import `in`.odograph.tracker.ui.theme.Palette
 import `in`.odograph.tracker.ui.theme.Settings
@@ -54,6 +55,7 @@ fun SetupScreen(
     var limit by remember { mutableStateOf(settings.speedLimitKmh) }
     var zoneId by remember { mutableStateOf(settings.timeZoneId) }
     var alertMode by remember { mutableStateOf(settings.alertMode) }
+    var lanExport by remember { mutableStateOf(settings.lanExportEnabled) }
 
     LaunchedEffect(Unit) {
         probe = runCatching { DeviceProbe.collect(ctx).asText() }
@@ -174,6 +176,27 @@ fun SetupScreen(
                 Text(
                     "Credentials for the iSMART account are typed at " +
                         "http://<this device>:${DashboardServer.PORT}/config, once, from your Mac.",
+                    color = palette.dim, fontSize = m.body,
+                    modifier = Modifier.padding(top = m.gap / 2)
+                )
+            }
+
+            Section("LAN DATA", palette, m) {
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(m.gap / 2)) {
+                    Chip("ON", lanExport, palette, m) { lanExport = true; settings.lanExportEnabled = true }
+                    Chip("OFF", !lanExport, palette, m) { lanExport = false; settings.lanExportEnabled = false }
+                }
+                val ip = remember { LanInfo.lanIpv4() }
+                Text(
+                    if (lanExport) {
+                        val base = ip?.let { "http://$it:${DashboardServer.PORT}" }
+                            ?: "http://<this device>:${DashboardServer.PORT}"
+                        "Every drive, point, charge and coverage row is published at $base/export " +
+                            "— open it from your Mac on the same network, or pull the CSVs with curl."
+                    } else {
+                        "Off. Nothing machine-readable is served; the dashboard HTML stays up for " +
+                            "the touchscreen."
+                    },
                     color = palette.dim, fontSize = m.body,
                     modifier = Modifier.padding(top = m.gap / 2)
                 )

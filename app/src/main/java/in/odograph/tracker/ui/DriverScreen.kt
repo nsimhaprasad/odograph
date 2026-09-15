@@ -107,7 +107,9 @@ private fun TallLayout(
             live.batterySocPercent?.let {
                 BatteryMeter(
                     it, live.batteryCharging, palette, m,
-                    onClick = { TripRecorderService.requestTelematicsRefresh() }
+                    onClick = { TripRecorderService.requestTelematicsRefresh() },
+                    smartRangeKm = live.batteryRangeKm,
+                    carRangeKm = live.mgBatteryRangeKm
                 )
             }
         }
@@ -163,7 +165,9 @@ private fun WideLayout(
             BatteryMeter(
                 it, live.batteryCharging, palette, m,
                 modifier = Modifier.weight(1f),
-                onClick = { TripRecorderService.requestTelematicsRefresh() }
+                onClick = { TripRecorderService.requestTelematicsRefresh() },
+                smartRangeKm = live.batteryRangeKm,
+                carRangeKm = live.mgBatteryRangeKm
             )
         }
         live.batteryRangeAtFullKm?.let {
@@ -230,7 +234,9 @@ private fun BalancedLayout(
                 live.batterySocPercent?.let {
                     BatteryMeter(
                         it, live.batteryCharging, palette, m,
-                        onClick = { TripRecorderService.requestTelematicsRefresh() }
+                        onClick = { TripRecorderService.requestTelematicsRefresh() },
+                        smartRangeKm = live.batteryRangeKm,
+                        carRangeKm = live.mgBatteryRangeKm
                     )
                 }
             }
@@ -276,7 +282,9 @@ private fun BatteryMeter(
     m: Metrics,
     size: TextUnit = m.stat,
     modifier: Modifier = Modifier,
-    onClick: (() -> Unit)? = null
+    onClick: (() -> Unit)? = null,
+    smartRangeKm: Double? = null,
+    carRangeKm: Double? = null
 ) {
     val target = (socPercent / 100.0).coerceIn(0.0, 1.0).toFloat()
     val fill by animateFloatAsState(
@@ -335,5 +343,24 @@ private fun BatteryMeter(
             letterSpacing = 1.1.sp,
             maxLines = 1
         )
+        // Remaining range: the box's own efficiency when enough drives are measured, the car's
+        // quoted figure otherwise, and the car's figure as a small cross-check when both agree
+        // the box should be trusted.
+        val mainKm = smartRangeKm ?: carRangeKm
+        val crossKm = if (smartRangeKm != null && carRangeKm != null) carRangeKm else null
+        if (mainKm != null) {
+            Text(
+                text = buildString {
+                    append("≈ ").append(mainKm.roundToInt()).append(" km")
+                    crossKm?.takeIf { it != smartRangeKm }?.let {
+                        append("  ·  car ").append(it.roundToInt())
+                    }
+                },
+                color = palette.dim,
+                fontSize = m.label,
+                letterSpacing = 0.4.sp,
+                maxLines = 1
+            )
+        }
     }
 }

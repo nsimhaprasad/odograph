@@ -109,10 +109,41 @@ object DashboardServer {
                         )
                     }
                     get("/trips.csv") {
-                        call.respondText(
-                            Exporters.tripsCsv(OdographDb.get(app).dao().allTrips()),
-                            ContentType.Text.CSV
-                        )
+                        exportResponse(call, settings) {
+                            Exporters.tripsCsv(OdographDb.get(app).dao().allTrips())
+                        }
+                    }
+                    // Raw machine-readable exports for a laptop on the same LAN. All gated by the
+                    // SETUP → LAN DATA toggle; the HTML dashboard itself is never gated because it
+                    // is the one surface a car touchscreen can read without another device.
+                    get("/export") {
+                        exportResponse(call, settings, ContentType.Text.Html) {
+                            DashboardHtml.exportPage(
+                                baseUrl = LanInfo.baseUrl(),
+                                counts = listOf(
+                                    "trips.csv" to "Every drive: SOC swing, energy, cost, elevation",
+                                    "points.csv" to "Every GPS sample, one row per point",
+                                    "charges.csv" to "Every plug-in session and its price",
+                                    "telemetry.csv" to "Days the box was alive and polling"
+                                )
+                            )
+                        }
+                    }
+                    get("/points.csv") {
+                        exportResponse(call, settings) {
+                            val dao = OdographDb.get(app).dao()
+                            Exporters.pointsCsv(dao.allTrips().flatMap { dao.pointsFor(it.id) })
+                        }
+                    }
+                    get("/charges.csv") {
+                        exportResponse(call, settings) {
+                            Exporters.chargesCsv(OdographDb.get(app).dao().allChargeEvents())
+                        }
+                    }
+                    get("/telemetry.csv") {
+                        exportResponse(call, settings) {
+                            Exporters.telemetryCsv(OdographDb.get(app).dao().allTelemetryDays())
+                        }
                     }
                     get("/places") {
                         val dao = OdographDb.get(app).dao()
@@ -290,6 +321,27 @@ object DashboardServer {
             homeRateInr = "%.2f".format(settings.homeRateInr),
             outsideRateInr = "%.2f".format(settings.outsideRateInr)
         )
+
+    /**
+     * Serves the machine-readable exports while the SETUP → LAN DATA toggle is on, and an
+     * explicit "off" otherwise rather than a confusing 404. Re-reads the setting on every request
+     * so toggling applies immediately, no restart needed.
+     */
+    private suspend fun exportResponse(
+        call: io.ktor.server.application.ApplicationCall,
+        settings: Settings,
+        contentType: io.ktor.http.ContentType = io.ktor.http.ContentType.Text.CSV,
+        block: suspend () -> String
+    ) {
+        if (settings.lanExportEnabled) {
+            call.respondText(block(), contentType)
+        } else {
+            call.respondText(
+                "LAN export is off.\nTurn it on under SETUP → LAN DATA on the device.\n",
+                ContentType.Text.Plain
+            )
+        }
+    }
 
     /**
      * One live login + vehicle + status round-trip against the real MG servers, for the "Try my

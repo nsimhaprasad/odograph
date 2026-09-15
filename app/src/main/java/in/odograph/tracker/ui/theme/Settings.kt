@@ -98,6 +98,15 @@ class Settings(ctx: Context) {
         set(value) = prefs.edit().putString(KEY_ALERT, value.name).apply()
 
     /**
+     * Whether the device publishes raw trip, point, charge and telemetry data over the LAN so a
+     * laptop on the same network can pull it and analyse it locally. The on-device dashboard is
+     * unaffected; this only gates the machine-readable exports a puller would consume.
+     */
+    var lanExportEnabled: Boolean
+        get() = prefs.getBoolean(KEY_LAN_EXPORT, true)
+        set(value) = prefs.edit().putBoolean(KEY_LAN_EXPORT, value).apply()
+
+    /**
      * Display timezone. Blank means follow the device.
      *
      * A box with no SIM receives no NITZ, so it can learn correct UTC from NTP but never learns
@@ -128,6 +137,7 @@ class Settings(ctx: Context) {
         const val KEY_HOME_RATE = "home_rate_inr"
         const val KEY_OUTSIDE_RATE = "outside_rate_inr"
         const val KEY_GST_RATE = "gst_rate_pct"
+        const val KEY_LAN_EXPORT = "lan_export_enabled"
     }
 }
 
