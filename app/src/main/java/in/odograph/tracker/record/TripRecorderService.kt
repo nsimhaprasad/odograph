@@ -30,6 +30,7 @@ import `in`.odograph.tracker.server.RawFrames
 import `in`.odograph.tracker.sync.Outbound
 import `in`.odograph.tracker.sync.SheetsSync
 import `in`.odograph.tracker.ui.theme.Settings
+import `in`.odograph.tracker.core.Arrival
 import `in`.odograph.tracker.core.Departure
 import `in`.odograph.tracker.core.Telematics
 import io.windsor.telematics.TelematicsClient
@@ -312,6 +313,13 @@ class TripRecorderService : Service() {
     private val pendingFixes = ArrayDeque<Fix>()
     /** What the last run left behind, held until there is a trip to attach it to. */
     private var recovery = TripRecovery.Recovery()
+    /**
+     * The car's own account of being shut down, from the most recent telematics frame.
+     *
+     * Lets a drive end the moment the car is locked instead of waiting out the stationary timer.
+     * Stays empty when telematics is off or unreachable, and the timer carries it alone.
+     */
+    private var carState = Arrival.CarState()
     /** Lifetime odometer at boot: seeded baseline + every closed trip's distance. */
     private var odoBaseKm: Double = 0.0
     private lateinit var settings: Settings
@@ -467,6 +475,10 @@ class TripRecorderService : Service() {
                 status.charge?.let { RawFrames.record(framesDir, "charge.decoded", it.toString()) }
                 val ch = status.charge
                 val now = System.currentTimeMillis()
+                // What the car says about being shut down. A locked car has been walked away from,
+                // which ends a drive far sooner and far more certainly than waiting out a timer
+                // that cannot tell a car park from a level crossing.
+                carState = Arrival.CarState(locked = status.locked, canBusActive = status.canBusActive)
                 val powerKw = Telematics.chargePowerKw(ch)
                 // A snapshot without a SOC reading is not charge data — it is noise that would
                 // make a battery-less trip look instrumented. The car can cut power any moment,
@@ -694,6 +706,28 @@ class TripRecorderService : Service() {
         pendingFixes.clear()
     }
 
+    /**
+     * Ends the open drive and returns the recorder to waiting for the next one.
+     *
+     * The trip is written through the same path a boot would have used, so a drive closed by
+     * parking and a drive closed by a power cut are recorded identically — and one that turns out
+     * not to have moved is discarded by that path rather than surfacing as a 0 km row.
+     */
+    private fun closeTripOnArrival(dao: OdographDao) {
+        val closed = tripId
+        recovery = TripRecovery.close(
+            dao, closed,
+            capacityKwh = settings.batteryCapacityKwh,
+            homeRateInr = settings.homeRateInr,
+            outsideRateInr = settings.outsideRateInr
+        )
+        tripId = NO_TRIP
+        startedAt = null
+        pendingFixes.clear()
+        track = LiveTrack()
+        Diagnostics.crumb("trip closed on arrival trip=$closed")
+    }
+
     /** The live readout, which a parked car still gets — it just is not recording a drive. */
     private fun publishLiveState(
         fix: Fix,
@@ -774,7 +808,16 @@ class TripRecorderService : Service() {
             driveEndedCharge = false
         }
 
-        if (effectiveSpeedMps > 0.5f) lastMovedAt = fix.t
+        if (effectiveSpeedMps >= Arrival.STILL_SPEED_MPS) lastMovedAt = fix.t
+
+        // A drive that has arrived is written now rather than at the next boot, so an outing with
+        // a stop in the middle is two trips rather than one that begins and ends at home.
+        if (tripId != NO_TRIP && Arrival.arrived(Arrival.stillForMs(lastMovedAt, fix.t), carState)) {
+            closeTripOnArrival(dao)
+            publishLiveState(fix, effectiveSpeedMps, moving = false)
+            lastFix = fix
+            return
+        }
         val limit = settings.speedLimitKmh
         if (limit != configuredLimit) {
             configuredLimit = limit

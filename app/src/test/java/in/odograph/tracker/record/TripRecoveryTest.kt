@@ -27,6 +27,74 @@ class TripRecoveryTest {
     @After
     fun tearDown() = db.close()
 
+    // ---------------------------------------------------------------- closing on arrival
+
+    /**
+     * Parking now writes the trip, rather than leaving it open for the next boot to find. The two
+     * paths are the same code, so a drive ended by parking and one ended by a power cut are
+     * recorded identically.
+     */
+    @Test
+    fun `closing a trip that moved writes it with its totals and endpoints`() {
+        val dao = db.dao()
+        val id = dao.startTrip(1_000_000L)
+        dao.appendPoint(PointEntity(0, id, 1_000_000L, 12.9700, 77.5900, 0f, null, 900.0, 5f, false))
+        dao.appendPoint(PointEntity(0, id, 1_060_000L, 12.9800, 77.5900, 15f, null, 905.0, 5f, false))
+
+        val ended = TripRecovery.close(dao, id)
+
+        val trip = dao.tripById(id)!!
+        assertThat(trip.endedAt).isEqualTo(1_060_000L)
+        assertThat(trip.distanceM).isGreaterThan(0.0)
+        assertThat(trip.endLat).isEqualTo(12.9800)
+        assertThat(ended.seedLat).`as`("the next trip starts from here").isEqualTo(12.9800)
+    }
+
+    @Test
+    fun `closing a trip that never moved discards it rather than writing a zero km drive`() {
+        val dao = db.dao()
+        val id = dao.startTrip(1_000_000L)
+        dao.appendPoint(PointEntity(0, id, 1_000_000L, 12.9700, 77.5900, 0f, null, 900.0, 5f, false))
+        dao.appendPoint(PointEntity(0, id, 1_060_000L, 12.9700, 77.5900, 0f, null, 900.0, 5f, false))
+
+        val ended = TripRecovery.close(dao, id)
+
+        assertThat(dao.tripById(id)).isNull()
+        assertThat(dao.allTrips()).isEmpty()
+        assertThat(ended.seedLat).isNull()
+    }
+
+    @Test
+    fun `closing a trip that does not exist is harmless`() {
+        assertThat(TripRecovery.close(db.dao(), 9_999L).seedLat).isNull()
+    }
+
+    /**
+     * The point of closing on arrival: an outing with a stop in the middle becomes two drives
+     * between three places, not one drive that begins and ends at home. Every "most visited route"
+     * answer depends on this being right.
+     */
+    @Test
+    fun `an outing with a stop becomes two drives rather than one round trip`() {
+        val dao = db.dao()
+
+        val out = dao.startTrip(1_000_000L)
+        dao.appendPoint(PointEntity(0, out, 1_000_000L, 12.9700, 77.5900, 0f, null, 900.0, 5f, false))
+        dao.appendPoint(PointEntity(0, out, 1_060_000L, 12.9800, 77.6100, 15f, null, 905.0, 5f, false))
+        TripRecovery.close(dao, out)
+
+        val back = dao.startTrip(2_000_000L)
+        dao.appendPoint(PointEntity(0, back, 2_000_000L, 12.9800, 77.6100, 0f, null, 905.0, 5f, false))
+        dao.appendPoint(PointEntity(0, back, 2_060_000L, 12.9700, 77.5900, 15f, null, 900.0, 5f, false))
+        TripRecovery.close(dao, back)
+
+        val trips = dao.allTrips()
+        assertThat(trips).hasSize(2)
+        assertThat(trips.all { it.endedAt != null }).`as`("both are closed").isTrue()
+        val outbound = dao.tripById(out)!!
+        assertThat(outbound.startLat).isNotEqualTo(outbound.endLat)
+    }
+
     // ---------------------------------------------------------------- opening on movement
 
     /**
