@@ -387,7 +387,20 @@ fun ChargingScreen(palette: Palette) {
     val gst = settings.gstRatePct
     var events by remember { mutableStateOf<List<ChargeEventEntity>>(emptyList()) }
     var editing by remember { mutableStateOf<ChargeEventEntity?>(null) }
+    var editingPlaceName by remember { mutableStateOf("unknown") }
+    var editingPlaceLabel by remember { mutableStateOf<String?>(null) }
     var placeStats by remember { mutableStateOf<List<ChargePlaceStatsRow>>(emptyList()) }
+
+    // The place name/label under edit comes from Room, which is off-limits on the main thread.
+    val editingId = editing?.id
+    LaunchedEffect(editingId) {
+        val pid = editing?.placeId ?: return@LaunchedEffect
+        val p = withContext(Dispatchers.IO) {
+            runCatching { OdographDb.get(ctx).dao().placeById(pid) }.getOrNull()
+        }
+        editingPlaceName = p?.displayName ?: "unknown"
+        editingPlaceLabel = p?.label
+    }
 
     val fmt = remember {
         SimpleDateFormat("d MMM HH:mm", Locale.getDefault()).apply { timeZone = settings.zone }
@@ -501,15 +514,12 @@ fun ChargingScreen(palette: Palette) {
             contentAlignment = Alignment.Center
         ) {
             val kindLabel = if (e.kind == ChargeKind.FAST.ordinal) "fast" else "slow"
-            val place = e.placeId?.let { pid ->
-                runCatching { OdographDb.get(ctx).dao().placeById(pid) }.getOrNull()
-            }
-            val placeName = place?.displayName ?: "unknown"
+            val placeName = editingPlaceName
             ChargeEditDialog(
                 title = "CHARGE  ·  ${kindLabel.uppercase(Locale.getDefault())}  ·  ${placeName}",
                 subtitle = "%.2f kWh · current ₹%.2f".format(e.energyKwh, e.costInr ?: 0.0),
                 e = e,
-                placeLabel = place?.label,
+                placeLabel = editingPlaceLabel,
                 gstRatePct = gst,
                 palette = palette,
                 m = m,

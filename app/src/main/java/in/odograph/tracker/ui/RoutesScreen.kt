@@ -232,13 +232,14 @@ fun RoutesScreen(palette: Palette) {
                                 value = draft,
                                 onValueChange = { draft = it },
                                 singleLine = true,
-                                placeholder = { Text("Home, Office, Farm...", fontSize = m.body) },
+                                placeholder = { Text("Home, Office, Farm...", color = palette.dim, fontSize = m.body) },
                                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
                                 keyboardActions = KeyboardActions(onDone = {
                                     savePlaceLabel(ctx, place.id, draft)
                                     editingId = null
                                     reloadToken++
                                 }),
+                                colors = textFieldColors(palette),
                                 modifier = Modifier.weight(1f)
                             )
                             Chip("SAVE", true, palette, m) {

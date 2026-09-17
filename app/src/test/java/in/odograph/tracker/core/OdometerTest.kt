@@ -100,4 +100,66 @@ class OdometerTest {
         assertThat(Odometer.drift(20400.0, 20412.5)).isEqualTo(-12.5, within(0.001))
         assertThat(Odometer.drift(20504.0, 20500.0)).isEqualTo(4.0, within(0.001))
     }
+
+    @Test
+    fun `anchor uses no calibration, not anchored by default`() {
+        // A fresh box: no dash anchor yet, so the live odo is the plain calibration line (0 km).
+        assertThat(Odometer.anchored(settings)).isFalse()
+        assertThat(Odometer.liveOdoKm(settings, 0.0)).isEqualTo(0.0, within(0.001))
+        assertThat(Odometer.liveOdoKm(settings, 50.0)).isEqualTo(50.0, within(0.001))
+    }
+
+    @Test
+    fun `adopting the dash absorbs the whole carried gap without touching trips`() {
+        val s = Settings(ApplicationProvider.getApplicationContext())
+        // Car rolled 20,000 km before tracking; the app has only measured a few hundred.
+        assertThat(Odometer.adoptCarOdo(s, 20000.0, 100.0)).isTrue()
+        assertThat(Odometer.anchored(s)).isTrue()
+        // The odometer snaps to the dash at the adoption moment…
+        assertThat(Odometer.liveOdoKm(s, 100.0)).isEqualTo(20000.0, within(0.001))
+        // …and ticks up from there with the measured km since.
+        assertThat(Odometer.liveOdoKm(s, 120.0)).isEqualTo(20020.0, within(0.001))
+    }
+
+    @Test
+    fun `the first adopted reading accepts any distance`() {
+        val s = Settings(ApplicationProvider.getApplicationContext())
+        // No previous anchor → the 18k gap is a carried offset, not a suspect regression.
+        assertThat(Odometer.adoptCarOdo(s, 20000.0, 350.0)).isTrue()
+        assertThat(Odometer.liveOdoKm(s, 350.0)).isEqualTo(20000.0, within(0.001))
+    }
+
+    @Test
+    fun `a dash reading cannot go backwards once anchored`() {
+        val s = Settings(ApplicationProvider.getApplicationContext())
+        assertThat(Odometer.adoptCarOdo(s, 20000.0, 100.0)).isTrue()
+        // A car's odometer never decreases — reject the glitchy dip.
+        assertThat(Odometer.adoptCarOdo(s, 19999.0, 115.0)).isFalse()
+        assertThat(s.odoMgAnchorCarKm).isEqualTo(20000.0, within(0.001))
+        assertThat(Odometer.adoptCarOdo(s, 20005.0, 115.0)).isTrue()
+        assertThat(Odometer.liveOdoKm(s, 115.0)).isEqualTo(20005.0, within(0.001))
+    }
+
+    @Test
+    fun `a raw zero or negative dash read is ignored`() {
+        val s = Settings(ApplicationProvider.getApplicationContext())
+        assertThat(Odometer.adoptCarOdo(s, 0.0, 0.0)).isFalse()
+        assertThat(Odometer.adoptCarOdo(s, -5.0, 0.0)).isFalse()
+        assertThat(Odometer.anchored(s)).isFalse()
+    }
+
+    @Test
+    fun `drift clears once the odometer is anchored to the dash`() {
+        val s = Settings(ApplicationProvider.getApplicationContext())
+        // App computed a calibration line sitting at 2,000 km while the dash really reads 20,000.
+        Odometer.calibrate(s, 2000.0, 500.0)
+        assertThat(Odometer.appOdoKm(s, 500.0)).isEqualTo(2000.0, within(0.001))
+        // So the untethered app carries an 18,000 km gap…
+        assertThat(Odometer.drift(20000.0, Odometer.appOdoKm(s, 500.0)))
+            .isEqualTo(18000.0, within(0.001))
+        // …then the anchor snaps ours to the car and the drift is gone.
+        assertThat(Odometer.adoptCarOdo(s, 20000.0, 500.0)).isTrue()
+        assertThat(Odometer.drift(20000.0, Odometer.liveOdoKm(s, 500.0)))
+            .isEqualTo(0.0, within(0.001))
+    }
 }

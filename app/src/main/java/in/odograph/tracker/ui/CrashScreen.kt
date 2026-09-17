@@ -23,10 +23,13 @@ import androidx.compose.ui.unit.sp
  */
 @Composable
 fun CrashScreen(report: String, onDismiss: () -> Unit) {
+    // The whole screen is the button — the box is touched by a driver, and only a full-surface
+    // tap reliably dismisses a while-screen like this.
     Column(
         Modifier
             .fillMaxSize()
             .background(Color(0xFF120A0B))
+            .clickable { onDismiss() }
             .verticalScroll(rememberScrollState())
             .padding(16.dp)
     ) {
@@ -37,13 +40,11 @@ fun CrashScreen(report: String, onDismiss: () -> Unit) {
             letterSpacing = 2.sp
         )
         Text(
-            text = "TAP ANYWHERE TO DISMISS AND RETRY",
+            text = "THE APP DIED ON ITS LAST RUN. TAP THE SCREEN TO CLEAR THIS AND OPEN THE APP FRESH.",
             color = Color(0xFF8B96A5),
             fontSize = 10.sp,
             letterSpacing = 1.5.sp,
-            modifier = Modifier
-                .padding(top = 4.dp, bottom = 14.dp)
-                .clickable { onDismiss() }
+            modifier = Modifier.padding(top = 4.dp, bottom = 14.dp)
         )
         Text(
             text = report,

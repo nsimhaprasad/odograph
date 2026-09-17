@@ -62,6 +62,8 @@ fun PlacesScreen(palette: Palette) {
     var savedNote by remember { mutableStateOf("") }
     var known by remember { mutableStateOf<List<KnownPlace>>(emptyList()) }
     var reload by remember { mutableStateOf(0) }
+    var renamingId by remember { mutableStateOf<Long?>(null) }
+    var renameText by remember { mutableStateOf("") }
 
     LaunchedEffect(reload) {
         val places = withContext(Dispatchers.IO) {
@@ -87,7 +89,7 @@ fun PlacesScreen(palette: Palette) {
                 value = query,
                 onValueChange = { query = it },
                 singleLine = true,
-                placeholder = { Text("Find a place…", fontSize = m.body) },
+                placeholder = { Text("Find a place…", color = palette.dim, fontSize = m.body) },
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
                 keyboardActions = KeyboardActions(onSearch = {
                     searching = true
@@ -101,6 +103,7 @@ fun PlacesScreen(palette: Palette) {
                         searched = true
                     }
                 }),
+                colors = textFieldColors(palette),
                 modifier = Modifier.fillMaxWidth()
             )
 
@@ -164,17 +167,22 @@ fun PlacesScreen(palette: Palette) {
                     value = name,
                     onValueChange = { name = it },
                     singleLine = true,
-                    placeholder = { Text("Label it — Home, Office, Farm…", fontSize = m.body) },
+                    placeholder = { Text("Label it — Home, Office, Farm…", color = palette.dim, fontSize = m.body) },
+                    colors = textFieldColors(palette),
                     modifier = Modifier.fillMaxWidth()
                 )
                 Row(horizontalArrangement = Arrangement.spacedBy(m.gap / 2)) {
                     Chip("SAVE PLACE", true, palette, m) {
                         val p = pin ?: return@Chip
-                        savedNote = runCatching {
-                            val dao = OdographDb.get(ctx).dao()
-                            val saved = PlaceRepo(dao).createOrReposition(p.first, p.second, name)
-                            "${saved.displayName} pinned."
-                        }.getOrElse { "Could not save now — try again." }
+                        scope.launch {
+                            savedNote = withContext(Dispatchers.IO) {
+                                runCatching {
+                                    val dao = OdographDb.get(ctx).dao()
+                                    val saved = PlaceRepo(dao).createOrReposition(p.first, p.second, name)
+                                    "${saved.displayName} pinned."
+                                }.getOrElse { "Could not save now — try again." }
+                            }
+                        }
                         reload++
                     }
                     if (savedNote.isNotEmpty()) {
@@ -200,30 +208,71 @@ fun PlacesScreen(palette: Palette) {
                     )
                 } else {
                     known.forEach { place ->
-                        Row(
-                            modifier = Modifier.fillMaxWidth().padding(vertical = m.gap / 3),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Column(Modifier.weight(1f)) {
+                        if (renamingId == place.id) {
+                            OutlinedTextField(
+                                value = renameText,
+                                onValueChange = { renameText = it },
+                                singleLine = true,
+                                placeholder = { Text("Label it — Home, Office, Farm…", color = palette.dim, fontSize = m.body) },
+                                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                                keyboardActions = KeyboardActions(onDone = {
+                                    val dao = OdographDb.get(ctx).dao()
+                                    scope.launch {
+                                        withContext(Dispatchers.IO) {
+                                            dao.setPlaceLabel(place.id, renameText.trim().ifBlank { null })
+                                        }
+                                        renamingId = null
+                                        reload++
+                                    }
+                                }),
+                                colors = textFieldColors(palette),
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                            Row(horizontalArrangement = Arrangement.spacedBy(m.gap / 2)) {
+                                Chip("SAVE LABEL", true, palette, m) {
+                                    val dao = OdographDb.get(ctx).dao()
+                                    scope.launch {
+                                        withContext(Dispatchers.IO) {
+                                            dao.setPlaceLabel(place.id, renameText.trim().ifBlank { null })
+                                        }
+                                        renamingId = null
+                                        reload++
+                                    }
+                                }
+                                Chip("CANCEL", false, palette, m) { renamingId = null }
+                            }
+                        } else {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable {
+                                        renamingId = place.id
+                                        renameText = place.name
+                                    }
+                                    .padding(vertical = m.gap / 3),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column(Modifier.weight(1f)) {
+                                    Text(
+                                        text = place.name,
+                                        color = palette.numeral,
+                                        fontSize = m.stat,
+                                        fontWeight = FontWeight.Medium,
+                                        maxLines = 1
+                                    )
+                                    Text(
+                                        text = "drive-placed, auto-counting · tap to label",
+                                        color = palette.label,
+                                        fontSize = m.body
+                                    )
+                                }
                                 Text(
-                                    text = place.name,
-                                    color = palette.numeral,
+                                    text = "${place.visits}",
+                                    color = palette.accent2,
                                     fontSize = m.stat,
-                                    fontWeight = FontWeight.Medium,
-                                    maxLines = 1
-                                )
-                                Text(
-                                    text = "drive-placed, auto-counting",
-                                    color = palette.label,
-                                    fontSize = m.body
+                                    fontWeight = FontWeight.SemiBold
                                 )
                             }
-                            Text(
-                                text = "${place.visits}",
-                                color = palette.accent2,
-                                fontSize = m.stat,
-                                fontWeight = FontWeight.SemiBold
-                            )
                         }
                     }
                 }

@@ -121,7 +121,9 @@ fun OdographApp() {
     // as a prompt until the driver APPLYs or IGNOREs it — a dismissal at the car no longer
     // erases the debt silently.
     LaunchedEffect(Unit) {
-        TripRecorderService.raisePendingPriceReminder(OdographDb.get(ctx).dao())
+        withContext(Dispatchers.IO) {
+            TripRecorderService.raisePendingPriceReminder(OdographDb.get(ctx).dao())
+        }
     }
 
     BoxWithConstraints(Modifier.fillMaxSize().background(palette.ground)) {

@@ -197,7 +197,7 @@ class TripRecorderService : Service() {
          */
         fun refreshCalibratedOdo(dao: `in`.odograph.tracker.data.OdographDao?, settings: Settings) {
             if (dao == null) return
-            val base = `in`.odograph.tracker.core.Odometer.appOdoKm(
+            val base = `in`.odograph.tracker.core.Odometer.liveOdoKm(
                 settings, dao.trackedDistanceM() / 1000.0
             )
             _state.update { it.copy(odoKm = base + it.distanceM / 1000.0 *
@@ -319,7 +319,7 @@ class TripRecorderService : Service() {
                 outsideRateInr = settings.outsideRateInr
             )
             Diagnostics.crumb("recovery done trip=$tripId")
-            odoBaseKm = `in`.odograph.tracker.core.Odometer.appOdoKm(settings, dao.trackedDistanceM() / 1000.0)
+            odoBaseKm = `in`.odograph.tracker.core.Odometer.liveOdoKm(settings, dao.trackedDistanceM() / 1000.0)
             _state.value = LiveState(tripId = tripId, odoKm = odoBaseKm)
             // A charge owed an answer is the first thing a boot should ask again.
             raisePendingPriceReminder(dao)
@@ -489,11 +489,16 @@ class TripRecorderService : Service() {
                 // the days it did not.
                 recordDailyCoverage(dao, settings.zone, now)
 
-                // The car quotes its own odometer on telematics frames; anything ours counts up
-                // against that is drift (GNSS distance error, a wrong seed, a wheel-off). Compare
-                // live so the setup page can offer a one-tap recalibrate, and nag once a day when
-                // the mismatch grows past the noise floor.
-                checkOdoDrift(ch?.odometerKm, settings)
+                // The car quotes its own odometer on telematics frames; the dash is ground truth,
+                // so adopt it as the odometer anchor. Existing trips are never rewritten — the gap
+                // between a car that had already covered 18k km before tracking began and the app's
+                // count is an offset, not a measurement error, so it is absorbed here in one number.
+                val carOdoKm = status.odometerKm ?: ch?.odometerKm
+                adoptMgOdometerAnchor(carOdoKm, dao)
+                // Anything ours counts up against that is drift (GNSS distance error, a wrong seed,
+                // a wheel-off). Compare live so the setup page can offer a one-tap recalibrate, and
+                // nag once a day when the mismatch grows past the noise floor.
+                checkOdoDrift(carOdoKm, settings)
 
                 // If a long stretch has gone by without a dash reading, the odometer window keeps
                 // stretching uncalibrated — ask the driver to record one (at most once a day).
@@ -819,6 +824,24 @@ class TripRecorderService : Service() {
     }
 
     /**
+     * Adopts the car's own dash odometer (reported over MG telematics) as the authoritative source.
+     * The 18,000 km a car carried before the app started counting is a baseline offset — it must not
+     * be distributed across the recorded trips, which are real travelled kilometres. So instead of
+     * calibrating (which would rescale a window of trips), this snapshots the anchor: the car's dash
+     * number plus however much the app has measured since that quote. The base shifts once, live;
+     * trips are untouched.
+     */
+    private fun adoptMgOdometerAnchor(carOdoKm: Double?, dao: `in`.odograph.tracker.data.OdographDao) {
+        if (carOdoKm == null || carOdoKm <= 0.0) return
+        val state = _state.value
+        val measuredNow = dao.trackedDistanceM() / 1000.0 + state.distanceM / 1000.0
+        if (!`in`.odograph.tracker.core.Odometer.adoptCarOdo(settings, carOdoKm, measuredNow)) return
+        odoBaseKm = `in`.odograph.tracker.core.Odometer.liveOdoKm(settings, dao.trackedDistanceM() / 1000.0)
+        _state.update { it.copy(odoKm = odoBaseKm + it.distanceM / 1000.0 *
+            `in`.odograph.tracker.core.Odometer.factor(settings)) }
+    }
+
+    /**
      * Compares the car's own odometer against the app's computed one and surfaces the result.
      *
      * The car is ground truth: its dash reading ticks up with real wheel revolutions, while ours
@@ -867,6 +890,9 @@ class TripRecorderService : Service() {
      */
     private fun checkOdoRecordDue(dao: `in`.odograph.tracker.data.OdographDao?, settings: Settings) {
         if (dao == null) return
+        // The car reports its own dash read over telematics, so once it has been quoted the
+        // odometer self-corrects and there is nothing left for the driver to type in.
+        if (`in`.odograph.tracker.core.Odometer.anchored(settings)) return
         val freshKm = `in`.odograph.tracker.core.Odometer.recordDueAt(
             settings, dao.trackedDistanceM() / 1000.0
         ) ?: return

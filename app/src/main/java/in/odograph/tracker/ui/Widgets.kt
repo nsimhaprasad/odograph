@@ -20,10 +20,12 @@ import androidx.compose.ui.unit.sp
 import `in`.odograph.tracker.ui.theme.Palette
 
 /**
- * OutlinedTextField colors matched to the instrument palette. Without this the Material default
- * (near-black on a white field) renders as dark-on-dark text against the dark track, so typed
- * input is effectively invisible — the "camouflaged" bug the driver reported: the caret moved,
- * the field looked empty. Shared by every field in the app (charge edits, setup).
+ * OutlinedTextField colors matched to the instrument palette, with the input always readable:
+ * typed text is the page's bright numeral, the caret and focused border the accent, and the label
+ * a stepped-up gray (readable on both night and day grounds) while unfocused. Without this the
+ * Material default (near-black on a white field) renders as dark-on-dark text against the dark
+ * track, so typed input is effectively invisible — the "camouflaged" bug the driver reported: the
+ * caret moved, the field looked empty. Shared by every field in the app (charge edits, setup).
  */
 @Composable
 fun textFieldColors(palette: Palette) =
@@ -32,8 +34,8 @@ fun textFieldColors(palette: Palette) =
         unfocusedTextColor = palette.numeral,
         cursorColor = palette.accent,
         focusedLabelColor = palette.accent,
-        unfocusedLabelColor = palette.label,
-        focusedBorderColor = palette.accent.copy(alpha = 0.8f),
+        unfocusedLabelColor = palette.dim,
+        focusedBorderColor = palette.accent.copy(alpha = 0.9f),
         unfocusedBorderColor = palette.track,
         focusedContainerColor = palette.ground,
         unfocusedContainerColor = palette.ground

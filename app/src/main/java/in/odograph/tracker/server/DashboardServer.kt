@@ -287,12 +287,11 @@ object DashboardServer {
                         params["home_rate"]?.toDoubleOrNull()?.let { settings.homeRateInr = it }
                         params["out_rate"]?.toDoubleOrNull()?.let { settings.outsideRateInr = it }
                         params["current_odo"]?.toDoubleOrNull()?.let { current ->
-                            // Calibrate: with meaningful tracking this re-solves the factor, so
-                            // the drift is shared across every trip proportionally rather than
-                            // rewriting any row or moving the 20,000 km seed.
+                            // The car's dash is ground truth: anchor to it so the odometer snaps to
+                            // the real number and trips are never rescaled.
                             val dao = OdographDb.get(app).dao()
                             `in`.odograph.tracker.core.Odometer
-                                .calibrate(settings, current, dao.trackedDistanceM() / 1000.0)
+                                .adoptCarOdo(settings, current, dao.trackedDistanceM() / 1000.0)
                         }
 
                         val phone = params["tl_phone"]?.trim().orEmpty()
@@ -446,7 +445,7 @@ object DashboardServer {
             outsideRateInr = "%.2f".format(settings.outsideRateInr),
             docsSyncHours = settings.docsSyncHours,
             lastDocsSyncAt = settings.lastDocsSyncAt,
-            odoCurrentKm = `in`.odograph.tracker.core.Odometer.appOdoKm(settings, trackedKm),
+            odoCurrentKm = `in`.odograph.tracker.core.Odometer.liveOdoKm(settings, trackedKm),
             odoBaselineKm = settings.odoBaselineKm,
             odoCalibratedAt = settings.odoCalibratedAt
         )

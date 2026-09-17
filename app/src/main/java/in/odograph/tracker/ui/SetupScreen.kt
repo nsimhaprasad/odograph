@@ -99,7 +99,7 @@ fun SetupScreen(
             carOdoKm = dao.latestCarOdoKm()
         }
     }
-    val currentOdoKm = remember(trackedKm) { `in`.odograph.tracker.core.Odometer.appOdoKm(settings, trackedKm) }
+    val currentOdoKm = remember(trackedKm) { `in`.odograph.tracker.core.Odometer.liveOdoKm(settings, trackedKm) }
     val driftKm = remember(carOdoKm, currentOdoKm) {
         carOdoKm?.let { `in`.odograph.tracker.core.Odometer.drift(it, currentOdoKm) }
     }
@@ -302,19 +302,19 @@ fun SetupScreen(
             }
 
             Section("ODOMETER", palette, m) {
-                // The app counts up from a seeded baseline; the car quotes its real dash reading
-                // over telematics. Comparing them is the drift check. Calibration records the
-                // dash reading as a calibration point: it corrects only the trips driven since
-                // the previous reading, never the older ones, and shares the drift across them
-                // proportionally. A reading far off what the app expected is flagged before it is
-                // applied, because it would rescale a whole window of trips.
+                // The car's own dash reading comes over MG telematics and is ground truth. When it
+                // has been quoted, the app anchors to it: the odometer shows that number plus
+                // whatever the app has measured since. Recorded trips are never touched — a gap
+                // between a car that already carried kilometres and the app's count is a baseline
+                // offset, not a measurement error, so it is absorbed in this one number instead of
+                // being spread across the trips.
                 Text(
                     "App: %.0f km · car: %s km · drift: %s".format(
                         currentOdoKm,
                         carOdoKm?.let { "%.0f".format(it) } ?: "—",
                         driftKm?.let {
                             if (kotlin.math.abs(it) >= TripRecorderService.ODO_DRIFT_FLAG_KM) {
-                                "%+.1f km (needs calibration)".format(it)
+                                "%+.1f km (anchored to car)".format(it)
                             } else {
                                 "%+.1f km (on track)".format(it)
                             }
@@ -328,10 +328,10 @@ fun SetupScreen(
                 )
 
                 val fresh = remember(trackedKm) { `in`.odograph.tracker.core.Odometer.recordDueAt(settings, trackedKm) }
-                if (fresh != null) {
+                if (fresh != null && !`in`.odograph.tracker.core.Odometer.anchored(settings)) {
                     Text(
-                        "%.0f km travelled since your last odometer reading — record the dash " +
-                            "number to keep the app on track.".format(fresh),
+                        "%.0f km travelled since your last odometer reading — the car reports its " +
+                            "own dash read over telematics, so this self-corrects once connected.".format(fresh),
                         color = palette.warn,
                         fontSize = m.body,
                         modifier = Modifier.padding(top = m.gap / 2)
@@ -345,10 +345,9 @@ fun SetupScreen(
                     }
                     if (carPreview.suspect) {
                         Text(
-                            "Warning: the car's %.0f km is %+.1f km off what the app expected " +
-                                "— this would rescale every trip since the last reading. Point the " +
-                                "number in the field and tap SET ODOMETER only if you trust it."
-                                .format(carKm, carPreview.offByKm),
+                            "Warning: the car's %.0f km is %+.1f km off what the app measured — " +
+                                "RECORD FROM CAR anchors the odometer to the dash and trips are " +
+                                "never rewritten, so this is safe to apply.".format(carKm, carPreview.offByKm),
                             color = palette.warn, fontSize = m.body,
                             modifier = Modifier.padding(top = m.gap / 2)
                         )
@@ -358,18 +357,14 @@ fun SetupScreen(
                             scope.launch {
                                 val msg = withContext(Dispatchers.IO) {
                                     runCatching {
-                                        val r = `in`.odograph.tracker.core.Odometer
-                                            .calibrate(settings, carKm, trackedKm)
-                                        val note = if (r.applied) {
-                                            "Recorded the car's %.0f km — trips since your last " +
-                                                "reading corrected.".format(carKm)
-                                        } else {
-                                            "Not recorded: ${r.reason ?: "reading rejected"}."
-                                        }
-                                        if (r.applied) {
+                                        val ok = `in`.odograph.tracker.core.Odometer
+                                            .adoptCarOdo(settings, carKm, trackedKm)
+                                        if (ok) {
                                             TripRecorderService.refreshCalibratedOdo(dao, settings)
+                                            "Odometer anchored to the car's %.0f km — trips untouched.".format(carKm)
+                                        } else {
+                                            "Not recorded: the dashboard reading is ahead of its last known value."
                                         }
-                                        note
                                     }.getOrElse { "Calibration failed: ${it.message}" }
                                 }
                                 note = msg
@@ -390,8 +385,8 @@ fun SetupScreen(
                 }
                 if (manualPreview?.suspect == true) {
                     Text(
-                        "%s %+.1f km off what the app expected — rescaling trips since the last " +
-                            "reading. Double-check the number.".format(
+                        "%s %+.1f km off what the app expected — it will anchor the odometer there " +
+                            "rather than rescale trips. Double-check the number.".format(
                             odoReading, manualPreview.offByKm
                         ),
                         color = palette.warn, fontSize = m.body,
@@ -403,17 +398,14 @@ fun SetupScreen(
                         odoReading.toDoubleOrNull()?.let { reading ->
                             scope.launch {
                                 val msg = withContext(Dispatchers.IO) {
-                                    val r = `in`.odograph.tracker.core.Odometer
-                                        .calibrate(settings, reading, trackedKm)
-                                    val n = if (r.applied) {
-                                        "Recorded %.0f km — trips since your last reading corrected.".format(reading)
-                                    } else {
-                                        "Not recorded: ${r.reason ?: "reading rejected"}."
-                                    }
-                                    if (r.applied) {
+                                    val ok = `in`.odograph.tracker.core.Odometer
+                                        .adoptCarOdo(settings, reading, trackedKm)
+                                    if (ok) {
                                         TripRecorderService.refreshCalibratedOdo(dao, settings)
+                                        "Odometer set to %.0f km — trips untouched.".format(reading)
+                                    } else {
+                                        "Not recorded: that reading is behind the anchored odometer."
                                     }
-                                    n
                                 }
                                 note = msg
                             }

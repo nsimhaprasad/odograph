@@ -186,6 +186,20 @@ class Settings(ctx: Context) {
         set(value) = prefs.edit().putLong(KEY_ODO_RECORD_NAG, value).apply()
 
     /**
+     * The car's own dash odometer (km) as reported by MG telematics on the last frame. The dash is
+     * ground truth — wheel revolutions, not GNSS — so once it is quoted the live odometer follows
+     * it, and the app simply adds whatever it has measured since that quote. 0 means "never quoted".
+     */
+    var odoMgAnchorCarKm: Double
+        get() = prefs.getFloat(KEY_ODO_MG_ANCHOR_CAR, 0f).toDouble()
+        set(value) = prefs.edit().putFloat(KEY_ODO_MG_ANCHOR_CAR, value.toFloat().coerceIn(0f, 2_000_000f)).apply()
+
+    /** The app's measured km (closed trips + the open drive) at the moment [odoMgAnchorCarKm] was quoted. */
+    var odoMgAnchorMeasuredKm: Double
+        get() = prefs.getFloat(KEY_ODO_MG_ANCHOR_MEASURED, 0f).toDouble()
+        set(value) = prefs.edit().putFloat(KEY_ODO_MG_ANCHOR_MEASURED, value.toFloat().coerceIn(0f, 2_000_000f)).apply()
+
+    /**
      * Display timezone. Blank means follow the device.
      *
      * A box with no SIM receives no NITZ, so it can learn correct UTC from NTP but never learns
@@ -228,6 +242,8 @@ class Settings(ctx: Context) {
         const val KEY_ODO_FACTOR = "odo_factor"
         const val KEY_ODO_NAG = "odo_drift_nagged_at"
         const val KEY_ODO_RECORD_NAG = "odo_record_due_nagged_at"
+        const val KEY_ODO_MG_ANCHOR_CAR = "odo_mg_anchor_car_km"
+        const val KEY_ODO_MG_ANCHOR_MEASURED = "odo_mg_anchor_measured_km"
 
         /** The Odograph analytics workbook the drive box pushes to. */
         const val DEFAULT_DOCS_URL =

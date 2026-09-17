@@ -112,6 +112,42 @@ object Odometer {
     fun drift(carOdoKm: Double, appOdoKm: Double): Double = carOdoKm - appOdoKm
 
     /**
+     * Whether MG telematics has anchored the odometer: the car's dash reading is ground truth, so
+     * once it has been quoted the app shows that number plus whatever it has measured since.
+     */
+    fun anchored(settings: Settings): Boolean = settings.odoMgAnchorCarKm > 0.0
+
+    /**
+     * The live odometer at the app's current measured total. When MG has quoted the car's dash, the
+     * odometer is that dash number plus the measured km since the quote (scaled by the open segment
+     * factor). Otherwise it is the calibration line as before. The 18,000 km a car carried before
+     * tracking began is absorbed by the anchor — an offset, never spread over recorded trips.
+     */
+    fun liveOdoKm(settings: Settings, measuredKm: Double): Double {
+        val anchorCarKm = settings.odoMgAnchorCarKm
+        if (anchorCarKm > 0.0) {
+            val measured = (measuredKm - settings.odoMgAnchorMeasuredKm).coerceAtLeast(0.0)
+            return anchorCarKm + measured * factor(settings)
+        }
+        return appOdoKm(settings, measuredKm)
+    }
+
+    /**
+     * New dash reading from the car itself (telematics). Adopts it as the anchor: the odometer
+     * snaps to the car's real number from now on. The previous anchor is only ever replaced by a
+     * plausible forward reading — a car's odometer cannot go backwards — except for the very first
+     * adoption, which may be any distance from where the app had been counting.
+     */
+    fun adoptCarOdo(settings: Settings, carOdoKm: Double, measuredKm: Double): Boolean {
+        if (carOdoKm <= 0.0) return false
+        val prev = settings.odoMgAnchorCarKm
+        if (prev > 0.0 && carOdoKm < prev - 0.5) return false
+        settings.odoMgAnchorCarKm = carOdoKm
+        settings.odoMgAnchorMeasuredKm = measuredKm
+        return true
+    }
+
+    /**
      * What a calibration would look like before it is applied: the expected reading and how far
      * the typed one is off. Lets the UI warn instead of silently rewriting a window of trips.
      */
