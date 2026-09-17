@@ -19,8 +19,8 @@ android {
         applicationId = "in.odograph.tracker"
         minSdk = 26
         targetSdk = 34
-        versionCode = 6
-        versionName = "0.5.1"
+        versionCode = 13
+        versionName = "0.7.0"
     }
 
     buildFeatures { compose = true }

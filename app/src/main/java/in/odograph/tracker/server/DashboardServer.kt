@@ -12,6 +12,7 @@ import io.ktor.server.engine.ApplicationEngine
 import io.ktor.server.engine.embeddedServer
 import io.ktor.server.request.receiveChannel
 import io.ktor.server.request.receiveParameters
+import io.ktor.server.request.receiveStream
 import io.ktor.server.response.respond
 import io.ktor.server.response.respondBytes
 import io.ktor.server.response.respondFile
@@ -278,6 +279,44 @@ object DashboardServer {
                             ContentType.Text.Html
                         )
                     }
+                    /**
+                     * A browser lands here, so say what this is rather than 404-ing at someone who
+                     * guessed the URL. The actual deploy is the POST below.
+                     */
+                    get("/update") {
+                        call.respondText(
+                            "POST an APK here to install it:\n\n" +
+                                "  curl --data-binary @app-release.apk \\\n" +
+                                "       -H 'Content-Type: application/vnd.android.package-archive' \\\n" +
+                                "       http://<this-box>:8080/update\n\n" +
+                                "Android then asks for confirmation on the box's screen. It cannot\n" +
+                                "be skipped without device-owner rights, so one tap is the floor.\n",
+                            ContentType.Text.Plain
+                        )
+                    }
+
+                    /**
+                     * Install a build posted from the laptop.
+                     *
+                     * The box has no ADB and no cable, so without this every deploy means carrying
+                     * a URL to its browser by hand. The response says what happened rather than
+                     * just a status code: nobody is watching the box's screen when this runs.
+                     */
+                    post("/update") {
+                        // On Dispatchers.IO deliberately. receiveStream() hands back a blocking
+                        // InputStream, and reading a nine-megabyte body on the handler's own
+                        // dispatcher parks the very thread the server needs to keep feeding it:
+                        // the upload stalls after "100 Continue" and no response is ever written.
+                        val result = withContext(Dispatchers.IO) {
+                            SelfUpdate.install(app, call.receiveStream())
+                        }
+                        call.respondText(
+                            if (result.ok) "ok: ${result.message}\n" else "failed: ${result.message}\n",
+                            ContentType.Text.Plain,
+                            if (result.ok) HttpStatusCode.OK else HttpStatusCode.BadRequest
+                        )
+                    }
+
                     post("/config") {
                         val params = call.receiveParameters()
                         params["webhook"]?.let { settings.webhookUrl = it }

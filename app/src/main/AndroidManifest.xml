@@ -12,6 +12,9 @@
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <!-- Needed to LISTEN on a socket for the local dashboard, not to reach the internet. -->
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Lets a build posted to the LAN server be handed to Android's package installer. The
+         confirmation dialog on the box's own screen is still required and cannot be waived. -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
 
     <uses-feature android:name="android.hardware.location.gps" android:required="false" />

@@ -1,4 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <paths>
     <external-files-path name="exports" path="exports/" />
+    <!-- A build posted to /update is staged here and handed to the package installer. -->
+    <cache-path name="updates" path="." />
 </paths>
