@@ -482,10 +482,9 @@ class TripRecorderService : Service() {
                 status.charge?.let { RawFrames.record(framesDir, "charge.decoded", it.toString()) }
                 val ch = status.charge
                 val now = System.currentTimeMillis()
-                // What the car says about being shut down. A locked car has been walked away from,
-                // which ends a drive far sooner and far more certainly than waiting out a timer
-                // that cannot tell a car park from a level crossing.
-                carState = Arrival.CarState(locked = status.locked, canBusActive = status.canBusActive)
+                // What the car says about being shut down. Only the CAN bus: a locked car is not a
+                // parked one, because the doors lock themselves above walking pace.
+                carState = Arrival.CarState(canBusActive = status.canBusActive)
                 val powerKw = Telematics.chargePowerKw(ch)
                 // A snapshot without a SOC reading is not charge data — it is noise that would
                 // make a battery-less trip look instrumented. The car can cut power any moment,

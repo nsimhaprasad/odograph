@@ -36,26 +36,38 @@ object Arrival {
     const val STILL_SPEED_MPS = Departure.SPEED_MPS
 
     /**
+     * How long a stationary car with a sleeping CAN bus waits before the drive is called over.
+     *
+     * Far shorter than [STILL_MS] because a quiet bus is real evidence, but not zero: a single
+     * frame reporting the bus asleep while the car is at a signal must not end a live drive.
+     */
+    const val BUS_ASLEEP_STILL_MS = 2 * 60_000L
+
+    /**
      * What the car itself says about being shut down, when telematics is reachable.
      *
-     * [locked] and [canBusActive] come straight off the MG status frame. A locked car has been
-     * walked away from, which is as certain as parking gets; a quiet CAN bus means the car is
-     * asleep. Either ends the drive immediately, without waiting out [STILL_MS].
+     * Only [canBusActive] is here, and `locked` deliberately is not. A locked car sounds like the
+     * most certain parking signal there is, and it is not one: the Windsor locks its own doors
+     * above walking pace, so a car in motion reports locked=true and would "arrive" on the very
+     * next poll. That shipped once — every telematics frame closed the open drive, the next fix
+     * opened another, and the screen sat at zero distance and zero moving time for an entire
+     * journey while the speedometer read perfectly normally.
      *
-     * All fields are nullable because the link is optional: telematics may be switched off, the
-     * credentials unset, or the servers unreachable, and the recorder has to work regardless.
+     * Nullable because the link is optional: telematics may be switched off, the credentials
+     * unset, or the servers unreachable, and the recorder has to work regardless.
      */
-    data class CarState(val locked: Boolean? = null, val canBusActive: Boolean? = null)
+    data class CarState(val canBusActive: Boolean? = null)
 
     /**
      * Whether the drive that is currently open has ended.
      *
-     * [stillForMs] is how long the car has been below [STILL_SPEED_MPS]. Negative or zero means it
-     * is still moving.
+     * [stillForMs] is how long the car has been below [STILL_SPEED_MPS]. A moving car has not
+     * arrived, whatever else is true — no telematics reading may override what the wheels are
+     * doing, which is the lesson the `locked` signal taught.
      */
     fun arrived(stillForMs: Long, car: CarState = CarState()): Boolean {
-        if (car.locked == true) return true
-        if (car.canBusActive == false) return true
+        if (stillForMs <= 0L) return false
+        if (car.canBusActive == false && stillForMs >= BUS_ASLEEP_STILL_MS) return true
         return stillForMs >= STILL_MS
     }
 

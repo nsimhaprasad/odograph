@@ -21,6 +21,7 @@ class ArrivalTest {
     @Test
     fun `a moving car has not arrived`() {
         assertThat(Arrival.arrived(stillForMs = 0L)).isFalse()
+        assertThat(Arrival.arrived(stillForMs = -1L)).isFalse()
     }
 
     @Test
@@ -49,21 +50,39 @@ class ArrivalTest {
         assertThat(Arrival.arrived(30 * minute)).isTrue()
     }
 
-    /** A locked car has been walked away from. Nothing is more certain than that. */
+    /**
+     * The regression this whole signal nearly caused, pinned so it cannot return.
+     *
+     * `locked` was treated as certain proof of parking. It is the opposite of certain: the Windsor
+     * locks its own doors above walking pace, so a car at speed reports locked=true and "arrived"
+     * on the very next telematics poll. The open drive was closed, the next fix opened another,
+     * and the screen sat at zero distance and zero moving time for a whole journey while the
+     * speedometer read perfectly normally. A moving car has not arrived, whatever else is true.
+     */
     @Test
-    fun `a locked car has arrived immediately`() {
-        assertThat(Arrival.arrived(0L, Arrival.CarState(locked = true))).isTrue()
+    fun `no car reading can end a drive while the wheels are turning`() {
+        val everySignal = Arrival.CarState(canBusActive = false)
+        assertThat(Arrival.arrived(stillForMs = 0L, car = everySignal))
+            .`as`("a moving car has not arrived")
+            .isFalse()
     }
 
     @Test
-    fun `a sleeping CAN bus ends the drive immediately`() {
-        assertThat(Arrival.arrived(0L, Arrival.CarState(canBusActive = false))).isTrue()
+    fun `a sleeping CAN bus ends the drive once the car has also stopped`() {
+        val asleep = Arrival.CarState(canBusActive = false)
+        assertThat(Arrival.arrived(Arrival.BUS_ASLEEP_STILL_MS, asleep)).isTrue()
+    }
+
+    /** One odd frame at a signal must not end a live drive either. */
+    @Test
+    fun `a sleeping bus at a brief halt is not yet an arrival`() {
+        val asleep = Arrival.CarState(canBusActive = false)
+        assertThat(Arrival.arrived(30_000L, asleep)).isFalse()
     }
 
     @Test
-    fun `an unlocked car with a live bus is still driving`() {
-        val running = Arrival.CarState(locked = false, canBusActive = true)
-        assertThat(Arrival.arrived(minute, running)).isFalse()
+    fun `a live bus is still driving`() {
+        assertThat(Arrival.arrived(minute, Arrival.CarState(canBusActive = true))).isFalse()
     }
 
     /**
@@ -72,14 +91,15 @@ class ArrivalTest {
      */
     @Test
     fun `an unknown car state falls back to the timer`() {
-        val unknown = Arrival.CarState(locked = null, canBusActive = null)
+        val unknown = Arrival.CarState(canBusActive = null)
         assertThat(Arrival.arrived(minute, unknown)).isFalse()
         assertThat(Arrival.arrived(Arrival.STILL_MS, unknown)).isTrue()
     }
 
     @Test
-    fun `a locked car ends the drive even against a live bus reading`() {
-        assertThat(Arrival.arrived(0L, Arrival.CarState(locked = true, canBusActive = true))).isTrue()
+    fun `the bus shortcut is much shorter than the plain timer but not instant`() {
+        assertThat(Arrival.BUS_ASLEEP_STILL_MS).isLessThan(Arrival.STILL_MS)
+        assertThat(Arrival.BUS_ASLEEP_STILL_MS).isGreaterThan(0L)
     }
 
     // ---------------------------------------------------------------- how long it has been still
