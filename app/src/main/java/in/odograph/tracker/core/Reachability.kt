@@ -1,5 +1,6 @@
 package `in`.odograph.tracker.core
 
+import `in`.odograph.tracker.data.RouteTripEff
 import kotlin.math.roundToInt
 
 /**
@@ -136,4 +137,57 @@ object Reachability {
      */
     fun efficiencyKwhPer100Km(routeEfficiency: Double?, rollingEfficiency: Double?): Double? =
         routeEfficiency?.takeIf { it > 0.0 } ?: rollingEfficiency?.takeIf { it > 0.0 }
+
+    /**
+     * What a route has actually cost, the times it has been driven.
+     *
+     * [kwhPer100Km] is the median rather than the mean on purpose: one crawl home through a
+     * thunderstorm should not permanently re-price a commute driven fifty times. Distance is the
+     * mean, where the same reasoning does not apply — a route's length barely varies, and what
+     * variation there is comes from where exactly the car was parked at either end.
+     */
+    data class RouteProfile(
+        val distanceM: Double,
+        val kwhPer100Km: Double,
+        val drives: Int
+    )
+
+    /**
+     * Per-route consumption and distance, keyed origin-to-destination.
+     *
+     * Direction matters and the key keeps it: the climb out to the office and the roll back down
+     * are different drives with different costs, and averaging them together loses exactly the
+     * information this is for.
+     *
+     * A route needs [minDrives] before it is allowed to speak for itself. One drive is an anecdote
+     * — it might have been the day of the diversion — and the rolling average is the better answer
+     * until there is enough to beat it.
+     */
+    fun routeProfiles(
+        trips: List<RouteTripEff>,
+        minDrives: Int = BatteryMath.MIN_ROUTE_DRIVES
+    ): Map<Pair<Long, Long>, RouteProfile> =
+        trips
+            .filter { it.distanceM >= BatteryMath.MIN_EFFICIENCY_DISTANCE_M && it.energyKwh > 0.0 }
+            .groupBy { it.startId to it.endId }
+            .mapNotNull { (route, legs) ->
+                if (legs.size < minDrives) return@mapNotNull null
+                val efficiencies = legs.mapNotNull {
+                    BatteryMath.kwhPer100Km(it.energyKwh, it.distanceM)
+                }
+                if (efficiencies.isEmpty()) return@mapNotNull null
+                route to RouteProfile(
+                    distanceM = legs.sumOf { it.distanceM } / legs.size,
+                    kwhPer100Km = median(efficiencies),
+                    drives = legs.size
+                )
+            }
+            .toMap()
+
+    /** Middle value, averaging the two middles on an even count. */
+    private fun median(values: List<Double>): Double {
+        val sorted = values.sorted()
+        val mid = sorted.size / 2
+        return if (sorted.size % 2 == 1) sorted[mid] else (sorted[mid - 1] + sorted[mid]) / 2.0
+    }
 }

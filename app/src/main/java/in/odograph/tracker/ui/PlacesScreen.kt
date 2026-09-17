@@ -33,6 +33,7 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import `in`.odograph.tracker.core.BatteryMath
+import `in`.odograph.tracker.core.Geo
 import `in`.odograph.tracker.ui.theme.Settings
 import `in`.odograph.tracker.core.Reachability
 import `in`.odograph.tracker.data.PlaceEntity
@@ -46,6 +47,15 @@ import `in`.odograph.tracker.ui.theme.Palette
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+
+/**
+ * How close the car has to be to a saved place to count as standing at it.
+ *
+ * Generous, because a car park is not a point: the entrance, the far corner and the road outside
+ * are all "at the office" as far as the drive ahead is concerned, and the route history was built
+ * from arrivals scattered over exactly that spread.
+ */
+private const val AT_PLACE_RADIUS_M = 250.0
 
 private data class KnownPlace(
     val id: Long,
@@ -88,31 +98,43 @@ fun PlacesScreen(palette: Palette) {
         val loaded = withContext(Dispatchers.IO) {
             runCatching {
                 val dao = OdographDb.get(ctx).dao()
-                // The rolling figure is what an undriven route gets billed at. Measured per-route
-                // consumption is the better answer and is the next step; this is honest in the
-                // meantime because the estimate says which of the two it used.
+                // Two answers, in order of preference: what this exact route has actually cost the
+                // times it was driven, and the rolling average for everywhere else.
                 val rolling = BatteryMath.rollingKwhPer100Km(
                     dao.tripEnergies().mapNotNull {
                         BatteryMath.kwhPer100Km(it.energyKwh, it.distanceM)
                     }
                 )
-                dao.allPlaces() to rolling
-            }.getOrDefault(emptyList<PlaceEntity>() to null)
+                Triple(
+                    dao.allPlaces(),
+                    rolling,
+                    Reachability.routeProfiles(dao.routeTripsForEfficiency())
+                )
+            }.getOrDefault(Triple(emptyList(), null, emptyMap()))
         }
-        val (places, rolling) = loaded
+        val (places, rolling, profiles) = loaded
 
-        val here = live.lat to live.lon
+        val hereLat = live.lat
+        val hereLon = live.lon
         val soc = live.batterySocPercent
         val capacity = Settings(ctx).batteryCapacityKwh
-        val efficiency = Reachability.efficiencyKwhPer100Km(null, rolling)
+
+        // Which saved place the car is standing at, if any. Only a route that starts where the car
+        // actually is can lend its measured distance and cost to the drive ahead.
+        val origin = if (hereLat != null && hereLon != null) {
+            places.minByOrNull { Geo.haversineMetres(hereLat, hereLon, it.lat, it.lon) }
+                ?.takeIf { Geo.haversineMetres(hereLat, hereLon, it.lat, it.lon) <= AT_PLACE_RADIUS_M }
+        } else null
 
         known = places
             .sortedByDescending { it.visits }
             .map { place ->
-                val reach = if (here.first != null && here.second != null && soc != null && efficiency != null) {
+                val profile = origin?.let { profiles[it.id to place.id] }
+                val efficiency = Reachability.efficiencyKwhPer100Km(profile?.kwhPer100Km, rolling)
+                val reach = if (hereLat != null && hereLon != null && soc != null && efficiency != null) {
                     val (km, measured) = Reachability.distanceKm(
-                        measuredRouteM = null,
-                        fromLat = here.first!!, fromLon = here.second!!,
+                        measuredRouteM = profile?.distanceM,
+                        fromLat = hereLat, fromLon = hereLon,
                         toLat = place.lat, toLon = place.lon
                     )
                     Reachability.estimate(km, soc, capacity, efficiency, measured)
