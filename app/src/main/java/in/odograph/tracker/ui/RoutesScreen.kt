@@ -16,6 +16,8 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -113,6 +115,9 @@ fun RoutesScreen(palette: Palette) {
         val m = rememberMetrics(maxWidth, maxHeight)
         val countWidth = maxWidth * 0.17f
 
+        // The period chips stay put and only what is under them scrolls. The root deliberately
+        // does NOT scroll: this screen embeds the whole of PlacesScreen, which scrolls itself, and
+        // a scrollable inside a scrollable is measured with an infinite height and throws.
         Column(Modifier.fillMaxSize().padding(m.pad)) {
 
             FlowRow(horizontalArrangement = Arrangement.spacedBy(m.gap / 2)) {
@@ -126,6 +131,7 @@ fun RoutesScreen(palette: Palette) {
             }
 
             if (showPlaces) {
+                // Already scrolling, and bounded by the space the chips left it.
                 PlacesScreen(palette)
                 return@BoxWithConstraints
             }
@@ -166,7 +172,12 @@ fun RoutesScreen(palette: Palette) {
                 )
             }
 
-            LazyColumn {
+            // The list is the scroller, so it takes the height the header left rather than its
+            // natural size. Without the weight a short split-screen band gave the header every
+            // pixel and measured the list at nothing: the routes were in the tree, drawn nowhere,
+            // and unreachable. Wrapping the whole screen in a scroller instead would nest one
+            // scrollable inside another, which Compose measures with an infinite height and throws.
+            LazyColumn(Modifier.weight(1f)) {
                 items(rows) { r ->
                     Row(
                         modifier = Modifier.fillMaxWidth().padding(vertical = m.gap / 3),

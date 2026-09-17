@@ -14,6 +14,8 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -77,7 +79,17 @@ fun PlacesScreen(palette: Palette) {
     BoxWithConstraints(Modifier.fillMaxSize().background(palette.ground)) {
         val m = rememberMetrics(maxWidth, maxHeight)
 
-        Column(Modifier.fillMaxSize().padding(m.pad), verticalArrangement = Arrangement.spacedBy(m.gap)) {
+        // Scrolls, because this screen has never fitted a short window. A Column measures each
+        // child against the height that is left, so on the box's quarter-height band the search
+        // block consumed all of it and KNOWN PLACES rendered at zero height — present in the tree,
+        // invisible on the glass, and with no gesture that could reach it.
+        Column(
+            Modifier
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState())
+                .padding(m.pad),
+            verticalArrangement = Arrangement.spacedBy(m.gap)
+        ) {
             Text(
                 text = "NAME A PLACE  ·  SEARCH, PIN, SAVE",
                 color = palette.label,
