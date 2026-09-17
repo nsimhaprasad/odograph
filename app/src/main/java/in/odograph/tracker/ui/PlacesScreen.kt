@@ -32,6 +32,12 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import `in`.odograph.tracker.core.BatteryMath
+import `in`.odograph.tracker.ui.theme.Settings
+import `in`.odograph.tracker.core.Reachability
+import `in`.odograph.tracker.data.PlaceEntity
+import `in`.odograph.tracker.record.TripRecorderService
+import androidx.compose.runtime.collectAsState
 import `in`.odograph.tracker.data.OdographDb
 import `in`.odograph.tracker.geocode.PlaceNamer
 import `in`.odograph.tracker.record.PlaceRepo
@@ -41,7 +47,15 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-private data class KnownPlace(val id: Long, val name: String, val visits: Int)
+private data class KnownPlace(
+    val id: Long,
+    val name: String,
+    val visits: Int,
+    val lat: Double,
+    val lon: Double,
+    /** What the charge would be on arrival, when the car has said where it is and how full. */
+    val reach: Reachability.Estimate? = null
+)
 
 /**
  * Name a place without driving there: type an area or landmark, pick a search hit, pin it on the
@@ -67,13 +81,44 @@ fun PlacesScreen(palette: Palette) {
     var renamingId by remember { mutableStateOf<Long?>(null) }
     var renameText by remember { mutableStateOf("") }
 
-    LaunchedEffect(reload) {
-        val places = withContext(Dispatchers.IO) {
-            runCatching { OdographDb.get(ctx).dao().allPlaces() }.getOrDefault(emptyList())
+    // Live, so the answer moves with the car rather than with the screen being reopened.
+    val live by TripRecorderService.state.collectAsState()
+
+    LaunchedEffect(reload, live.lat, live.batterySocPercent) {
+        val loaded = withContext(Dispatchers.IO) {
+            runCatching {
+                val dao = OdographDb.get(ctx).dao()
+                // The rolling figure is what an undriven route gets billed at. Measured per-route
+                // consumption is the better answer and is the next step; this is honest in the
+                // meantime because the estimate says which of the two it used.
+                val rolling = BatteryMath.rollingKwhPer100Km(
+                    dao.tripEnergies().mapNotNull {
+                        BatteryMath.kwhPer100Km(it.energyKwh, it.distanceM)
+                    }
+                )
+                dao.allPlaces() to rolling
+            }.getOrDefault(emptyList<PlaceEntity>() to null)
         }
+        val (places, rolling) = loaded
+
+        val here = live.lat to live.lon
+        val soc = live.batterySocPercent
+        val capacity = Settings(ctx).batteryCapacityKwh
+        val efficiency = Reachability.efficiencyKwhPer100Km(null, rolling)
+
         known = places
             .sortedByDescending { it.visits }
-            .map { KnownPlace(it.id, it.displayName, it.visits) }
+            .map { place ->
+                val reach = if (here.first != null && here.second != null && soc != null && efficiency != null) {
+                    val (km, measured) = Reachability.distanceKm(
+                        measuredRouteM = null,
+                        fromLat = here.first!!, fromLon = here.second!!,
+                        toLat = place.lat, toLon = place.lon
+                    )
+                    Reachability.estimate(km, soc, capacity, efficiency, measured)
+                } else null
+                KnownPlace(place.id, place.displayName, place.visits, place.lat, place.lon, reach)
+            }
     }
 
     BoxWithConstraints(Modifier.fillMaxSize().background(palette.ground)) {
@@ -273,9 +318,12 @@ fun PlacesScreen(palette: Palette) {
                                         maxLines = 1
                                     )
                                     Text(
-                                        text = "drive-placed, auto-counting · tap to label",
-                                        color = palette.label,
-                                        fontSize = m.body
+                                        text = place.reach?.let { reachLine(it) }
+                                            ?: "drive-placed, auto-counting · tap to label",
+                                        color = place.reach?.let { reachColor(it, palette) }
+                                            ?: palette.label,
+                                        fontSize = m.body,
+                                        maxLines = 1
                                     )
                                 }
                                 Text(
@@ -291,4 +339,28 @@ fun PlacesScreen(palette: Palette) {
             }
         }
     }
+}
+
+/**
+ * What the drive to a place would leave in the battery.
+ *
+ * Says how far and what is left, and marks an estimate that came from a straight line rather than
+ * a road the car has driven — the difference is easily thirty percent, and a number that hides
+ * which one it is invites being trusted equally.
+ */
+private fun reachLine(e: Reachability.Estimate): String {
+    val about = if (e.measured) "" else "~"
+    val verdict = when (e.verdict) {
+        Reachability.Verdict.COMFORTABLE -> ""
+        Reachability.Verdict.TIGHT -> "  ·  tight"
+        Reachability.Verdict.UNREACHABLE -> "  ·  needs a charge"
+    }
+    return "$about%.0f km  ·  arrive %d%%%s".format(e.distanceKm, e.shownPercent, verdict)
+}
+
+/** The same three states the drive screen colours a charge with, for the same reason. */
+private fun reachColor(e: Reachability.Estimate, palette: Palette) = when (e.verdict) {
+    Reachability.Verdict.COMFORTABLE -> palette.good
+    Reachability.Verdict.TIGHT -> palette.caution
+    Reachability.Verdict.UNREACHABLE -> palette.warn
 }

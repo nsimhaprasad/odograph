@@ -104,7 +104,14 @@ class TripRecorderService : Service() {
          * poller when a fast session opens (pre-price) or closes (correct with the real bill);
          * the dialog that shows it clears it. A slow session never prompts — the home rate stands.
          */
-        val pendingChargePrompt: ChargePrompt? = null
+        val pendingChargePrompt: ChargePrompt? = null,
+        /**
+         * Where the car is, from the last fix. Carried on the live state so a screen can answer
+         * "how far is that from here" without reaching into the recorder or re-reading the points
+         * table. Null before the first fix.
+         */
+        val lat: Double? = null,
+        val lon: Double? = null
     )
 
     /** What the charger the driver just used expects to be paid. */
@@ -750,7 +757,9 @@ class TripRecorderService : Service() {
             overLimit = overLimit,
             speedLimitKmh = speedLimitKmh,
             odoKm = odoBaseKm + (if (moving) track.distanceM else 0.0) / 1000.0 *
-                `in`.odograph.tracker.core.Odometer.factor(settings)
+                `in`.odograph.tracker.core.Odometer.factor(settings),
+            lat = fix.lat,
+            lon = fix.lon
         )
     }
 
