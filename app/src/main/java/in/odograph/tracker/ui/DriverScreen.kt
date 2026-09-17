@@ -323,14 +323,17 @@ private fun RangePanel(
         horizontalArrangement = Arrangement.spacedBy(m.gap)
     ) {
         if (readout != null) {
+            // Deliberately unweighted. Giving the range the row's spare width pinned the charge
+            // meter to the far edge, so on the full 1291dp window the two halves of one reading —
+            // how far it goes, and how much is left — sat five hundred pixels apart and stopped
+            // reading as a pair.
             Stat(
                 value = "${readout.km.roundToInt()}",
                 label = rangeCaption(readout),
                 palette = palette,
                 m = m,
                 size = m.hero,
-                contentColor = stateColor,
-                modifier = Modifier.weight(1f)
+                contentColor = stateColor
             )
         }
         if (soc != null) {

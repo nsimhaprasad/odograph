@@ -30,6 +30,7 @@ import `in`.odograph.tracker.server.RawFrames
 import `in`.odograph.tracker.sync.Outbound
 import `in`.odograph.tracker.sync.SheetsSync
 import `in`.odograph.tracker.ui.theme.Settings
+import `in`.odograph.tracker.core.Telematics
 import io.windsor.telematics.TelematicsClient
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -439,13 +440,7 @@ class TripRecorderService : Service() {
                 status.charge?.let { RawFrames.record(framesDir, "charge.decoded", it.toString()) }
                 val ch = status.charge
                 val now = System.currentTimeMillis()
-                // The decoder already applies the confirmed telematics scales: chargingVoltage is
-                // real volts (raw × 0.25) and chargingCurrent is real amps (1000 − raw × 0.05), so
-                // power is straight V × I. Re-applying the scale factors here double-scaled the
-                // values and clamped every 30 kW public charger to SLOW — fixed in this release.
-                val powerKw = if (ch != null)
-                    ch.chargingVoltage * ch.chargingCurrent / 1000
-                else 0.0
+                val powerKw = Telematics.chargePowerKw(ch)
                 // A snapshot without a SOC reading is not charge data — it is noise that would
                 // make a battery-less trip look instrumented. The car can cut power any moment,
                 // so every frame that does carry a SOC is written to disk immediately and never
@@ -453,7 +448,7 @@ class TripRecorderService : Service() {
                 // moving it lands under the open trip, and once it has been parked (unplugged,
                 // no motion for [PARKED_MOVE_GAP_MS]) it carries trip -1 instead — invisible to
                 // every trip-scoped query but never lost, and source of the overnight drain read.
-                if (ch != null && ch.soc != null) {
+                if (Telematics.hasBatteryReading(ch) && ch != null) {
                     val t = lastFix?.t ?: now
                     val parked = ch.isCharging == false &&
                         (now - lastMovedAt) > PARKED_MOVE_GAP_MS
@@ -493,7 +488,7 @@ class TripRecorderService : Service() {
                 // so adopt it as the odometer anchor. Existing trips are never rewritten — the gap
                 // between a car that had already covered 18k km before tracking began and the app's
                 // count is an offset, not a measurement error, so it is absorbed here in one number.
-                val carOdoKm = status.odometerKm ?: ch?.odometerKm
+                val carOdoKm = Telematics.carOdometerKm(status)
                 adoptMgOdometerAnchor(carOdoKm, dao)
                 // Anything ours counts up against that is drift (GNSS distance error, a wrong seed,
                 // a wheel-off). Compare live so the setup page can offer a one-tap recalibrate, and
@@ -530,7 +525,7 @@ class TripRecorderService : Service() {
                         ) {
                             BatteryMath.rangeAtFullKwh(capacity, rolling)
                         } else {
-                            ch.rangeKm?.let { r -> if (soc > 0) r / soc * 100.0 else null }
+                            Telematics.carRangeAtFullKm(ch)
                         }
                         // Same gate as range-at-full: only real measured efficiency gets to quote a
                         // remaining range. Before that the car's own number is the only honest one.

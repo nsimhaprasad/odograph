@@ -234,6 +234,32 @@ class ScreenshotTest {
 
     // ---------- the full instrument: every optional stat present ----------
 
+    /**
+     * Every state an MG frame can put the car in, shot at the box's own window.
+     *
+     * One PNG per scenario, named after it, so the whole range — flat, critical, charging fast,
+     * full and plugged in, a frame with no SOC, the link dropped — can be reviewed side by side
+     * without a device. [DriverScenarioTest] asserts these same states do not break; this is for
+     * looking at them.
+     */
+    @Test
+    @Config(qualifiers = "w1291dp-h726dp-land")
+    fun `every mg scenario on the box window`() {
+        val scenarios = `in`.odograph.tracker.core.MgFixtures.SCENARIOS
+        val state = androidx.compose.runtime.mutableStateOf(scenarios.first().live)
+        compose.setContent {
+            DriverScreen(
+                state.value, mpsToKmh(state.value.speedMps),
+                Direction.ION, paletteFor(Direction.ION, night = true)
+            )
+        }
+        scenarios.forEachIndexed { i, scenario ->
+            state.value = scenario.live
+            compose.waitForIdle()
+            shoot("mg-%02d-%s".format(i, scenario.name.replace(Regex("[^a-z0-9]+"), "-")))
+        }
+    }
+
     @Test
     @Config(qualifiers = "w640dp-h360dp-land")
     fun `driver fully populated balanced`() {

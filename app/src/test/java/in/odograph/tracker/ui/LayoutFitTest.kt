@@ -24,6 +24,16 @@ import org.robolectric.annotation.Config
  * screen" is not a check. Instead every screen is laid out at each candidate viewport and every
  * node's unclipped bounds are asserted to sit inside the root. That is a mechanical definition of
  * "nothing overflows", it runs on the JVM in seconds, and it keeps holding as the UI changes.
+ *
+ * What it does NOT establish is that text fits horizontally. This class runs in Robolectric's
+ * default graphics mode, where font metrics are stubbed and every glyph measures about one pixel:
+ * "KWH LIFETIME" comes back 13px wide, so a row of stats that would visibly run off a real screen
+ * measures a tenth of its true width here and passes. Vertical starvation is still caught, because
+ * a line box comes from the specified sp rather than from glyph metrics — which is how the
+ * original clipped stat row showed up, as text rendered at zero height.
+ *
+ * For genuine text fit see [DriverScenarioTest], which opts into NATIVE graphics and a real Skia
+ * text measurement, and pays for it in runtime.
  */
 @RunWith(RobolectricTestRunner::class)
 class LayoutFitTest {
@@ -68,52 +78,11 @@ class LayoutFitTest {
     }
 
     private fun assertNothingOverflows() {
-        val root = compose.onRoot().fetchSemanticsNode()
-        val rootW = root.size.width.toFloat()
-        val rootH = root.size.height.toFloat()
-        val offenders = mutableListOf<String>()
-
-        fun walk(node: SemanticsNode) {
-            val left = node.positionInRoot.x
-            val top = node.positionInRoot.y
-            val right = left + node.size.width
-            val bottom = top + node.size.height
-            // One pixel of slack absorbs rounding in the layout pass.
-            if (right > rootW + 1f || bottom > rootH + 1f || left < -1f || top < -1f) {
-                offenders += "${node.config}: [$left,$top,$right,$bottom] outside ${rootW}x$rootH"
-            }
-            node.children.forEach { walk(it) }
-        }
-        walk(root)
-
-        assertThat(offenders).`as`("nodes outside the viewport").isEmpty()
+        LayoutAssertions.assertNothingOverflows(compose.onRoot().fetchSemanticsNode(), "this viewport")
     }
 
-    /**
-     * Nothing that carries text has been squeezed out of existence.
-     *
-     * The bounds walk above cannot see this failure. A Row measures each child against the width
-     * that is left, so a child that does not fit is constrained down and clipped rather than
-     * placed outside its parent — its position stays perfectly legal while its content vanishes.
-     * That is how the drive screen shipped a stat row whose tail was cut mid-word and whose last
-     * two entries rendered at no width at all. A collapsed text node is the mechanical signature
-     * of it, and unlike a screenshot it can be asserted.
-     */
     private fun assertNoTextIsSqueezedAway() {
-        val starved = mutableListOf<String>()
-
-        fun walk(node: SemanticsNode) {
-            val text = node.config.getOrNull(SemanticsProperties.Text)
-                ?.joinToString(" ") { it.text }
-                ?.takeIf { it.isNotBlank() }
-            if (text != null && (node.size.width == 0 || node.size.height == 0)) {
-                starved += "\"$text\" rendered at ${node.size.width}x${node.size.height}"
-            }
-            node.children.forEach { walk(it) }
-        }
-        walk(compose.onRoot().fetchSemanticsNode())
-
-        assertThat(starved).`as`("text collapsed to nothing").isEmpty()
+        LayoutAssertions.assertNoTextIsSqueezedAway(compose.onRoot().fetchSemanticsNode(), "this viewport")
     }
 
     private fun renderDriver() {
