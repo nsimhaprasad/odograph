@@ -15,6 +15,15 @@ data class Palette(
     val accent2: Color,
     /** Overspeed. Deliberately outside the direction's own palette so it cannot be mistaken. */
     val warn: Color,
+    /**
+     * State colours for a reading that is healthy or needs planning around. Like [warn] these sit
+     * outside the direction's accents on purpose: a charge level must mean the same thing whatever
+     * instrument face the driver has chosen, and an accent that happened to be green would make
+     * "healthy" unreadable on the CHRONO face. Both are darkened on a light ground, where the
+     * night values wash out.
+     */
+    val good: Color,
+    val caution: Color,
     /** Blur radius multiplier. Zero on a light ground, where glow only muddies. */
     val glow: Float
 )
@@ -52,6 +61,8 @@ fun paletteFor(direction: Direction, night: Boolean): Palette {
         accent = accents.first,
         accent2 = accents.second,
         warn = if (night) Color(0xFFFF4D4F) else Color(0xFFC81E14),
+        good = if (night) Color(0xFF31D67A) else Color(0xFF0F8F46),
+        caution = if (night) Color(0xFFFFB020) else Color(0xFF9A6100),
         glow = if (night) 1f else 0f
     )
 }

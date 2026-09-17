@@ -12,6 +12,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -50,7 +51,7 @@ fun Stat(
     m: Metrics,
     size: TextUnit = m.hero,
     modifier: Modifier = Modifier,
-    contentColor: androidx.compose.ui.graphics.Color = palette.numeral
+    contentColor: Color = palette.numeral
 ) {
     Column(modifier) {
         Text(
@@ -74,6 +75,15 @@ fun Stat(
     }
 }
 
+/**
+ * A dense caption-and-value pair for the reference screens.
+ *
+ * The value carries the page's numeral colour so it outranks its own caption — it used to be
+ * drawn in the same dim grey at the same size, which left the number and the word describing it
+ * typographically indistinguishable. The size is deliberately unchanged: these screens are read
+ * parked, and their layouts are sized against this metric. The driving screen does not use this;
+ * it has its own step, because none of this is legible at speed.
+ */
 @Composable
 fun SmallStat(
     value: String,
@@ -87,9 +97,9 @@ fun SmallStat(
         Text(label, color = palette.label, fontSize = m.label, letterSpacing = 1.1.sp, maxLines = 1)
         Text(
             text = value,
-            color = palette.dim,
+            color = palette.numeral,
             fontSize = m.label,
-            fontWeight = FontWeight.Medium,
+            fontWeight = FontWeight.SemiBold,
             maxLines = 1
         )
     }

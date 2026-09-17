@@ -39,6 +39,30 @@ class ScreenshotTest {
         elapsedS = 1_484, maxSpeedMps = 31.9f, movingS = 1_219, tripId = 1
     )
 
+    /**
+     * Everything the drive screen can show, all at once: SOC, both range estimates, the odometer
+     * with drift, this ride's energy and cost, lifetime energy and a climb. The sparse fixture
+     * above leaves all of these null, so it renders perhaps a third of the shipping screen —
+     * a screenshot of it cannot show a crowding or overflow problem in the stat rows.
+     */
+    private val liveFull = live.copy(
+        batterySocPercent = 63.0,
+        batteryCharging = false,
+        telematicsConnected = true,
+        batteryMileageKmPerKwh = 6.42,
+        batteryRangeAtFullKm = 331.0,
+        batteryRangeKm = 208.0,
+        mgBatteryRangeKm = 214.0,
+        batteryTotalKwh = 1_284.36,
+        tripEnergyKwh = 2.87,
+        tripCostInr = 23.40,
+        elevGainM = 184.0,
+        elevLossM = 142.0,
+        odoKm = 20_431.0,
+        odoDriftKm = 1.8,
+        speedLimitKmh = 80
+    )
+
     private val route = List(140) { i ->
         val t = i / 18.0
         (12.9716 + t * 0.010 + kotlin.math.sin(t * 2.1) * 0.004) to
@@ -206,6 +230,47 @@ class ScreenshotTest {
             DriverScreen(live, 88.6f, Direction.CHRONO, paletteFor(Direction.CHRONO, night = true))
         }
         shoot("10-driver-wide-1920x720")
+    }
+
+    // ---------- the full instrument: every optional stat present ----------
+
+    @Test
+    @Config(qualifiers = "w640dp-h360dp-land")
+    fun `driver fully populated balanced`() {
+        compose.setContent {
+            DriverScreen(liveFull, 88.6f, Direction.ION, paletteFor(Direction.ION, night = true))
+        }
+        shoot("11-driver-full-balanced")
+    }
+
+    @Test
+    @Config(qualifiers = "w1291dp-h181dp-land")
+    fun `driver fully populated wide band`() {
+        compose.setContent {
+            DriverScreen(liveFull, 88.6f, Direction.ION, paletteFor(Direction.ION, night = true))
+        }
+        shoot("12-driver-full-wide")
+    }
+
+    @Test
+    @Config(qualifiers = "w645dp-h726dp")
+    fun `driver fully populated tall`() {
+        compose.setContent {
+            DriverScreen(liveFull, 88.6f, Direction.ION, paletteFor(Direction.ION, night = true))
+        }
+        shoot("13-driver-full-tall")
+    }
+
+    @Test
+    @Config(qualifiers = "w640dp-h360dp-land")
+    fun `driver fully populated day`() {
+        compose.setContent {
+            DriverScreen(
+                liveFull.copy(batteryCharging = true, batterySocPercent = 22.0),
+                88.6f, Direction.AUDI, paletteFor(Direction.AUDI, night = false)
+            )
+        }
+        shoot("14-driver-full-day-charging")
     }
 
     @Test

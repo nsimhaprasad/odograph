@@ -18,6 +18,12 @@ import androidx.compose.ui.unit.dp
 data class MetricSpec(
     val heroSp: Float,
     val statSp: Float,
+    /**
+     * Reference readings on the driving screen. A driver reads these at arm's length, in motion,
+     * in one glance — so they get their own step between [statSp] and [labelSp] rather than being
+     * rendered at label size, which is what made the range and ride figures unreadable at speed.
+     */
+    val readSp: Float,
     val bodySp: Float,
     val labelSp: Float,
     val chipTextSp: Float,
@@ -55,6 +61,7 @@ fun metricsFor(widthDp: Float, heightDp: Float): MetricSpec {
     return MetricSpec(
         heroSp = scaled(0.135f, 20f, 74f),
         statSp = scaled(0.068f, 13f, 34f),
+        readSp = scaled(0.046f, 15f, 24f),
         bodySp = scaled(0.036f, 10f, 16f),
         labelSp = scaled(0.026f, 8f, 12f),
         chipTextSp = scaled(0.030f, 9f, 13f),
@@ -72,6 +79,7 @@ data class Metrics(
     val spec: MetricSpec,
     val hero: TextUnit,
     val stat: TextUnit,
+    val read: TextUnit,
     val body: TextUnit,
     val label: TextUnit,
     val chipText: TextUnit,
@@ -94,6 +102,7 @@ fun rememberMetrics(maxWidth: Dp, maxHeight: Dp): Metrics {
                 spec = s,
                 hero = s.heroSp.dp.toSp(),
                 stat = s.statSp.dp.toSp(),
+                read = s.readSp.dp.toSp(),
                 body = s.bodySp.dp.toSp(),
                 label = s.labelSp.dp.toSp(),
                 chipText = s.chipTextSp.dp.toSp(),

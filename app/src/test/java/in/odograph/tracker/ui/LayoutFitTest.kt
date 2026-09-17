@@ -3,6 +3,8 @@ package `in`.odograph.tracker.ui
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.SemanticsNode
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onRoot
 import `in`.odograph.tracker.record.TripRecorderService
@@ -34,6 +36,33 @@ class LayoutFitTest {
         elapsedS = 1_484, maxSpeedMps = 31.9f, movingS = 1_219, tripId = 1
     )
 
+    /**
+     * Every optional reading present at once.
+     *
+     * The sparse fixture above leaves battery, odometer, ride energy, cost and climb null, so the
+     * driver cases composed roughly a third of the shipping screen and the rows that actually
+     * overflowed were never built. This check was always able to catch that — a Row with no
+     * weights places its overflowing children past the parent's edge, which is exactly what the
+     * walker below looks for — but it never had the state to build them from.
+     */
+    private val liveFull = live.copy(
+        batterySocPercent = 63.0,
+        batteryCharging = false,
+        telematicsConnected = true,
+        batteryMileageKmPerKwh = 6.42,
+        batteryRangeAtFullKm = 331.0,
+        batteryRangeKm = 208.0,
+        mgBatteryRangeKm = 214.0,
+        batteryTotalKwh = 1_284.36,
+        tripEnergyKwh = 2.87,
+        tripCostInr = 23.40,
+        elevGainM = 184.0,
+        elevLossM = 142.0,
+        odoKm = 20_431.0,
+        odoDriftKm = 1.8,
+        speedLimitKmh = 80
+    )
+
     private val route = List(60) { i ->
         (12.9716 + i * 0.0008) to (77.5946 + i * 0.0011)
     }
@@ -60,9 +89,42 @@ class LayoutFitTest {
         assertThat(offenders).`as`("nodes outside the viewport").isEmpty()
     }
 
+    /**
+     * Nothing that carries text has been squeezed out of existence.
+     *
+     * The bounds walk above cannot see this failure. A Row measures each child against the width
+     * that is left, so a child that does not fit is constrained down and clipped rather than
+     * placed outside its parent — its position stays perfectly legal while its content vanishes.
+     * That is how the drive screen shipped a stat row whose tail was cut mid-word and whose last
+     * two entries rendered at no width at all. A collapsed text node is the mechanical signature
+     * of it, and unlike a screenshot it can be asserted.
+     */
+    private fun assertNoTextIsSqueezedAway() {
+        val starved = mutableListOf<String>()
+
+        fun walk(node: SemanticsNode) {
+            val text = node.config.getOrNull(SemanticsProperties.Text)
+                ?.joinToString(" ") { it.text }
+                ?.takeIf { it.isNotBlank() }
+            if (text != null && (node.size.width == 0 || node.size.height == 0)) {
+                starved += "\"$text\" rendered at ${node.size.width}x${node.size.height}"
+            }
+            node.children.forEach { walk(it) }
+        }
+        walk(compose.onRoot().fetchSemanticsNode())
+
+        assertThat(starved).`as`("text collapsed to nothing").isEmpty()
+    }
+
     private fun renderDriver() {
         compose.setContent {
             DriverScreen(live, 88.6f, Direction.ION, paletteFor(Direction.ION, night = true))
+        }
+    }
+
+    private fun renderFullDriver(night: Boolean = true) {
+        compose.setContent {
+            DriverScreen(liveFull, 88.6f, Direction.ION, paletteFor(Direction.ION, night))
         }
     }
 
@@ -176,6 +238,92 @@ class LayoutFitTest {
             DriverScreen(
                 live.copy(overLimit = true, speedLimitKmh = 120),
                 131f, Direction.VECTOR, paletteFor(Direction.VECTOR, night = false)
+            )
+        }
+        assertNothingOverflows()
+    }
+
+    // ---------- the driver view with every optional reading present ----------
+
+    @Test
+    @Config(qualifiers = "w1291dp-h726dp-land")
+    fun `fully populated driver view fits the full box window`() {
+        renderFullDriver(); assertNothingOverflows(); assertNoTextIsSqueezedAway()
+    }
+
+    @Test
+    @Config(qualifiers = "w960dp-h360dp-land")
+    fun `fully populated driver view fits a wide short head unit`() {
+        renderFullDriver(); assertNothingOverflows(); assertNoTextIsSqueezedAway()
+    }
+
+    @Test
+    @Config(qualifiers = "w640dp-h360dp-land")
+    fun `fully populated driver view fits a common 1280x720 viewport`() {
+        renderFullDriver(); assertNothingOverflows(); assertNoTextIsSqueezedAway()
+    }
+
+    @Test
+    @Config(qualifiers = "w533dp-h300dp-land")
+    fun `fully populated driver view fits a small 800x480 viewport`() {
+        renderFullDriver(); assertNothingOverflows(); assertNoTextIsSqueezedAway()
+    }
+
+    @Test
+    @Config(qualifiers = "w427dp-h240dp-land")
+    fun `fully populated driver view survives an extremely small viewport`() {
+        renderFullDriver(); assertNothingOverflows(); assertNoTextIsSqueezedAway()
+    }
+
+    @Test
+    @Config(qualifiers = "w1291dp-h181dp-land")
+    fun `fully populated driver view fits the quarter-height split band`() {
+        renderFullDriver(); assertNothingOverflows(); assertNoTextIsSqueezedAway()
+    }
+
+    @Test
+    @Config(qualifiers = "w645dp-h726dp")
+    fun `fully populated driver view fits the vertical split column`() {
+        renderFullDriver(); assertNothingOverflows(); assertNoTextIsSqueezedAway()
+    }
+
+    @Test
+    @Config(qualifiers = "w640dp-h360dp-land")
+    fun `fully populated driver view fits on the day palette`() {
+        renderFullDriver(night = false); assertNothingOverflows(); assertNoTextIsSqueezedAway()
+    }
+
+    @Test
+    @Config(qualifiers = "w533dp-h300dp-land")
+    fun `driver view fits while charging on a low battery`() {
+        compose.setContent {
+            DriverScreen(
+                liveFull.copy(batterySocPercent = 8.0, batteryCharging = true),
+                0f, Direction.AUDI, paletteFor(Direction.AUDI, night = true)
+            )
+        }
+        assertNothingOverflows()
+    }
+
+    @Test
+    @Config(qualifiers = "w533dp-h300dp-land")
+    fun `driver view fits with only the car's range estimate`() {
+        compose.setContent {
+            DriverScreen(
+                liveFull.copy(batteryRangeKm = null),
+                88.6f, Direction.ION, paletteFor(Direction.ION, night = true)
+            )
+        }
+        assertNothingOverflows()
+    }
+
+    @Test
+    @Config(qualifiers = "w533dp-h300dp-land")
+    fun `driver view fits with a battery reading but no range at all`() {
+        compose.setContent {
+            DriverScreen(
+                liveFull.copy(batteryRangeKm = null, mgBatteryRangeKm = null),
+                88.6f, Direction.ION, paletteFor(Direction.ION, night = true)
             )
         }
         assertNothingOverflows()
