@@ -6,21 +6,27 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import `in`.odograph.tracker.alert.AlertMode
 import `in`.odograph.tracker.data.OdographDb
@@ -31,13 +37,17 @@ import `in`.odograph.tracker.probe.DeviceProbe
 import `in`.odograph.tracker.record.TripRecorderService
 import `in`.odograph.tracker.server.DashboardServer
 import `in`.odograph.tracker.server.LanInfo
+import `in`.odograph.tracker.sync.SheetsSync
 import `in`.odograph.tracker.ui.theme.Direction
 import `in`.odograph.tracker.ui.theme.Palette
 import `in`.odograph.tracker.ui.theme.Settings
 import `in`.odograph.tracker.ui.theme.ThemeMode
 import java.io.File
 import java.util.Locale
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 
@@ -62,6 +72,37 @@ fun SetupScreen(
     var zoneId by remember { mutableStateOf(settings.timeZoneId) }
     var alertMode by remember { mutableStateOf(settings.alertMode) }
     var lanExport by remember { mutableStateOf(settings.lanExportEnabled) }
+
+    // The fields /config once held on a laptop; now typed on this screen, still one device.
+    var webhook by remember { mutableStateOf(settings.webhookUrl) }
+    var docsHours by remember { mutableStateOf(settings.docsSyncHours) }
+    var deviceName by remember { mutableStateOf(settings.deviceId) }
+    var mgPhone by remember { mutableStateOf(settings.telematicsPhone) }
+    var mgPassword by remember { mutableStateOf(settings.telematicsPassword) }
+    var mgVin by remember { mutableStateOf(settings.telematicsVin) }
+    var capacity by remember { mutableStateOf("%.2f".format(settings.batteryCapacityKwh)) }
+    var homeRate by remember { mutableStateOf("%.2f".format(settings.homeRateInr)) }
+    var outsideRate by remember { mutableStateOf("%.2f".format(settings.outsideRateInr)) }
+    var odoReading by remember { mutableStateOf("") }
+    val scope = rememberCoroutineScope()
+
+    val dao = remember { OdographDb.get(ctx).dao() }
+
+    // The odometer stats come from Room, which is off-limits on the main thread (the box has no
+    // allowMainThreadQueries). Load them once on IO; the ODOMETER section recomputes its derived
+    // numbers from these states whenever they arrive.
+    var trackedKm by remember { mutableStateOf(0.0) }
+    var carOdoKm by remember { mutableStateOf<Double?>(null) }
+    LaunchedEffect(Unit) {
+        withContext(Dispatchers.IO) {
+            trackedKm = dao.trackedDistanceM() / 1000.0
+            carOdoKm = dao.latestCarOdoKm()
+        }
+    }
+    val currentOdoKm = remember(trackedKm) { `in`.odograph.tracker.core.Odometer.appOdoKm(settings, trackedKm) }
+    val driftKm = remember(carOdoKm, currentOdoKm) {
+        carOdoKm?.let { `in`.odograph.tracker.core.Odometer.drift(it, currentOdoKm) }
+    }
 
     val restoreLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocument()
@@ -213,12 +254,264 @@ fun SetupScreen(
                     color = palette.dim, fontSize = m.body,
                     modifier = Modifier.padding(top = m.gap / 2)
                 )
+                // The old "typed at /config from your Mac" hint is gone: these fields live here,
+                // on the same screen as the on/off switch, because the driver stopped visiting
+                // the web page. All four are required for the poller to run; a blank phone
+                // disables telemetry entirely even with the switch ON.
+                SetupField(
+                    "iSMART phone number", mgPhone,
+                    { mgPhone = it }, palette, m,
+                    placeholder = "10-digit mobile on the iSmart account",
+                    keyboardType = KeyboardType.Phone
+                )
+                SetupField(
+                    "iSMART password", mgPassword,
+                    { mgPassword = it }, palette, m,
+                    placeholder = "left blank keeps the saved password",
+                    isPassword = true
+                )
+                SetupField(
+                    "VIN (optional)", mgVin,
+                    { mgVin = it }, palette, m,
+                    placeholder = "blank uses the account's first vehicle"
+                )
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(m.gap / 2)) {
+                    Chip("SAVE", false, palette, m) {
+                        settings.telematicsPhone = mgPhone
+                        settings.telematicsPassword = mgPassword
+                        settings.telematicsVin = mgVin
+                        note = "MG credentials saved."
+                    }
+                    var testing by remember { mutableStateOf(false) }
+                    Chip(if (testing) "TESTING…" else "TEST CONNECTION", testing, palette, m) {
+                        if (!testing) {
+                            testing = true
+                            scope.launch {
+                                note = try {
+                                    DashboardServer.testTelematics(
+                                        mgPhone, mgPassword, mgVin
+                                    )
+                                } catch (e: Exception) {
+                                    "Connection failed: ${e.message ?: e.javaClass.simpleName}"
+                                }
+                                testing = false
+                            }
+                        }
+                    }
+                }
+            }
+
+            Section("ODOMETER", palette, m) {
+                // The app counts up from a seeded baseline; the car quotes its real dash reading
+                // over telematics. Comparing them is the drift check. Calibration records the
+                // dash reading as a calibration point: it corrects only the trips driven since
+                // the previous reading, never the older ones, and shares the drift across them
+                // proportionally. A reading far off what the app expected is flagged before it is
+                // applied, because it would rescale a whole window of trips.
                 Text(
-                    "Credentials for the iSMART account are typed at " +
-                        "http://<this device>:${DashboardServer.PORT}/config, once, from your Mac.",
+                    "App: %.0f km · car: %s km · drift: %s".format(
+                        currentOdoKm,
+                        carOdoKm?.let { "%.0f".format(it) } ?: "—",
+                        driftKm?.let {
+                            if (kotlin.math.abs(it) >= TripRecorderService.ODO_DRIFT_FLAG_KM) {
+                                "%+.1f km (needs calibration)".format(it)
+                            } else {
+                                "%+.1f km (on track)".format(it)
+                            }
+                        } ?: "—"
+                    ),
+                    color = if (driftKm != null &&
+                        kotlin.math.abs(driftKm) >= TripRecorderService.ODO_DRIFT_FLAG_KM
+                    ) palette.warn else palette.dim,
+                    fontSize = m.body,
+                    modifier = Modifier.padding(top = m.gap / 2)
+                )
+
+                val fresh = remember(trackedKm) { `in`.odograph.tracker.core.Odometer.recordDueAt(settings, trackedKm) }
+                if (fresh != null) {
+                    Text(
+                        "%.0f km travelled since your last odometer reading — record the dash " +
+                            "number to keep the app on track.".format(fresh),
+                        color = palette.warn,
+                        fontSize = m.body,
+                        modifier = Modifier.padding(top = m.gap / 2)
+                    )
+                }
+
+                val carKm = carOdoKm
+                if (carKm != null) {
+                    val carPreview = remember(carKm, trackedKm) {
+                        `in`.odograph.tracker.core.Odometer.preview(settings, carKm, trackedKm)
+                    }
+                    if (carPreview.suspect) {
+                        Text(
+                            "Warning: the car's %.0f km is %+.1f km off what the app expected " +
+                                "— this would rescale every trip since the last reading. Point the " +
+                                "number in the field and tap SET ODOMETER only if you trust it."
+                                .format(carKm, carPreview.offByKm),
+                            color = palette.warn, fontSize = m.body,
+                            modifier = Modifier.padding(top = m.gap / 2)
+                        )
+                    }
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(m.gap / 2)) {
+                        Chip("RECORD FROM CAR", false, palette, m) {
+                            scope.launch {
+                                val msg = withContext(Dispatchers.IO) {
+                                    runCatching {
+                                        val r = `in`.odograph.tracker.core.Odometer
+                                            .calibrate(settings, carKm, trackedKm)
+                                        val note = if (r.applied) {
+                                            "Recorded the car's %.0f km — trips since your last " +
+                                                "reading corrected.".format(carKm)
+                                        } else {
+                                            "Not recorded: ${r.reason ?: "reading rejected"}."
+                                        }
+                                        if (r.applied) {
+                                            TripRecorderService.refreshCalibratedOdo(dao, settings)
+                                        }
+                                        note
+                                    }.getOrElse { "Calibration failed: ${it.message}" }
+                                }
+                                note = msg
+                            }
+                        }
+                    }
+                }
+                SetupField(
+                    "Current dash reading (km)", odoReading,
+                    { odoReading = it }, palette, m,
+                    placeholder = "type the dash number once, calibration happens automatically",
+                    keyboardType = KeyboardType.Decimal
+                )
+                val manualPreview = odoReading.toDoubleOrNull()?.let {
+                    remember(it, trackedKm) {
+                        `in`.odograph.tracker.core.Odometer.preview(settings, it, trackedKm)
+                    }
+                }
+                if (manualPreview?.suspect == true) {
+                    Text(
+                        "%s %+.1f km off what the app expected — rescaling trips since the last " +
+                            "reading. Double-check the number.".format(
+                            odoReading, manualPreview.offByKm
+                        ),
+                        color = palette.warn, fontSize = m.body,
+                        modifier = Modifier.padding(top = m.gap / 2)
+                    )
+                }
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(m.gap / 2)) {
+                    Chip("SET ODOMETER", odoReading.isNotBlank(), palette, m) {
+                        odoReading.toDoubleOrNull()?.let { reading ->
+                            scope.launch {
+                                val msg = withContext(Dispatchers.IO) {
+                                    val r = `in`.odograph.tracker.core.Odometer
+                                        .calibrate(settings, reading, trackedKm)
+                                    val n = if (r.applied) {
+                                        "Recorded %.0f km — trips since your last reading corrected.".format(reading)
+                                    } else {
+                                        "Not recorded: ${r.reason ?: "reading rejected"}."
+                                    }
+                                    if (r.applied) {
+                                        TripRecorderService.refreshCalibratedOdo(dao, settings)
+                                    }
+                                    n
+                                }
+                                note = msg
+                            }
+                        } ?: run { note = "Enter a number." }
+                    }
+                }
+            }
+
+            Section("POWER & RATES", palette, m) {
+                SetupField(
+                    "Battery, kWh", capacity,
+                    { capacity = it }, palette, m,
+                    placeholder = "usable capacity e.g. 52.9",
+                    keyboardType = KeyboardType.Decimal
+                )
+                SetupField(
+                    "Home rate, ₹/kWh", homeRate,
+                    { homeRate = it }, palette, m,
+                    placeholder = "slow charge rate e.g. 8",
+                    keyboardType = KeyboardType.Decimal
+                )
+                SetupField(
+                    "Fast charge rate, ₹/kWh", outsideRate,
+                    { outsideRate = it }, palette, m,
+                    placeholder = "fast charger rate e.g. 25",
+                    keyboardType = KeyboardType.Decimal
+                )
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(m.gap / 2)) {
+                    Chip("SAVE", false, palette, m) {
+                        capacity.toDoubleOrNull()?.let { settings.batteryCapacityKwh = it }
+                        homeRate.toDoubleOrNull()?.let { settings.homeRateInr = it }
+                        outsideRate.toDoubleOrNull()?.let { settings.outsideRateInr = it }
+                        note = "Power settings saved."
+                    }
+                }
+                Text(
+                    "Capacity turns SOC into kW·h (default 52.9 for the Windsor). Under 10 kW is " +
+                        "a slow/home charge at the home rate; 10 kW and up is fast at the outside " +
+                        "rate. Blank fields keep the current values.",
                     color = palette.dim, fontSize = m.body,
                     modifier = Modifier.padding(top = m.gap / 2)
                 )
+            }
+
+            Section("CLOUD SYNC", palette, m) {
+                SetupField(
+                    "Google Docs link / webhook", webhook,
+                    { webhook = it }, palette, m,
+                    placeholder = "spreadsheet link or its /exec URL"
+                )
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(m.gap / 2)) {
+                    listOf(1 to "HOURLY", 12 to "12 H", 24 to "DAILY").forEach { (h, label) ->
+                        Chip(label, h == docsHours, palette, m) { docsHours = h }
+                    }
+                }
+                SetupField(
+                    "Device name", deviceName,
+                    { deviceName = it }, palette, m,
+                    placeholder = "how this box signs its uploads e.g. windsor"
+                )
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(m.gap / 2)) {
+                    var syncing by remember { mutableStateOf(false) }
+                    Chip("SAVE", false, palette, m) {
+                        settings.webhookUrl = webhook
+                        settings.docsSyncHours = docsHours
+                        if (deviceName.isNotBlank()) settings.deviceId = deviceName.trim()
+                        note = "Cloud sync settings saved."
+                    }
+                    var importing by remember { mutableStateOf(false) }
+                    Chip(if (syncing) "SYNCING…" else "EXPORT NOW", syncing, palette, m) {
+                        if (!syncing) {
+                            syncing = true
+                            scope.launch {
+                                val r = withContext(Dispatchers.IO) {
+                                    SheetsSync.exportDocs(ctx, settings.webhookUrl, settings.deviceId)
+                                }
+                                note = when {
+                                    r.error != null -> "Export failed: ${r.error}"
+                                    r.attempted == 0 -> "Nothing new since the last export."
+                                    else -> "Uploaded ${r.delivered} of ${r.attempted} new rows."
+                                }
+                                syncing = false
+                            }
+                        }
+                    }
+                    Chip(if (importing) "IMPORTING…" else "IMPORT NOW", importing, palette, m) {
+                        if (!importing) {
+                            importing = true
+                            scope.launch {
+                                val msg = withContext(Dispatchers.IO) {
+                                    SheetsSync.importControl(settings, settings.webhookUrl).first
+                                }
+                                note = msg
+                                importing = false
+                            }
+                        }
+                    }
+                }
             }
 
             Section("LAN DATA", palette, m) {
@@ -285,9 +578,9 @@ fun SetupScreen(
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(m.gap / 2)) {
                     Chip("SHARE CSV", false, palette, m) {
                         Thread {
-                            val dao = OdographDb.get(ctx).dao()
+                            val db = OdographDb.get(ctx).dao()
                             val f = writeExport(
-                                ctx, "odograph-trips.csv", Exporters.tripsCsv(dao.allTrips())
+                                ctx, "odograph-trips.csv", Exporters.tripsCsv(db.allTrips())
                             )
                             shareFile(ctx, f, "text/csv")
                         }.start()
@@ -295,10 +588,10 @@ fun SetupScreen(
                     }
                     Chip("SHARE GPX", false, palette, m) {
                         Thread {
-                            val dao = OdographDb.get(ctx).dao()
-                            val latest = dao.allTrips().firstOrNull()
+                            val db = OdographDb.get(ctx).dao()
+                            val latest = db.allTrips().firstOrNull()
                             val gpx = latest?.let {
-                                Exporters.gpx("Trip ${it.id}", dao.pointsFor(it.id))
+                                Exporters.gpx("Trip ${it.id}", db.pointsFor(it.id))
                             } ?: "<gpx/>"
                             shareFile(ctx, writeExport(ctx, "odograph-latest.gpx", gpx),
                                 "application/gpx+xml")
@@ -385,4 +678,38 @@ private fun Section(
         )
         content()
     }
+}
+
+/** A labelled text input on the setup page, matched to the instrument palette so it is readable. */
+@Composable
+private fun SetupField(
+    label: String,
+    value: String,
+    onValueChange: (String) -> Unit,
+    palette: Palette,
+    m: Metrics,
+    placeholder: String = "",
+    isPassword: Boolean = false,
+    keyboardType: KeyboardType = KeyboardType.Text
+) {
+    OutlinedTextField(
+        value = value,
+        onValueChange = onValueChange,
+        label = { Text(label) },
+        placeholder = if (placeholder.isNotEmpty()) {
+            { Text(placeholder, color = palette.label) }
+        } else null,
+        singleLine = true,
+        isError = false,
+        visualTransformation = if (isPassword) {
+            androidx.compose.ui.text.input.PasswordVisualTransformation()
+        } else {
+            androidx.compose.ui.text.input.VisualTransformation.None
+        },
+        keyboardOptions = KeyboardOptions(keyboardType = keyboardType),
+        colors = textFieldColors(palette),
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = m.gap / 4)
+    )
 }

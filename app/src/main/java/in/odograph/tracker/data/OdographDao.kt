@@ -23,6 +23,14 @@ interface OdographDao {
     @Query("SELECT * FROM trips ORDER BY startedAt DESC")
     fun allTrips(): List<TripEntity>
 
+    /** Every metre every finished trip covered — the app's own lifetime odometer, plus the baseline. */
+    @Query("SELECT COALESCE(SUM(distanceM), 0) FROM trips WHERE endedAt IS NOT NULL")
+    fun trackedDistanceM(): Double
+
+    /** The most recent odometer the car itself quoted, km — the ground truth for drift checks. */
+    @Query("SELECT odometerKm FROM battery WHERE odometerKm IS NOT NULL ORDER BY t DESC LIMIT 1")
+    fun latestCarOdoKm(): Double?
+
     @Query("SELECT * FROM trips WHERE id = :id")
     fun tripById(id: Long): TripEntity?
 

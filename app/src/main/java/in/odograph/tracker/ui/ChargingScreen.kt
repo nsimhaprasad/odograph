@@ -86,6 +86,7 @@ fun ChargeCostDialog(
             label = { Text("₹ per kW·h (tariff)") },
             singleLine = true,
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+            colors = textFieldColors(palette),
             modifier = Modifier.fillMaxWidth()
         )
         Text(
@@ -99,6 +100,7 @@ fun ChargeCostDialog(
             label = { Text("Total bill ₹ (GST included)") },
             singleLine = true,
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+            colors = textFieldColors(palette),
             modifier = Modifier.fillMaxWidth()
         )
         Row(horizontalArrangement = Arrangement.spacedBy(m.gap / 2)) {
@@ -243,6 +245,7 @@ fun ChargeEditDialog(
             label = { Text("kWh from battery (SOC)") },
             singleLine = true,
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+            colors = textFieldColors(palette),
             modifier = Modifier.fillMaxWidth()
         )
         OutlinedTextField(
@@ -251,6 +254,7 @@ fun ChargeEditDialog(
             label = { Text("kWh from wall (charger / Qubo)") },
             singleLine = true,
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+            colors = textFieldColors(palette),
             modifier = Modifier.fillMaxWidth()
         )
         if (e.placeId != null) {
@@ -259,6 +263,7 @@ fun ChargeEditDialog(
                 onValueChange = { placeText = it },
                 label = { Text("Where (CHANGE)") },
                 singleLine = true,
+                colors = textFieldColors(palette),
                 modifier = Modifier.fillMaxWidth()
             )
         }
@@ -276,6 +281,7 @@ fun ChargeEditDialog(
             label = { Text("₹ per kW·h (tariff)") },
             singleLine = true,
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+            colors = textFieldColors(palette),
             modifier = Modifier.fillMaxWidth()
         )
         Text(
@@ -289,6 +295,7 @@ fun ChargeEditDialog(
             label = { Text("Total bill ₹ (GST included)") },
             singleLine = true,
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+            colors = textFieldColors(palette),
             modifier = Modifier.fillMaxWidth()
         )
         Row(horizontalArrangement = Arrangement.spacedBy(m.gap / 2)) {

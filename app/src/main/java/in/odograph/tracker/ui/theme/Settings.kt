@@ -139,6 +139,53 @@ class Settings(ctx: Context) {
         set(value) = prefs.edit().putBoolean(KEY_LAN_EXPORT, value).apply()
 
     /**
+     * The car's physical odometer at the moment tracking began, km. The app's own odometer is
+     * this plus every closed-trip distance, so entering the real dash reading here (20,000 km
+     * on a car that was never tracked) seeds the baseline the instrument counts up from.
+     *
+     * Calibration re-bases rather than editing trips: enter the current dash reading, the app
+     * sets baseline = reading - trackedSoFar, and the whole stored history is silently corrected
+     * in one number — no row is rewritten, and trips/costs/efficiency are untouched.
+     */
+    var odoBaselineKm: Double
+        get() = prefs.getFloat(KEY_ODO_BASELINE, 0f).toDouble()
+        set(value) = prefs.edit().putFloat(KEY_ODO_BASELINE, value.toFloat().coerceIn(0f, 1_000_000f)).apply()
+
+    /** When the odometer was last calibrated, for the "on track since" line on the setup page. */
+    var odoCalibratedAt: Long
+        get() = prefs.getLong(KEY_ODO_CALIB, 0L)
+        set(value) = prefs.edit().putLong(KEY_ODO_CALIB, value).apply()
+
+    /**
+     * The calibration line as JSON — one point per dash reading the driver typed. Each point is
+     * `{m, p, t}`: the app's measured km, the physical dash km, and when. A new reading only
+     * rescales the trips since the previous point. Falls back to a lone baseline when blank.
+     * See [in.odograph.tracker.core.Odometer] for the model.
+     */
+    var odoPointsJson: String
+        get() = prefs.getString(KEY_ODO_POINTS, "").orEmpty()
+        set(value) = prefs.edit().putString(KEY_ODO_POINTS, value).apply()
+
+    /**
+     * The odometer calibration factor: real kilometres per measured kilometre (1.0 = on track).
+     * Applied to every trip so a drift found at any point is shared across the whole history —
+     * see [in.odograph.tracker.core.Odometer] for the model.
+     */
+    var odoFactor: Double
+        get() = prefs.getFloat(KEY_ODO_FACTOR, 1f).toDouble().takeIf { it in 0.1..4.0 } ?: 1.0
+        set(value) = prefs.edit().putFloat(KEY_ODO_FACTOR, value.toFloat().coerceIn(0.1f, 4f)).apply()
+
+    /** Last time a drift notification fired, so a persistent mismatch nags at most once a day. */
+    var odoDriftNaggedAt: Long
+        get() = prefs.getLong(KEY_ODO_NAG, 0L)
+        set(value) = prefs.edit().putLong(KEY_ODO_NAG, value).apply()
+
+    /** Last time the "please record the odometer" reminder fired, so it surfaces at most once a day. */
+    var odoRecordDueNaggedAt: Long
+        get() = prefs.getLong(KEY_ODO_RECORD_NAG, 0L)
+        set(value) = prefs.edit().putLong(KEY_ODO_RECORD_NAG, value).apply()
+
+    /**
      * Display timezone. Blank means follow the device.
      *
      * A box with no SIM receives no NITZ, so it can learn correct UTC from NTP but never learns
@@ -175,6 +222,12 @@ class Settings(ctx: Context) {
         const val KEY_OUTSIDE_RATE = "outside_rate_inr"
         const val KEY_GST_RATE = "gst_rate_pct"
         const val KEY_LAN_EXPORT = "lan_export_enabled"
+        const val KEY_ODO_BASELINE = "odo_baseline_km"
+        const val KEY_ODO_CALIB = "odo_calibrated_at"
+        const val KEY_ODO_POINTS = "odo_points_json"
+        const val KEY_ODO_FACTOR = "odo_factor"
+        const val KEY_ODO_NAG = "odo_drift_nagged_at"
+        const val KEY_ODO_RECORD_NAG = "odo_record_due_nagged_at"
 
         /** The Odograph analytics workbook the drive box pushes to. */
         const val DEFAULT_DOCS_URL =

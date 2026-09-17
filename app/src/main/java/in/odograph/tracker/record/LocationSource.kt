@@ -67,8 +67,13 @@ class GnssLocationSource(ctx: Context) : LocationSource {
             // throws when it has none. The recorder starts this from Dispatchers.IO, a plain
             // worker thread, so the Looper is named explicitly. Callbacks land on the main thread
             // and hand the work straight back to IO.
+            //
+            // 200 ms minimum interval: the GNSS chip typically produces Doppler-speed fixes at
+            // 5-10 Hz; this accepts nearly all of them instead of throttling to 1 Hz, cutting the
+            // reported latency by up to 800 ms. The downstream spring filter still removes the
+            // residual 2-3 km/h of GNSS jitter.
             runCatching {
-                lm.requestLocationUpdates(provider, 1000L, 0f, l, Looper.getMainLooper())
+                lm.requestLocationUpdates(provider, 200L, 0f, l, Looper.getMainLooper())
             }
         }
 

@@ -109,6 +109,18 @@ class ChargeLedger(
         return Change.None
     }
 
+    /**
+     * Ends an open session because the car started driving, whatever the last telematics frame
+     * said. A moving car physically cannot be charging, so motion is as authoritative an end as
+     * "not charging" — and it works even when the MG link is down and the goodbye frame never
+     * arrives. The closing SOC is the last one the car reported, so the energy the box saw is
+     * still booked.
+     */
+    fun endByDriving(now: Long): Change {
+        val open = dao.openChargeEvent() ?: return Change.None
+        return close(open, now, open.endSoc)
+    }
+
     private fun isStale(open: ChargeEventEntity, now: Long): Boolean =
         now - (open.endTime ?: open.startTime) > BatteryMath.CHARGE_SESSION_GAP_MS
 

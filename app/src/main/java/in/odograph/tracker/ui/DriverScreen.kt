@@ -94,6 +94,15 @@ private fun TallLayout(
         ) {
             Stat(formatKm(live.distanceM), "KM   DISTANCE", palette, m, size = m.stat)
             Stat(formatHhMm(live.elapsedS), "H:MM   TIME", palette, m, size = m.stat)
+live.odoKm?.let {
+            Stat(
+                odoValue(it, live.odoDriftKm),
+                "KM   ODO",
+                palette, m,
+                size = m.stat,
+                contentColor = driftColor(live.odoDriftKm, palette)
+            )
+        }
         }
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -157,6 +166,12 @@ private fun WideLayout(
             modifier = Modifier.weight(1f))
         Stat(formatHhMm(live.elapsedS), "H:MM   TIME", palette, m, size = m.stat,
             modifier = Modifier.weight(1f))
+        live.odoKm?.let {
+            Stat(
+                odoValue(it, live.odoDriftKm), "KM   ODO", palette, m, size = m.stat,
+                modifier = Modifier.weight(1f), contentColor = driftColor(live.odoDriftKm, palette)
+            )
+        }
         Stat("${mpsToKmh(live.maxSpeedMps).toInt()}", "KM/H   MAX", palette, m, size = m.stat,
             modifier = Modifier.weight(1f))
         Stat(formatHhMm(live.movingS), "H:MM   MOVING", palette, m, size = m.stat,
@@ -221,6 +236,14 @@ private fun BalancedLayout(
             Stat(formatKm(live.distanceM), "KM   DISTANCE", palette, m)
             Column(Modifier.padding(top = m.gap)) {
                 Stat(formatHhMm(live.elapsedS), "H:MM   TIME", palette, m)
+            }
+            live.odoKm?.let {
+                Column(Modifier.padding(top = m.gap)) {
+                    Stat(
+                        odoValue(it, live.odoDriftKm), "KM   ODO", palette, m, size = m.stat,
+                        contentColor = driftColor(live.odoDriftKm, palette)
+                    )
+                }
             }
             Row(
                 modifier = Modifier.fillMaxWidth().padding(top = m.gap),
@@ -363,4 +386,21 @@ private fun BatteryMeter(
             )
         }
     }
+}
+
+/** The odometer number, with an understated drift mark when the car disagrees meaningfully. */
+@Composable
+private fun odoValue(odoKm: Double, driftKm: Double?): String = buildString {
+    append("%.0f".format(odoKm))
+    driftKm?.takeIf { kotlin.math.abs(it) >= 1.0 }?.let {
+        append("  ").append("%+.1f".format(it))
+    }
+}
+
+/** On-track: normal colour. Drifting: the car's reference colour so a glance reads the state. */
+@Composable
+private fun driftColor(driftKm: Double?, palette: Palette): androidx.compose.ui.graphics.Color = when {
+    driftKm == null -> palette.numeral
+    kotlin.math.abs(driftKm) >= `in`.odograph.tracker.record.TripRecorderService.ODO_DRIFT_FLAG_KM -> palette.warn
+    else -> palette.accent
 }

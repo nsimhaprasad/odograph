@@ -86,6 +86,17 @@ class TripRecorderService : Service() {
         /** Metres descended this drive, never netted against the climb because descent regenerates. */
         val elevLossM: Double = 0.0,
         /**
+         * Lifetime odometer, km: the seeded baseline plus every closed trip plus this drive so
+         * far. Null until the baseline is set and the DB has been read once at boot.
+         */
+        val odoKm: Double? = null,
+        /**
+         * The car's own quoted odometer (telematics) minus ours, km. Zero means on track;
+         * a persistent positive/negative value means GPS drift — the setup page's calibrate
+         * button snaps ours back to the car's. Null until a telematics frame with an odo arrives.
+         */
+        val odoDriftKm: Double? = null,
+        /**
          * A fast charge the driver should price, surfaced to the UI as a prompt. Set from the
          * poller when a fast session opens (pre-price) or closes (correct with the real bill);
          * the dialog that shows it clears it. A slow session never prompts — the home rate stands.
@@ -107,6 +118,15 @@ class TripRecorderService : Service() {
 
         /** The "MG is offline" heads-up, separate from the ongoing recording notice. */
         private const val MG_ALERT_NOTIFICATION_ID = 2
+
+        /** The "odometer drifted" heads-up; the setup page can recalibrate in one tap. */
+        private const val ODO_ALERT_NOTIFICATION_ID = 3
+
+        /** The "record the odometer, it's been a while" reminder. */
+        private const val ODO_RECORD_NOTIFICATION_ID = 4
+
+        /** A drift this big (km, car vs ours) is worth interrupting for — GPS error is normal below it. */
+        const val ODO_DRIFT_FLAG_KM = 5.0
 
         /**
          * How long a single outage may keep nagging before another heads-up fires: one reminder
@@ -141,6 +161,16 @@ class TripRecorderService : Service() {
          */
         private const val PARKED_MOVE_GAP_MS = 10 * 60_000L
 
+        /**
+         * A fix this fast counts as the car genuinely driving. A parked car plugged into a charger
+         * never legitimately produces sustained speed, so once [DRIVE_START_CONFIRM_FIXES]
+         * consecutive fixes exceed it, any open charge session is assumed over — see [endChargeForDriveStart].
+         */
+        private const val DRIVE_START_SPEED_MPS = 1.0f
+
+        /** Consecutive driving fixes that confirm a real pull-away before a charge ends. */
+        private const val DRIVE_START_CONFIRM_FIXES = 3
+
         private val _state = MutableStateFlow(LiveState())
         val state: StateFlow<LiveState> = _state
 
@@ -158,6 +188,20 @@ class TripRecorderService : Service() {
         /** User-triggered freshness (e.g. tapping the battery tile). Honours the min-interval floor. */
         fun requestTelematicsRefresh() {
             telematicsRefresh.value = true
+        }
+
+        /**
+         * After a Setup-page calibration the stored factor/baseline changed, but the live state was
+         * computed at boot. Recompute the odometer against the current settings so the driver
+         * screen shows the corrected reading immediately instead of after the next reboot.
+         */
+        fun refreshCalibratedOdo(dao: `in`.odograph.tracker.data.OdographDao?, settings: Settings) {
+            if (dao == null) return
+            val base = `in`.odograph.tracker.core.Odometer.appOdoKm(
+                settings, dao.trackedDistanceM() / 1000.0
+            )
+            _state.update { it.copy(odoKm = base + it.distanceM / 1000.0 *
+                `in`.odograph.tracker.core.Odometer.factor(settings)) }
         }
 
         @Volatile
@@ -238,7 +282,13 @@ class TripRecorderService : Service() {
     private var startedAt: Long? = null
     /** Wall-clock the car last moved over a fix. When stale, the car is parked and may be draining. */
     private var lastMovedAt = Long.MIN_VALUE
+    /** Consecutive driving fixes, so a single GPS blip can't end a real charge. */
+    private var drivingFixStreak = 0
+    /** True once the current drive has already ended whatever charge was open. */
+    private var driveEndedCharge = false
     private var track = LiveTrack()
+    /** Lifetime odometer at boot: seeded baseline + every closed trip's distance. */
+    private var odoBaseKm: Double = 0.0
     private lateinit var settings: Settings
     private lateinit var alertSound: AlertSound
     private var speedAlert = SpeedAlert(AlertConfig(limitKmh = 0f))
@@ -269,7 +319,8 @@ class TripRecorderService : Service() {
                 outsideRateInr = settings.outsideRateInr
             )
             Diagnostics.crumb("recovery done trip=$tripId")
-            _state.value = LiveState(tripId = tripId)
+            odoBaseKm = `in`.odograph.tracker.core.Odometer.appOdoKm(settings, dao.trackedDistanceM() / 1000.0)
+            _state.value = LiveState(tripId = tripId, odoKm = odoBaseKm)
             // A charge owed an answer is the first thing a boot should ask again.
             raisePendingPriceReminder(dao)
             source.start { fix -> io.launch { record(fix) } }
@@ -337,7 +388,7 @@ class TripRecorderService : Service() {
             if (!settings.telematicsEnabled || phone.isBlank() || password.isBlank()) {
                 client = null
                 creds = null
-                _state.value = _state.value.copy(batterySocPercent = null, batteryCharging = null, telematicsConnected = null)
+                _state.value = _state.value.copy(batterySocPercent = null, batteryCharging = null, telematicsConnected = null, odoDriftKm = null)
                 // Deliberately off is not an outage; drop any reminder so it cannot nag on.
                 clearMgLostNotification()
                 continue
@@ -432,58 +483,21 @@ class TripRecorderService : Service() {
                 val capacity = settings.batteryCapacityKwh
                 val change = ChargeLedger(dao, capacity, settings.homeRateInr, settings.outsideRateInr)
                     .observe(ch?.isCharging, ch?.soc, powerKw, now)
-                when (change) {
-                    is ChargeLedger.Change.Opened -> {
-                        val e = change.event
-                        // Every session earns a charge location: the driveway it was plugged into,
-                        // whether that is a labelled home or a nameless public spot. Resolved at
-                        // session start so the Charging screen can group fills by where they
-                        // happened and report the per-location kWh.
-                        lastFix?.let { fix ->
-                            if (fix.lat.isFinite() && fix.lon.isFinite()) {
-                                val placeId = PlaceResolver(dao).resolve(fix.lat, fix.lon)
-                                dao.setChargePlace(e.id, placeId, fix.lat, fix.lon)
-                            }
-                        }
-                        val fastLooking = (e.peakPowerKw ?: 0.0) >= `in`.odograph.tracker.core.BatteryMath.FAST_CHARGE_KW
-                        if (fastLooking) {
-                            _state.update {
-                                if (it.pendingChargePrompt == null) {
-                                    it.copy(pendingChargePrompt = ChargePrompt(e.id, 0.0, isOpen = true))
-                                } else it
-                            }
-                        }
-                    }
-                    is ChargeLedger.Change.Closed -> {
-                        val e = change.event
-                        if (e.kind == `in`.odograph.tracker.core.BatteryMath.ChargeKind.FAST.ordinal) {
-                            // Never silence the ask twice: a fast session that closes unpriced gets
-                            // a durable reminder row the moment it closes, so a charge made after
-                            // locking the car can surface at the next drive instead of vanishing.
-                            if (e.enteredRateInr == null && e.enteredBillInr == null) {
-                                dao.upsertReminder(
-                                    PriceReminderEntity(
-                                        eventId = e.id, raisedAt = System.currentTimeMillis()
-                                    )
-                                )
-                            }
-                            _state.update {
-                                if (it.pendingChargePrompt == null) {
-                                    it.copy(
-                                        pendingChargePrompt = ChargePrompt(
-                                            e.id, e.energyKwh, isOpen = false, currentCostInr = e.costInr
-                                        )
-                                    )
-                                } else it
-                            }
-                        }
-                    }
-                    ChargeLedger.Change.None -> {}
-                }
+                applyChargeChange(dao, change)
 
                 // Coverage honesty: note that the poller ran at all, so the dashboard can show
                 // the days it did not.
                 recordDailyCoverage(dao, settings.zone, now)
+
+                // The car quotes its own odometer on telematics frames; anything ours counts up
+                // against that is drift (GNSS distance error, a wrong seed, a wheel-off). Compare
+                // live so the setup page can offer a one-tap recalibrate, and nag once a day when
+                // the mismatch grows past the noise floor.
+                checkOdoDrift(ch?.odometerKm, settings)
+
+                // If a long stretch has gone by without a dash reading, the odometer window keeps
+                // stretching uncalibrated — ask the driver to record one (at most once a day).
+                checkOdoRecordDue(dao, settings)
 
                 // Per-trip energy and the live efficiency readouts the drive screen shows.
                 val soc = ch?.soc
@@ -551,7 +565,8 @@ class TripRecorderService : Service() {
                 } else {
                     _state.value = _state.value.copy(
                         batterySocPercent = null, batteryCharging = null,
-                        batteryRangeAtFullKm = null, batteryRangeKm = null, mgBatteryRangeKm = null
+                        batteryRangeAtFullKm = null, batteryRangeKm = null, mgBatteryRangeKm = null,
+                        odoDriftKm = null
                     )
                 }
 
@@ -641,6 +656,22 @@ class TripRecorderService : Service() {
         val effectiveSpeedMps = track.speedMps
 
         val speedKmh = effectiveSpeedMps * 3.6f
+
+        // A moving car cannot be charging. The plug is unavoidably out the moment a real drive
+        // begins, so end any open charge on confirmed motion even if the MG "goodbye" frame never
+        // arrives (network down, API stale). A single GPS blip must not end a charge, hence the
+        // streak confirm; a fresh movement streak after parking re-arms the guard for the next drive.
+        if (effectiveSpeedMps >= DRIVE_START_SPEED_MPS) {
+            drivingFixStreak++
+            if (drivingFixStreak >= DRIVE_START_CONFIRM_FIXES && !driveEndedCharge) {
+                driveEndedCharge = true
+                endChargeForDriveStart(dao, fix.t)
+            }
+        } else {
+            drivingFixStreak = 0
+            driveEndedCharge = false
+        }
+
         if (effectiveSpeedMps > 0.5f) lastMovedAt = fix.t
         val limit = settings.speedLimitKmh
         if (limit != configuredLimit) {
@@ -662,9 +693,82 @@ class TripRecorderService : Service() {
             elevLossM = track.elevLossM,
             tripId = tripId,
             overLimit = alert.overLimit,
-            speedLimitKmh = limit
+            speedLimitKmh = limit,
+            odoKm = odoBaseKm + track.distanceM / 1000.0 *
+                `in`.odograph.tracker.core.Odometer.factor(settings)
         )
         lastFix = fix
+    }
+
+    /**
+     * Routes a ChargeLedger outcome to wherever the driver should see it: a fresh fast session
+     * prompts for a price at close, a fast session that closed unpriced leaves a durable reminder
+     * so the ask survives the car door, and a slow charge never interrupts. Shared by the
+     * telematics frame path and the drive-start close so both end a session identically.
+     */
+    private fun applyChargeChange(dao: `in`.odograph.tracker.data.OdographDao, change: ChargeLedger.Change) {
+        when (change) {
+            is ChargeLedger.Change.Opened -> {
+                val e = change.event
+                // Every session earns a charge location: the driveway it was plugged into,
+                // whether that is a labelled home or a nameless public spot. Resolved at
+                // session start so the Charging screen can group fills by where they
+                // happened and report the per-location kWh.
+                lastFix?.let { fix ->
+                    if (fix.lat.isFinite() && fix.lon.isFinite()) {
+                        val placeId = PlaceResolver(dao).resolve(fix.lat, fix.lon)
+                        dao.setChargePlace(e.id, placeId, fix.lat, fix.lon)
+                    }
+                }
+                val fastLooking = (e.peakPowerKw ?: 0.0) >= `in`.odograph.tracker.core.BatteryMath.FAST_CHARGE_KW
+                if (fastLooking) {
+                    _state.update {
+                        if (it.pendingChargePrompt == null) {
+                            it.copy(pendingChargePrompt = ChargePrompt(e.id, 0.0, isOpen = true))
+                        } else it
+                    }
+                }
+            }
+            is ChargeLedger.Change.Closed -> {
+                val e = change.event
+                if (e.kind == `in`.odograph.tracker.core.BatteryMath.ChargeKind.FAST.ordinal) {
+                    // Never silence the ask twice: a fast session that closes unpriced gets
+                    // a durable reminder row the moment it closes, so a charge made after
+                    // locking the car can surface at the next drive instead of vanishing.
+                    if (e.enteredRateInr == null && e.enteredBillInr == null) {
+                        dao.upsertReminder(
+                            PriceReminderEntity(
+                                eventId = e.id, raisedAt = System.currentTimeMillis()
+                            )
+                        )
+                    }
+                    _state.update {
+                        if (it.pendingChargePrompt == null) {
+                            it.copy(
+                                pendingChargePrompt = ChargePrompt(
+                                    e.id, e.energyKwh, isOpen = false, currentCostInr = e.costInr
+                                )
+                            )
+                        } else it
+                    }
+                }
+            }
+            ChargeLedger.Change.None -> {}
+        }
+    }
+
+    /**
+     * Closes an open charge session because the car demonstrably started driving. A moving car is
+     * physically not plugged in, so motion is as authoritative an end as the telematics "goodbye"
+     * frame — and works when the MG link is down or the frame stale. It books energy from the last
+     * SOC the car reported and prices the session normally, so nothing is lost except the "in
+     * progress" limbo.
+     */
+    private fun endChargeForDriveStart(dao: `in`.odograph.tracker.data.OdographDao, at: Long) {
+        val capacity = settings.batteryCapacityKwh
+        val change = ChargeLedger(dao, capacity, settings.homeRateInr, settings.outsideRateInr)
+            .endByDriving(at)
+        applyChargeChange(dao, change)
     }
 
     private fun startInForeground() {
@@ -714,10 +818,74 @@ class TripRecorderService : Service() {
         }
     }
 
+    /**
+     * Compares the car's own odometer against the app's computed one and surfaces the result.
+     *
+     * The car is ground truth: its dash reading ticks up with real wheel revolutions, while ours
+     * is a GNSS count-up from a seeded 20,000 km baseline. A small |drift| is normal — GPS
+     * distance error lives in the low single digits of kilometres. A persistent mismatch past
+     * [ODO_DRIFT_FLAG_KM] is worth a once-a-day heads-up (never a bark on every poll), and the
+     * setup page offers a one-tap recalibrate that snaps our baseline to the car's number.
+     */
+    private fun checkOdoDrift(carOdoKm: Double?, settings: Settings) {
+        if (carOdoKm == null || carOdoKm <= 0.0) return
+        val ours = _state.value.odoKm ?: return
+        val drift = carOdoKm - ours
+        _state.update { it.copy(odoDriftKm = drift) }
+        if (kotlin.math.abs(drift) >= ODO_DRIFT_FLAG_KM) {
+            val now = System.currentTimeMillis()
+            if (now - settings.odoDriftNaggedAt < 24 * 60 * 60_000L) return
+            settings.odoDriftNaggedAt = now
+            runCatching {
+                val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+                nm.notify(
+                    ODO_ALERT_NOTIFICATION_ID,
+                    Notification.Builder(this, CHANNEL_ID)
+                        .setContentTitle("Odograph")
+                        .setContentText(
+                            "Odometer drift %+.1f km vs the car — recalibrate in Settings".format(drift)
+                        )
+                        .setSmallIcon(android.R.drawable.ic_menu_compass)
+                        .setAutoCancel(true)
+                        .build()
+                )
+            }
+        }
+    }
+
     private fun clearMgLostNotification() {
         runCatching {
             (getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager)
                 .cancel(MG_ALERT_NOTIFICATION_ID)
+        }
+    }
+
+    /**
+     * Nags the driver to type in the current dash reading when a long stretch of tracking has
+     * gone without one. The odometer window grows uncalibrated in the meantime, so a single
+     * prompt a day is the difference between a tiny correction and a big one.
+     */
+    private fun checkOdoRecordDue(dao: `in`.odograph.tracker.data.OdographDao?, settings: Settings) {
+        if (dao == null) return
+        val freshKm = `in`.odograph.tracker.core.Odometer.recordDueAt(
+            settings, dao.trackedDistanceM() / 1000.0
+        ) ?: return
+        val now = System.currentTimeMillis()
+        if (now - settings.odoRecordDueNaggedAt < 24 * 60 * 60_000L) return
+        settings.odoRecordDueNaggedAt = now
+        runCatching {
+            val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            nm.notify(
+                ODO_RECORD_NOTIFICATION_ID,
+                Notification.Builder(this, CHANNEL_ID)
+                    .setContentTitle("Odograph")
+                    .setContentText(
+                        "%.0f km since the last odometer reading — record it in Settings".format(freshKm)
+                    )
+                    .setSmallIcon(android.R.drawable.ic_menu_compass)
+                    .setAutoCancel(true)
+                    .build()
+            )
         }
     }
 

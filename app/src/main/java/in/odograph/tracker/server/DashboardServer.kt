@@ -149,7 +149,6 @@ object DashboardServer {
                         )
                     }
                     get("/backup") {
-                        val dao = OdographDb.get(app).dao()
                         if (settings.lanExportEnabled) {
                             val tmp = File(app.cacheDir, "odograph-backup.db")
                             OdographDb.snapshotTo(app, tmp)
@@ -275,7 +274,7 @@ object DashboardServer {
                     }
                     get("/config") {
                         call.respondText(
-                            configPageView(settings),
+                            configPageView(settings, dao = OdographDb.get(app).dao()),
                             ContentType.Text.Html
                         )
                     }
@@ -287,6 +286,14 @@ object DashboardServer {
                         params["capacity"]?.toDoubleOrNull()?.let { settings.batteryCapacityKwh = it }
                         params["home_rate"]?.toDoubleOrNull()?.let { settings.homeRateInr = it }
                         params["out_rate"]?.toDoubleOrNull()?.let { settings.outsideRateInr = it }
+                        params["current_odo"]?.toDoubleOrNull()?.let { current ->
+                            // Calibrate: with meaningful tracking this re-solves the factor, so
+                            // the drift is shared across every trip proportionally rather than
+                            // rewriting any row or moving the 20,000 km seed.
+                            val dao = OdographDb.get(app).dao()
+                            `in`.odograph.tracker.core.Odometer
+                                .calibrate(settings, current, dao.trackedDistanceM() / 1000.0)
+                        }
 
                         val phone = params["tl_phone"]?.trim().orEmpty()
                         val password = params["tl_password"].orEmpty()
@@ -339,11 +346,11 @@ object DashboardServer {
                             r.attempted == 0 -> "Nothing new since the last export."
                             else -> "Uploaded ${r.delivered} of ${r.attempted} new rows to the docs workbook."
                         }
-                        call.respondText(configPageView(settings, msg), ContentType.Text.Html)
+                        call.respondText(configPageView(settings, msg, dao = OdographDb.get(app).dao()), ContentType.Text.Html)
                     }
                     get("/import") {
                         val (msg, error) = SheetsSync.importControl(settings, settings.webhookUrl)
-                        call.respondText(configPageView(settings, msg, error), ContentType.Text.Html)
+                        call.respondText(configPageView(settings, msg, error, OdographDb.get(app).dao()), ContentType.Text.Html)
                     }
                     get("/planner") {
                         val dao = OdographDb.get(app).dao()
@@ -423,8 +430,14 @@ object DashboardServer {
             mean(all.filter { it.distanceM > BatteryMath.CITY_MAX_DISTANCE_M })
     }
 
-    private fun configPageView(settings: Settings, message: String? = null, error: Boolean = false) =
-        DashboardHtml.configPage(
+    private fun configPageView(
+        settings: Settings,
+        message: String? = null,
+        error: Boolean = false,
+        dao: OdographDao? = null
+    ): String {
+        val trackedKm = dao?.trackedDistanceM()?.div(1000.0) ?: 0.0
+        return DashboardHtml.configPage(
             settings.webhookUrl, settings.deviceId,
             settings.telematicsPhone, settings.telematicsPassword, settings.telematicsVin,
             message, error,
@@ -432,8 +445,12 @@ object DashboardServer {
             homeRateInr = "%.2f".format(settings.homeRateInr),
             outsideRateInr = "%.2f".format(settings.outsideRateInr),
             docsSyncHours = settings.docsSyncHours,
-            lastDocsSyncAt = settings.lastDocsSyncAt
+            lastDocsSyncAt = settings.lastDocsSyncAt,
+            odoCurrentKm = `in`.odograph.tracker.core.Odometer.appOdoKm(settings, trackedKm),
+            odoBaselineKm = settings.odoBaselineKm,
+            odoCalibratedAt = settings.odoCalibratedAt
         )
+    }
 
     /**
      * Serves the machine-readable exports while the SETUP → LAN DATA toggle is on, and an
@@ -493,9 +510,9 @@ object DashboardServer {
     /**
      * One live login + vehicle + status round-trip against the real MG servers, for the "Try my
      * connection" button. Throws on failure so the caller renders the error; a returned string
-     * describes what was found.
+     * describes what was found. Public so the on-device setup screen can offer the same test.
      */
-    private suspend fun testTelematics(phone: String, password: String, vin: String): String =
+    suspend fun testTelematics(phone: String, password: String, vin: String): String =
         withContext(Dispatchers.IO) {
             val client = TelematicsClient.create(
                 phone, password, vin.takeIf { it.isNotBlank() }

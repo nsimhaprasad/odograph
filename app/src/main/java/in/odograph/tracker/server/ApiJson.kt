@@ -46,7 +46,9 @@ object ApiJson {
         append(kv("batteryRangeKm", numOrNull(state.batteryRangeKm))).append(",")
         append(kv("batteryRangeAtFullKm", numOrNull(state.batteryRangeAtFullKm))).append(",")
         append(kv("batteryMileageKmPerKwh", numOrNull(state.batteryMileageKmPerKwh))).append(",")
-        append(kv("telematicsConnected", state.telematicsConnected?.toString() ?: "null"))
+        append(kv("telematicsConnected", state.telematicsConnected?.toString() ?: "null")).append(",")
+        append(kv("odoKm", numOrNull(state.odoKm))).append(",")
+        append(kv("odoDriftKm", numOrNull(state.odoDriftKm)))
         append("}")
     }
 

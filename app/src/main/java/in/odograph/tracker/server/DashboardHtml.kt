@@ -433,7 +433,10 @@ a{color:#3DE1FF}
         homeRateInr: String = "8.0",
         outsideRateInr: String = "25.0",
         docsSyncHours: Int = 1,
-        lastDocsSyncAt: Long = 0
+        lastDocsSyncAt: Long = 0,
+        odoCurrentKm: Double = 0.0,
+        odoBaselineKm: Double = 0.0,
+        odoCalibratedAt: Long = 0
     ): String {
         val messageHtml = message?.let {
             "<div class=\"msg" + (if (error) " err" else "") + "\">" + esc(it) + "</div>"
@@ -516,6 +519,13 @@ a{color:#3DE1FF}
       <div><input name="out_rate" value="$outsideRateInr" inputmode="decimal" placeholder="&#8377;/kWh"><div class="hint">Fast charge rate</div></div>
     </div>
     <div class="hint">Capacity turns SOC into kW&middot;h. Under 10 kW is a slow/home charge at the home rate; 10 kW and up is fast at the outside rate. Blank keeps the current value.</div>
+    <label for="o" style="margin-top:26px">Odometer &mdash; current dash reading, km</label>
+    <input id="o" name="current_odo" value="${"%.0f".format(odoCurrentKm)}" inputmode="decimal"
+           placeholder="e.g. 20000">
+    <div class="hint">The app counts your odometer from <b>${"%.0f".format(odoBaselineKm)} km</b> baseline + every
+      tracked trip. It currently reads <b>${"%.0f".format(odoCurrentKm)} km</b> (the pairing above).
+      Enter what the car's dash actually shows to recalibrate &mdash; the drift is folded into the
+      baseline, so no trip or cost record is ever rewritten.${ if (odoCalibratedAt > 0) " Last calibrated " + SimpleDateFormat("d MMM, HH:mm", Locale.US).format(Date(odoCalibratedAt)) + "." else "" }</div>
     <div class="actions">
       <button type="submit" name="op" value="test">Try my connection</button>
       <button type="submit" class="ghost" name="op" value="save">Save</button>

@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
@@ -18,6 +19,26 @@ import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.sp
 import `in`.odograph.tracker.ui.theme.Palette
 
+/**
+ * OutlinedTextField colors matched to the instrument palette. Without this the Material default
+ * (near-black on a white field) renders as dark-on-dark text against the dark track, so typed
+ * input is effectively invisible — the "camouflaged" bug the driver reported: the caret moved,
+ * the field looked empty. Shared by every field in the app (charge edits, setup).
+ */
+@Composable
+fun textFieldColors(palette: Palette) =
+    OutlinedTextFieldDefaults.colors(
+        focusedTextColor = palette.numeral,
+        unfocusedTextColor = palette.numeral,
+        cursorColor = palette.accent,
+        focusedLabelColor = palette.accent,
+        unfocusedLabelColor = palette.label,
+        focusedBorderColor = palette.accent.copy(alpha = 0.8f),
+        unfocusedBorderColor = palette.track,
+        focusedContainerColor = palette.ground,
+        unfocusedContainerColor = palette.ground
+    )
+
 /** A stat in a fixed slot. Position never changes, so the glance is a jump, not a search. */
 @Composable
 fun Stat(
@@ -26,12 +47,13 @@ fun Stat(
     palette: Palette,
     m: Metrics,
     size: TextUnit = m.hero,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    contentColor: androidx.compose.ui.graphics.Color = palette.numeral
 ) {
     Column(modifier) {
         Text(
             text = value,
-            color = palette.numeral,
+            color = contentColor,
             fontSize = size,
             lineHeight = size * 1.05f,
             fontWeight = FontWeight.SemiBold,
