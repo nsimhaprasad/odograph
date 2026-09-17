@@ -17,6 +17,51 @@ object TripRecovery {
      *
      * @return the id of the freshly started trip.
      */
+    /**
+     * Where the last drive left the car, when the orphan it closed had somewhere to leave it.
+     *
+     * Carried separately from the trip because the next trip may not exist yet: a car that boots
+     * and sits there has nothing to attach an origin to.
+     */
+    data class Recovery(val seedLat: Double? = null, val seedLon: Double? = null)
+
+    /**
+     * Closes or discards whatever trip the last run left open, and reports where it ended.
+     *
+     * Deliberately does not open a new one. A trip row that exists before the car has moved is a
+     * 0 km drive sitting at the top of the history for as long as the car stays parked, and the
+     * only thing that ever cleaned it up was the *next* boot noticing it had not moved. Opening
+     * the row when the car actually moves means it is never wrong in the first place — see
+     * [startOnMove].
+     */
+    fun recover(
+        dao: OdographDao,
+        capacityKwh: Double = BatteryMath.DEFAULT_CAPACITY_KWH,
+        homeRateInr: Double = 8.0,
+        outsideRateInr: Double = 25.0
+    ): Recovery = recoverInternal(dao, capacityKwh, homeRateInr, outsideRateInr)
+
+    /**
+     * Opens a trip at the moment the car was first seen to move, back-dated to [at].
+     *
+     * [at] is the first fix of the departure window rather than the instant the speed threshold
+     * was crossed, so the trip still begins where the car was standing and the first hundred
+     * metres are not lost to the confirmation delay.
+     */
+    fun startOnMove(
+        dao: OdographDao,
+        at: Long,
+        originLat: Double,
+        originLon: Double,
+        recovery: Recovery = Recovery()
+    ): Long {
+        val id = dao.startTrip(at)
+        // The previous drive's endpoint wins when there is one: it is a settled position, where
+        // the first fix of a departure may still be converging.
+        dao.setOrigin(id, recovery.seedLat ?: originLat, recovery.seedLon ?: originLon)
+        return id
+    }
+
     fun recoverAndStart(
         dao: OdographDao,
         nowFromGnss: Long?,
@@ -24,6 +69,20 @@ object TripRecovery {
         homeRateInr: Double = 8.0,
         outsideRateInr: Double = 25.0
     ): Long {
+        val recovered = recoverInternal(dao, capacityKwh, homeRateInr, outsideRateInr)
+        val newId = dao.startTrip(nowFromGnss ?: 0L)
+        val lat = recovered.seedLat
+        val lon = recovered.seedLon
+        if (lat != null && lon != null) dao.setOrigin(newId, lat, lon)
+        return newId
+    }
+
+    private fun recoverInternal(
+        dao: OdographDao,
+        capacityKwh: Double,
+        homeRateInr: Double,
+        outsideRateInr: Double
+    ): Recovery {
         val places = PlaceResolver(dao)
         var seedLat: Double? = null
         var seedLon: Double? = null
@@ -90,11 +149,7 @@ object TripRecovery {
             }
         }
 
-        val newId = dao.startTrip(nowFromGnss ?: 0L)
-        val lat = seedLat
-        val lon = seedLon
-        if (lat != null && lon != null) dao.setOrigin(newId, lat, lon)
-        return newId
+        return Recovery(seedLat, seedLon)
     }
 
     /**

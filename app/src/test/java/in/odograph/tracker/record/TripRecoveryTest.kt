@@ -27,6 +27,104 @@ class TripRecoveryTest {
     @After
     fun tearDown() = db.close()
 
+    // ---------------------------------------------------------------- opening on movement
+
+    /**
+     * The whole point of splitting recovery from starting: booting must not put a drive in the
+     * history. A box that powers up in a parked car used to open a 0 km trip immediately, and
+     * nothing removed it until the *next* boot noticed the car had never moved — so the dummy row
+     * sat at the top of the list for as long as the car stayed still.
+     */
+    @Test
+    fun `recovering does not open a trip`() {
+        val dao = db.dao()
+
+        TripRecovery.recover(dao)
+
+        assertThat(dao.openTrip()).`as`("a parked boot must leave no open trip").isNull()
+        assertThat(dao.allTrips()).isEmpty()
+    }
+
+    @Test
+    fun `recovering still closes whatever the last run left open`() {
+        val dao = db.dao()
+        val old = dao.startTrip(1_000_000L)
+        dao.appendPoint(PointEntity(0, old, 1_000_000L, 12.9700, 77.5900, 0f, null, 900.0, 5f, false))
+        dao.appendPoint(PointEntity(0, old, 1_060_000L, 12.9800, 77.5900, 15f, null, 905.0, 5f, false))
+
+        TripRecovery.recover(dao)
+
+        assertThat(dao.tripById(old)!!.endedAt).isNotNull()
+        assertThat(dao.openTrip()).isNull()
+    }
+
+    @Test
+    fun `recovering discards an orphan that never moved`() {
+        val dao = db.dao()
+        val old = dao.startTrip(1_000_000L)
+        dao.appendPoint(PointEntity(0, old, 1_000_000L, 12.9700, 77.5900, 0f, null, 900.0, 5f, false))
+        dao.appendPoint(PointEntity(0, old, 1_060_000L, 12.9700, 77.5900, 0f, null, 900.0, 5f, false))
+
+        TripRecovery.recover(dao)
+
+        assertThat(dao.tripById(old)).`as`("a parked session is not a drive").isNull()
+        assertThat(dao.allTrips()).isEmpty()
+    }
+
+    @Test
+    fun `a trip opened on movement is back-dated to the first held fix`() {
+        val dao = db.dao()
+
+        val id = TripRecovery.startOnMove(dao, at = 5_000L, originLat = 12.97, originLon = 77.59)
+
+        val trip = dao.tripById(id)!!
+        assertThat(trip.startedAt).`as`("starts where the car was, not where it got to").isEqualTo(5_000L)
+        assertThat(trip.startLat).isEqualTo(12.97)
+        assertThat(trip.startLon).isEqualTo(77.59)
+        assertThat(trip.endedAt).isNull()
+    }
+
+    /**
+     * The previous drive's endpoint is a settled position; the first fix of a departure may still
+     * be converging, so where one exists it wins.
+     */
+    @Test
+    fun `the previous drive's endpoint seeds the origin when there is one`() {
+        val dao = db.dao()
+        val recovery = TripRecovery.Recovery(seedLat = 12.9999, seedLon = 77.5555)
+
+        val id = TripRecovery.startOnMove(dao, 5_000L, originLat = 12.97, originLon = 77.59, recovery = recovery)
+
+        val trip = dao.tripById(id)!!
+        assertThat(trip.startLat).isEqualTo(12.9999)
+        assertThat(trip.startLon).isEqualTo(77.5555)
+    }
+
+    @Test
+    fun `recovery carries the last drive's endpoint forward`() {
+        val dao = db.dao()
+        val old = dao.startTrip(1_000_000L)
+        dao.appendPoint(PointEntity(0, old, 1_000_000L, 12.9700, 77.5900, 0f, null, 900.0, 5f, false))
+        dao.appendPoint(PointEntity(0, old, 1_060_000L, 12.9800, 77.5900, 15f, null, 905.0, 5f, false))
+
+        val recovered = TripRecovery.recover(dao)
+
+        assertThat(recovered.seedLat).isEqualTo(12.9800)
+        assertThat(recovered.seedLon).isEqualTo(77.5900)
+    }
+
+    @Test
+    fun `a discarded orphan carries nothing forward`() {
+        val dao = db.dao()
+        val old = dao.startTrip(1_000_000L)
+        dao.appendPoint(PointEntity(0, old, 1_000_000L, 12.9700, 77.5900, 0f, null, 900.0, 5f, false))
+
+        val recovered = TripRecovery.recover(dao)
+
+        assertThat(recovered.seedLat).isNull()
+        assertThat(recovered.seedLon).isNull()
+    }
+
     @Test
     fun `an orphaned trip is closed with totals computed from its points`() {
         val dao = db.dao()

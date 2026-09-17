@@ -16,7 +16,7 @@ import `in`.odograph.tracker.alert.AlertConfig
 import `in`.odograph.tracker.alert.AlertSound
 import `in`.odograph.tracker.alert.SpeedAlert
 import `in`.odograph.tracker.core.Fix
-import `in`.odograph.tracker.core.Geo
+import `in`.odograph.tracker.data.OdographDao
 import `in`.odograph.tracker.core.LiveTrack
 import `in`.odograph.tracker.core.BatteryMath
 import `in`.odograph.tracker.data.OdographDb
@@ -30,6 +30,7 @@ import `in`.odograph.tracker.server.RawFrames
 import `in`.odograph.tracker.sync.Outbound
 import `in`.odograph.tracker.sync.SheetsSync
 import `in`.odograph.tracker.ui.theme.Settings
+import `in`.odograph.tracker.core.Departure
 import `in`.odograph.tracker.core.Telematics
 import io.windsor.telematics.TelematicsClient
 import kotlinx.coroutines.CoroutineScope
@@ -172,6 +173,19 @@ class TripRecorderService : Service() {
         /** Consecutive driving fixes that confirm a real pull-away before a charge ends. */
         private const val DRIVE_START_CONFIRM_FIXES = 3
 
+        /** No trip is open. Battery frames recorded under it are parked readings, not a drive. */
+        const val NO_TRIP = -1L
+
+        /**
+         * How much of the approach to a departure is kept while waiting to be sure of it.
+         *
+         * About a minute at one fix a second: long enough that a trip opened on the third moving
+         * fix still starts from where the car was standing, short enough that a car parked for the
+         * night does not hoard fixes or date its next departure to the previous evening.
+         */
+        private const val MAX_PENDING_FIXES = 60
+
+
         private val _state = MutableStateFlow(LiveState())
         val state: StateFlow<LiveState> = _state
 
@@ -288,6 +302,16 @@ class TripRecorderService : Service() {
     /** True once the current drive has already ended whatever charge was open. */
     private var driveEndedCharge = false
     private var track = LiveTrack()
+    /**
+     * Fixes seen before the car was judged to be moving.
+     *
+     * Held in memory rather than written, because until this window proves a departure there is no
+     * trip for them to belong to. Bounded: a car parked overnight must not accumulate a night's
+     * worth of fixes, and an origin a whole night old is worse than one a minute old.
+     */
+    private val pendingFixes = ArrayDeque<Fix>()
+    /** What the last run left behind, held until there is a trip to attach it to. */
+    private var recovery = TripRecovery.Recovery()
     /** Lifetime odometer at boot: seeded baseline + every closed trip's distance. */
     private var odoBaseKm: Double = 0.0
     private lateinit var settings: Settings
@@ -312,14 +336,17 @@ class TripRecorderService : Service() {
             // startedAt is patched by the first real fix; GNSS time is the authority.
             Diagnostics.crumb("db opened")
             track = LiveTrack()
-            tripId = TripRecovery.recoverAndStart(
+            // Closes whatever the last run left open, but opens nothing: a trip begins when the
+            // car does. Booting into an open 0 km row is what put a dummy drive at the top of the
+            // history every time the box powered up in a car that then sat still.
+            recovery = TripRecovery.recover(
                 dao,
-                nowFromGnss = null,
                 capacityKwh = settings.batteryCapacityKwh,
                 homeRateInr = settings.homeRateInr,
                 outsideRateInr = settings.outsideRateInr
             )
-            Diagnostics.crumb("recovery done trip=$tripId")
+            tripId = NO_TRIP
+            Diagnostics.crumb("recovery done, awaiting movement")
             odoBaseKm = `in`.odograph.tracker.core.Odometer.liveOdoKm(settings, dao.trackedDistanceM() / 1000.0)
             _state.value = LiveState(tripId = tripId, odoKm = odoBaseKm)
             // A charge owed an answer is the first thing a boot should ask again.
@@ -630,9 +657,96 @@ class TripRecorderService : Service() {
         runCatching { dao.pruneParkedFrames(now - 60L * 24 * 3_600_000L) }
     }
 
+    /**
+     * Has the car actually set off?
+     *
+     * Two ways to say yes, matching [TripStats.moved] so that what opens a trip and what keeps one
+     * cannot disagree: a sustained speed, or simply having ended up somewhere else. The streak is
+     * what stops a single GPS blip from opening a drive at a parked car, and the displacement is
+     * what stops a slow crawl out of a car park from being dismissed as one.
+     */
+    private fun departed(): Boolean = Departure.departed(pendingFixes.toList(), track.speedMps)
+
+    /**
+     * Opens the trip the held fixes turned out to belong to, and writes them into it.
+     *
+     * Back-dated to the first held fix so the drive starts where the car was standing rather than
+     * wherever it had got to by the time three fixes agreed it was moving.
+     */
+    private fun openTripFromPending(dao: OdographDao) {
+        val first = pendingFixes.first()
+        tripId = TripRecovery.startOnMove(dao, first.t, first.lat, first.lon, recovery)
+        recovery = TripRecovery.Recovery()
+        startedAt = first.t
+        Diagnostics.crumb("trip opened on movement trip=$tripId")
+
+        // All but the last: the caller writes that one itself, and a point written twice would
+        // put a zero-length segment into the middle of the departure.
+        pendingFixes.dropLast(1).forEach {
+            dao.appendPoint(
+                PointEntity(
+                    tripId = tripId, t = it.t, lat = it.lat, lon = it.lon,
+                    speedMps = it.speedMps, bearingDeg = null, altitudeM = it.altitudeM,
+                    accuracyM = it.accuracyM, interpolated = it.interpolated
+                )
+            )
+        }
+        pendingFixes.clear()
+    }
+
+    /** The live readout, which a parked car still gets — it just is not recording a drive. */
+    private fun publishLiveState(
+        fix: Fix,
+        speedMps: Float,
+        moving: Boolean,
+        overLimit: Boolean = false,
+        speedLimitKmh: Int = settings.speedLimitKmh
+    ) {
+        val cur = _state.value
+        _state.value = cur.copy(
+            hasFix = true,
+            speedMps = speedMps,
+            distanceM = if (moving) track.distanceM else 0.0,
+            elapsedS = if (moving) (fix.t - (startedAt ?: fix.t)) / 1000 else 0,
+            maxSpeedMps = if (moving) maxOf(cur.maxSpeedMps, speedMps) else 0f,
+            movingS = if (moving && speedMps > 0.5f) cur.movingS + 1 else if (moving) cur.movingS else 0,
+            elevGainM = if (moving) track.elevGainM else 0.0,
+            elevLossM = if (moving) track.elevLossM else 0.0,
+            tripId = tripId,
+            overLimit = overLimit,
+            speedLimitKmh = speedLimitKmh,
+            odoKm = odoBaseKm + (if (moving) track.distanceM else 0.0) / 1000.0 *
+                `in`.odograph.tracker.core.Odometer.factor(settings)
+        )
+    }
+
     private fun record(fix: Fix) {
         if (restoring) return
         val dao = OdographDb.get(this).dao()
+
+        if (tripId == NO_TRIP) {
+            // No trip yet, so nothing to write these against. They are held instead, and the
+            // window is rebuilt into the track each time so a car standing still under GPS jitter
+            // accumulates at most a minute of wander rather than a whole night of it.
+            pendingFixes.addLast(fix)
+            while (pendingFixes.size > MAX_PENDING_FIXES) pendingFixes.removeFirst()
+            track = LiveTrack().also { t -> pendingFixes.forEach(t::add) }
+
+            if (departed()) {
+                openTripFromPending(dao)
+            } else {
+                // The instrument still works while parked; it just is not recording a drive.
+                publishLiveState(fix, track.speedMps, moving = false)
+                lastFix = fix
+                return
+            }
+        } else {
+            // Anchor-based distance and derived speed, shared with the stored-trip maths so the
+            // live readout and the saved totals cannot disagree. The network provider supplies no
+            // speed at all, so without derivation the gauge sits at zero for an entire drive.
+            track.add(fix)
+        }
+
         dao.appendPoint(
             PointEntity(
                 tripId = tripId, t = fix.t, lat = fix.lat, lon = fix.lon,
@@ -641,18 +755,6 @@ class TripRecorderService : Service() {
             )
         )
 
-        if (startedAt == null) {
-            // First real fix: the trip row was created with a placeholder time because the
-            // system clock is untrustworthy without NTP. Correct it now.
-            startedAt = fix.t
-            dao.setStartedAt(tripId, fix.t)
-            if (dao.tripById(tripId)?.startLat == null) dao.setOrigin(tripId, fix.lat, fix.lon)
-        }
-
-        // Anchor-based distance and derived speed, shared with the stored-trip maths so the live
-        // readout and the saved totals cannot disagree. The network provider supplies no speed at
-        // all, so without derivation the gauge sits at zero for an entire drive.
-        track.add(fix)
         val effectiveSpeedMps = track.speedMps
 
         val speedKmh = effectiveSpeedMps * 3.6f
@@ -681,21 +783,9 @@ class TripRecorderService : Service() {
         val alert = speedAlert.update(speedKmh, fix.t)
         if (alert.sound) runCatching { alertSound.play(settings.alertMode) }
 
-        val cur = _state.value
-        _state.value = cur.copy(
-            hasFix = true,
-            speedMps = effectiveSpeedMps,
-            distanceM = track.distanceM,
-            elapsedS = (fix.t - (startedAt ?: fix.t)) / 1000,
-            maxSpeedMps = maxOf(cur.maxSpeedMps, effectiveSpeedMps),
-            movingS = cur.movingS + if (effectiveSpeedMps > 0.5f) 1 else 0,
-            elevGainM = track.elevGainM,
-            elevLossM = track.elevLossM,
-            tripId = tripId,
-            overLimit = alert.overLimit,
-            speedLimitKmh = limit,
-            odoKm = odoBaseKm + track.distanceM / 1000.0 *
-                `in`.odograph.tracker.core.Odometer.factor(settings)
+        publishLiveState(
+            fix, effectiveSpeedMps, moving = true,
+            overLimit = alert.overLimit, speedLimitKmh = limit
         )
         lastFix = fix
     }
