@@ -3,6 +3,7 @@ package `in`.odograph.tracker.ui
 import android.content.Context
 import androidx.compose.ui.test.junit4.ComposeContentTestRule
 import androidx.test.core.app.ApplicationProvider
+import `in`.odograph.tracker.core.BatteryMath
 import `in`.odograph.tracker.core.MgFixtures
 import `in`.odograph.tracker.data.BatteryEntity
 import `in`.odograph.tracker.data.ChargeEventEntity
@@ -17,8 +18,10 @@ import `in`.odograph.tracker.data.PlaceEntity
  * name too long for its row, a charge list that outgrows a split-screen band, a cost column that
  * pushes the date off the edge — need rows behind them.
  *
- * The numbers are the car's own, carried over from [MgFixtures]: a 37.3 kWh pack, home charging at
- * 1.6 kW, a fast session at 6.5 kW, an odometer in the 23,000s.
+ * Charging powers and the odometer come from [MgFixtures] so the whole suite quotes one car's
+ * worth of plausible numbers: home charging at 1.6 kW, a fast session at 6.5 kW, an odometer in
+ * the 23,000s. The pack, though, is this car's 52.9 kWh Pro figure and not the ~37 kWh the
+ * community goldens imply — SOC swings seeded against the wrong capacity would be wrong by 1.4x.
  */
 object AppFixtures {
 
@@ -75,7 +78,7 @@ object AppFixtures {
                         184.0, 142.0
                     )
                     dao.setTripPlaces(id, from, to)
-                    dao.setChargeSummary(id, 63.0, 63.0 - kwh / MgFixtures.PACK_KWH * 100, kwh)
+                    dao.setChargeSummary(id, 63.0, 63.0 - kwh / BatteryMath.DEFAULT_CAPACITY_KWH * 100, kwh)
                     dao.insertBattery(
                         BatteryEntity(
                             tripId = id, t = startedAt, socPercent = 63.0, charging = false,

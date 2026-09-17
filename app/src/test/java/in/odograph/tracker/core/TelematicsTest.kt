@@ -161,7 +161,7 @@ class TelematicsTest {
         ).forEach {
             assertThat(Telematics.impliedCapacityKwh(it))
                 .`as`("pack implied by a frame at ${it.soc}%")
-                .isEqualTo(MgFixtures.PACK_KWH, within(1.0))
+                .isEqualTo(MgFixtures.CAPTURED_PACK_KWH, within(1.0))
         }
     }
 
@@ -173,28 +173,43 @@ class TelematicsTest {
     }
 
     /**
-     * This car is not the one the default assumes, and the gap is not cosmetic.
+     * The captured frames do not describe this car, and nothing may treat them as if they did.
      *
-     * [BatteryMath.DEFAULT_CAPACITY_KWH] is 52.9 kWh, the Windsor EV Pro's pack. Every frame this
-     * car has ever sent implies about 37.3 kWh — the standard Windsor — so unless the capacity has
-     * been overridden on /config, every figure derived from a SOC swing is overstated by the ratio
-     * asserted here: trip energy, trip cost, charge loss and the range estimates alike.
+     * This is a corrected claim, kept as a test so the mistake cannot be made twice. The goldens
+     * imply a ~37 kWh pack and it was briefly concluded that the configured 52.9 kWh default was
+     * therefore wrong by a factor of 1.4 — overstating every energy and cost figure. It is not.
+     * The goldens are Home Assistant community captures from a different owner's Windsor (their
+     * fixture set is tagged `haos-mg-ismart-india`); this project's car is the 52.9 kWh Pro, and
+     * the default is right.
      *
-     * Pinned rather than silently corrected, because changing the default changes what every
-     * future drive costs and cannot be undone for the drives already recorded. The car reports its
-     * own pack size on every frame, so [Telematics.impliedCapacityKwh] is the honest fix.
+     * What the frames are good for is the check above: they must all agree with each other, which
+     * is what proves the SOC and energy fields are decoding at the right bit offsets.
      */
     @Test
-    fun `the configured default is the Pro pack, which this car does not have`() {
+    fun `the implied capacity describes the captured car, not this one`() {
         val implied = Telematics.impliedCapacityKwh(MgFixtures.IDLE_100)!!
-        assertThat(implied).isEqualTo(MgFixtures.PACK_KWH, within(0.5))
+        assertThat(implied)
+            .`as`("the captured car's pack")
+            .isEqualTo(MgFixtures.CAPTURED_PACK_KWH, within(0.5))
         assertThat(BatteryMath.DEFAULT_CAPACITY_KWH)
-            .`as`("the default is the Pro pack and does not match this car")
-            .isNotEqualTo(MgFixtures.PACK_KWH)
+            .`as`("this car is the Pro, and the default says so")
+            .isEqualTo(52.9)
+    }
 
-        val overstatement = BatteryMath.DEFAULT_CAPACITY_KWH / implied
-        assertThat(overstatement)
-            .`as`("energy and cost are overstated by this factor while the default stands")
-            .isEqualTo(1.42, within(0.02))
+    /**
+     * The car never tells us how big its battery is, so capacity can only ever be configuration.
+     * Asserted here because the tempting fix — deriving it from a frame — is wrong for exactly the
+     * reason above, and the temptation will come back.
+     */
+    @Test
+    fun `capacity is configuration, because no frame carries it`() {
+        listOf(
+            MgFixtures.CHARGING_70, MgFixtures.CHARGING_74, MgFixtures.CHARGING_11A,
+            MgFixtures.CHARGING_17A_SOC45, MgFixtures.IDLE_100
+        ).forEach {
+            assertThat(it.totalBatteryCapacityKwh)
+                .`as`("no captured frame transmits a capacity")
+                .isNull()
+        }
     }
 }

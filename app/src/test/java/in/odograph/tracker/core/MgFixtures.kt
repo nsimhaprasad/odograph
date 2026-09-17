@@ -5,22 +5,32 @@ import io.windsor.telematics.ChargeStatus
 import io.windsor.telematics.Status
 
 /**
- * MG Windsor telematics frames, as the car actually sends them.
+ * MG Windsor telematics frames, shaped the way the car really sends them.
  *
- * Every number here is anchored to a frame the telematics library captured from the real car and
- * keeps as a golden (`CHARGING_70`, `CHARGING_74`, `CHARGING_11A`, `CHARGING_17A_SOC45`,
- * `IDLE_100` in TapV21Test): a 37.3 kWh pack that quotes 320 km at 100% and 223 km at 70%, a slow
- * charger that pushes 382 V at 4.2 A, a fast one at 17.1 A, and an odometer reading 23,344.5 km.
- * Invented numbers would test the layout against a car that does not exist — 8 km of range at 95%,
- * a five-digit power figure — and would pass while the real thing broke.
+ * The values are anchored to the frames the telematics library keeps as goldens (`CHARGING_70`,
+ * `CHARGING_74`, `CHARGING_11A`, `CHARGING_17A_SOC45`, `IDLE_100` in TapV21Test): a slow charger
+ * pushing 382 V at 4.2 A, a fast one at 17.1 A, ranges of 223 km at 70% and 320 km at 100%, an
+ * odometer in the 23,000s. Invented numbers would test against a car that does not exist — 8 km of
+ * range at 95%, a five-digit power figure — and would pass while the real thing broke.
+ *
+ * Those goldens are NOT from this project's car. Their fixture set carries a `device_id` beginning
+ * `haos-mg-ismart-india`, so they are Home Assistant community captures from some other Windsor —
+ * which matters, because that car's frames imply a ~37 kWh pack while this one is the 52.9 kWh
+ * Pro. Use them for frame *shape*, scales and field presence. Never infer this car's capacity from
+ * them; [Telematics.impliedCapacityKwh] explains why.
  *
  * Nothing here calls MG. The frames are constructed locally, which keeps the suite offline, makes
  * it deterministic, and avoids hammering an account that can be rate-limited or blocked.
  */
 object MgFixtures {
 
-    /** What the captured frames imply the pack holds, kWh: batteryEnergyKwh / soc × 100. */
-    const val PACK_KWH = 37.3
+    /**
+     * What the *captured* frames imply their pack holds, kWh: batteryEnergyKwh / soc × 100.
+     *
+     * A property of the community-captured car, not of this one. Kept because every golden agrees
+     * on it, which is what makes it useful as a decode check.
+     */
+    const val CAPTURED_PACK_KWH = 37.3
 
     /** The odometer the real captured frames carry. */
     const val ODO_KM = 23_344.5

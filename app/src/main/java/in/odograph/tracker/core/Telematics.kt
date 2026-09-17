@@ -68,12 +68,22 @@ object Telematics {
     }
 
     /**
-     * The pack's usable capacity as this frame implies it, kWh.
+     * What this frame implies the pack holds, kWh: stored energy over the percentage it represents.
      *
-     * The car reports the energy currently in the pack and the percentage that represents, so the
-     * two together size the pack. Useful as a cross-check against the configured capacity — the
-     * captured frames put the Windsor at about 37.3 kWh. Null at a zero SOC, where the division
-     * says nothing.
+     * A decode check, NOT a way to discover the car's capacity, and the difference has already
+     * caused one wrong conclusion. Every frame should agree on this figure whatever charge level it
+     * was captured at; when they stop agreeing, the SOC or energy field has drifted off its bit
+     * offset. That is all it is good for.
+     *
+     * It must never configure [BatteryMath.DEFAULT_CAPACITY_KWH] or `Settings.batteryCapacityKwh`.
+     * The library's golden frames come from another owner's Windsor (their fixture set is tagged
+     * `haos-mg-ismart-india`) and imply ~37 kWh, while this project's car is the 52.9 kWh Pro —
+     * so a figure derived this way from someone else's capture would have silently rewritten every
+     * energy and cost figure by a factor of 1.4. The car does not transmit its own capacity at all:
+     * the library's BatteryCapacityTest confirms the `totalBatteryCapacityKwh` presence bit is
+     * clear in every captured frame. Capacity is configuration, not telemetry.
+     *
+     * Null at a zero SOC, where the division says nothing.
      */
     fun impliedCapacityKwh(ch: ChargeStatus?): Double? {
         val soc = ch?.soc ?: return null
