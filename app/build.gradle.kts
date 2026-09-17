@@ -19,11 +19,14 @@ android {
         applicationId = "in.odograph.tracker"
         minSdk = 26
         targetSdk = 34
-        versionCode = 16
-        versionName = "0.9.0"
+        versionCode = 17
+        versionName = "0.9.1"
     }
 
-    buildFeatures { compose = true }
+    // buildConfig so the running app can say which build it is: without it neither the box
+    // nor anyone querying it could tell 0.7.0 from 0.9.0, which made "did the install take?"
+    // unanswerable except by looking for a feature that had not existed before.
+    buildFeatures { compose = true; buildConfig = true }
     composeOptions { kotlinCompilerExtensionVersion = "1.5.14" }
 
     compileOptions {

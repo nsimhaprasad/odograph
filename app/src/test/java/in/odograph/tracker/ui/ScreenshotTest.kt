@@ -260,6 +260,25 @@ class ScreenshotTest {
         }
     }
 
+    /** The car's own 15.6-inch portrait screen, which is where a projected session lands. */
+    @Test
+    @Config(qualifiers = "w720dp-h1280dp-port")
+    fun `driver on the windsor portrait screen`() {
+        compose.setContent {
+            DriverScreen(liveFull, 88.6f, Direction.ION, paletteFor(Direction.ION, night = true))
+        }
+        shoot("30-windsor-portrait-720x1280")
+    }
+
+    @Test
+    @Config(qualifiers = "w1080dp-h1920dp-port")
+    fun `driver on the windsor portrait screen at mdpi`() {
+        compose.setContent {
+            DriverScreen(liveFull, 88.6f, Direction.ION, paletteFor(Direction.ION, night = true))
+        }
+        shoot("31-windsor-portrait-1080x1920")
+    }
+
     @Test
     @Config(qualifiers = "w640dp-h360dp-land")
     fun `driver fully populated balanced`() {

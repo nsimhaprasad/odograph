@@ -13,11 +13,13 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -32,6 +34,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.TextUnit
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import `in`.odograph.tracker.record.TripRecorderService
@@ -103,6 +106,16 @@ private const val TALL_ASPECT = 1.2f
 /** Above this it is a band, and a two-column arrangement strands its halves either side of a void. */
 private const val WIDE_ASPECT = 3.0f
 
+/**
+ * How a tall window is divided between the instrument and the readings.
+ *
+ * The dial gets a little more because it is the thing read at a glance, but not all the slack:
+ * these are shares of the same column, so on the car's portrait screen the readings get half the
+ * glass rather than whatever the gauge left over.
+ */
+private const val GAUGE_SHARE = 1.1f
+private const val READINGS_SHARE = 1f
+
 /** The stats column's share of the balanced arrangement, from the weights the Row is given. */
 private const val BALANCED_COLUMN_SHARE = 1.15f / 2.15f
 
@@ -124,10 +137,21 @@ private fun TallLayout(
         verticalArrangement = Arrangement.SpaceEvenly,
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        gauge(Modifier.fillMaxWidth().weight(1.4f))
-        RangePanel(live, palette, m, Modifier.fillMaxWidth())
-        TripStats(live, palette, m, Modifier.fillMaxWidth())
-        SecondaryStrip(secondary, perRow, palette, m, Modifier.fillMaxWidth())
+        // Both halves are weighted, so neither can starve the other. Giving only the gauge a
+        // weight handed it every pixel the readings did not take, which on the car's own portrait
+        // screen left an enormous void — the dial is limited by width, so a box twice as tall as
+        // it is wide is mostly empty — with the numbers crushed into the bottom fifth. Sharing the
+        // height lets the readings spread into the room a tall screen actually has, and a weight
+        // still yields when the window is short, which a fixed height does not.
+        gauge(Modifier.fillMaxWidth().weight(GAUGE_SHARE))
+        Column(
+            modifier = Modifier.fillMaxWidth().weight(READINGS_SHARE),
+            verticalArrangement = Arrangement.SpaceEvenly
+        ) {
+            RangePanel(live, palette, m, Modifier.fillMaxWidth())
+            TripStats(live, palette, m, Modifier.fillMaxWidth())
+            SecondaryStrip(secondary, perRow, palette, m, Modifier.fillMaxWidth())
+        }
     }
 }
 

@@ -56,9 +56,27 @@ fun metricsFor(widthDp: Float, heightDp: Float): MetricSpec {
     val h = heightDp
     val w = widthDp
 
-    fun scaled(fraction: Float, min: Float, max: Float) = (h * fraction).coerceIn(min, max)
+    /**
+     * Type is scaled from the shorter side, not from height.
+     *
+     * Height alone is right for the landscape bands this started as, and wrong for the car's own
+     * portrait screen: at 720x1280 the height-derived sizes all hit their ceilings, so the largest
+     * display in the fleet rendered at exactly the same scale as a 360dp strip — small type
+     * marooned in black. The shorter side is what actually constrains a layout in either
+     * orientation, and on every landscape viewport here it *is* the height, so nothing that was
+     * already tuned moves.
+     */
+    val base = minOf(w, h)
+
+    fun scaled(fraction: Float, min: Float, max: Float) = (base * fraction).coerceIn(min, max)
 
     return MetricSpec(
+        // The ceilings stay where they are. Raising them to fill the car's portrait screen was
+        // tried and reverted: it broke the vertical split, and MetricsTest asserts the hero cap
+        // outright, which is the codebase saying this is a decision rather than an oversight. A
+        // big screen showing restrained type is a lesser problem than a narrow one overflowing,
+        // and the space is better spent on layout — see the share the readings now get in
+        // DriverScreen's tall arrangement — than on larger glyphs.
         heroSp = scaled(0.135f, 20f, 74f),
         statSp = scaled(0.068f, 13f, 34f),
         readSp = scaled(0.046f, 15f, 24f),

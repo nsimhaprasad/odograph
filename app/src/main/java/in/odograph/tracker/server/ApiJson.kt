@@ -1,5 +1,6 @@
 package `in`.odograph.tracker.server
 
+import `in`.odograph.tracker.BuildConfig
 import `in`.odograph.tracker.core.Period
 import `in`.odograph.tracker.core.BatteryMath
 import `in`.odograph.tracker.data.ChargeEventEntity
@@ -36,6 +37,8 @@ object ApiJson {
 
     fun live(state: TripRecorderService.LiveState): String = buildString {
         append("{")
+        append(kv("version", "\"" + BuildConfig.VERSION_NAME + "\"")).append(",")
+        append(kv("versionCode", BuildConfig.VERSION_CODE.toString())).append(",")
         append(kv("hasFix", state.hasFix.toString())).append(",")
         append(kv("speedKmh", num(state.speedMps * 3.6))).append(",")
         append(kv("distanceKm", num(state.distanceM / 1000.0))).append(",")

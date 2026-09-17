@@ -117,6 +117,42 @@ class DriverScenarioTest {
         renderEveryScenario(night = true, direction = Direction.VECTOR, where = "extreme 427x240")
     }
 
+    // ---------- the car's own screen, which is portrait ----------
+
+    /**
+     * The Windsor's infotainment screen is a 15.6-inch portrait panel, so a projected session is
+     * far taller than it is wide — an aspect around 0.56 against the 0.89 of the narrowest split
+     * this suite had been checking. Everything here lands in the tall arrangement, which until now
+     * was only ever exercised at nearly square.
+     *
+     * Three densities because the exact one is not known from here, and the dp geometry is what
+     * the layout actually sees: the same 1080x1920 panel is 1080x1920 dp at mdpi and 720x1280 dp
+     * at hdpi, and a layout can fit one and not the other.
+     */
+    @Test
+    @Config(qualifiers = "w720dp-h1280dp-port")
+    fun `every scenario fits the car's portrait screen at hdpi`() {
+        renderEveryScenario(night = true, direction = Direction.ION, where = "windsor 720x1280")
+    }
+
+    @Test
+    @Config(qualifiers = "w1080dp-h1920dp-port")
+    fun `every scenario fits the car's portrait screen at mdpi`() {
+        renderEveryScenario(night = true, direction = Direction.ION, where = "windsor 1080x1920")
+    }
+
+    @Test
+    @Config(qualifiers = "w600dp-h1024dp-port")
+    fun `every scenario fits a smaller portrait head unit`() {
+        renderEveryScenario(night = true, direction = Direction.VECTOR, where = "portrait 600x1024")
+    }
+
+    @Test
+    @Config(qualifiers = "w720dp-h1280dp-port")
+    fun `every scenario fits the portrait screen on the day palette`() {
+        renderEveryScenario(night = false, direction = Direction.AUDI, where = "windsor day")
+    }
+
     // ---------- the day ground, and the face whose accent is red ----------
 
     @Test
