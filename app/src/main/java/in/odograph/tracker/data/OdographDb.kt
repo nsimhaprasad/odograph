@@ -10,7 +10,7 @@ import java.io.File
 
 @Database(
     entities = [TripEntity::class, PointEntity::class, PlaceEntity::class, BatteryEntity::class, ChargeEventEntity::class, DailyTelemetryEntity::class, PriceReminderEntity::class],
-    version = 8,
+    version = 9,
     exportSchema = true
 )
 abstract class OdographDb : RoomDatabase() {
@@ -141,6 +141,20 @@ abstract class OdographDb : RoomDatabase() {
          * can get — the raw-frame log only keeps the last 24 captures and per-frame charging
          * power was also corrupted.
          */
+        /**
+         * Keeps the outside temperature the car has been reporting all along.
+         *
+         * Nullable and backfilled with nothing: drives recorded before this have no temperature
+         * and inventing one would put fabricated conditions into the very history the efficiency
+         * figures are learned from.
+         */
+        val MIGRATION_8_9 = object : Migration(8, 9) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE `battery` ADD COLUMN `exteriorTempC` INTEGER")
+                db.execSQL("ALTER TABLE `trips` ADD COLUMN `avgTempC` REAL")
+            }
+        }
+
         val MIGRATION_7_8 = object : Migration(7, 8) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("ALTER TABLE `charge_events` ADD COLUMN `deliveredKwh` REAL")
@@ -183,7 +197,7 @@ abstract class OdographDb : RoomDatabase() {
                 // The car cuts power without warning. Write-ahead logging means a torn write
                 // costs one in-flight row, never the database.
                 .setJournalMode(JournalMode.WRITE_AHEAD_LOGGING)
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9)
                 .build()
                 .also { instance = it }
         }

@@ -444,6 +444,42 @@ interface OdographDao {
     )
     fun dailyEfficiency(fromMs: Long): List<DailyEffRow>
 
+    /**
+     * Closed, instrumented drives with the conditions they were made in.
+     *
+     * One row per drive rather than a join over its samples: every efficiency question asked of
+     * the history is "what did this cost, and in what conditions", and rejoining thousands of
+     * battery rows to answer it is the shape of query that stops being free once there are years
+     * of them. Bounded, newest first.
+     */
+    @Query(
+        """SELECT startedAt, distanceM, movingS, energyKwh, avgTempC FROM trips
+           WHERE endedAt IS NOT NULL AND energyKwh IS NOT NULL AND distanceM > 0
+           ORDER BY startedAt DESC LIMIT :limit"""
+    )
+    fun efficiencySamples(limit: Int = EFFICIENCY_SAMPLE_LIMIT): List<EfficiencySampleRow>
+
+    /**
+     * Recent battery frames taken near a full charge, for measuring what the pack holds.
+     *
+     * Near full because the capacity sum divides by the state of charge, so its error grows as
+     * that figure falls. Parked frames count: a car sitting on a charger is exactly where a
+     * near-full reading comes from.
+     */
+    @Query(
+        """SELECT * FROM battery
+           WHERE socPercent >= :minSoc AND batteryEnergyKwh IS NOT NULL
+           ORDER BY t DESC LIMIT :limit"""
+    )
+    fun highSocBattery(minSoc: Double, limit: Int = 200): List<BatteryEntity>
+
+    /** The mean outside temperature a drive was made in, from its own frames. */
+    @Query("SELECT AVG(exteriorTempC) FROM battery WHERE tripId = :tripId AND exteriorTempC IS NOT NULL")
+    fun avgTempFor(tripId: Long): Double?
+
+    @Query("UPDATE trips SET avgTempC = :avgTempC WHERE id = :id")
+    fun setAvgTemp(id: Long, avgTempC: Double?)
+
     // ---- route efficiency ----
 
     /**
@@ -459,6 +495,15 @@ interface OdographDao {
     )
     fun routeTripsForEfficiency(): List<RouteTripEff>
 }
+
+/**
+ * How many recent drives the conditioned efficiency figures look at.
+ *
+ * Generous, because these split into buckets — day against night, city against highway — and each
+ * bucket needs enough drives of its own to say anything. Still bounded, so a decade of history
+ * costs the same as a year.
+ */
+const val EFFICIENCY_SAMPLE_LIMIT = 400
 
 /** How many recent drives the rolling efficiency figure is allowed to consider. */
 const val RECENT_EFFICIENCY_TRIPS = 50
@@ -527,6 +572,15 @@ data class DailyEffRow(
 )
 
 /** One closeable, placed drive with the raw ingredients of route efficiency. */
+/** One drive, and the conditions it was made in. */
+data class EfficiencySampleRow(
+    val startedAt: Long,
+    val distanceM: Double,
+    val movingS: Long,
+    val energyKwh: Double,
+    val avgTempC: Double?
+)
+
 data class RouteTripEff(
     val startId: Long,
     val endId: Long,

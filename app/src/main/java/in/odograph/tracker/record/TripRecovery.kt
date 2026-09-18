@@ -137,6 +137,12 @@ object TripRecovery {
         val energy = dao.tripById(tripId)?.energyKwh
         dao.setTripCost(tripId, driveCost(dao, energy, trip.startedAt)?.let { BatteryMath.round2(it) })
 
+        // Stamp the conditions the drive was made in while its own frames are still to hand.
+        // Denormalised deliberately: every efficiency question asked later is "what did this cost,
+        // and how hot was it", and rejoining the samples to answer it is the shape of query that
+        // stops being free once there are years of them.
+        dao.setAvgTemp(tripId, dao.avgTempFor(tripId))
+
         // Now that the trip has real endpoints, attach it to the places it ran between. This is
         // what makes "most visited route" answerable with a GROUP BY.
         val places = PlaceResolver(dao)

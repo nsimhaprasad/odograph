@@ -32,6 +32,8 @@ import `in`.odograph.tracker.sync.SheetsSync
 import `in`.odograph.tracker.ui.theme.Settings
 import `in`.odograph.tracker.core.Arrival
 import `in`.odograph.tracker.core.Departure
+import `in`.odograph.tracker.core.EfficiencyStats
+import `in`.odograph.tracker.core.RangeCalibration
 import `in`.odograph.tracker.core.SpeedSanity
 import `in`.odograph.tracker.core.TripRepair
 import `in`.odograph.tracker.core.Telematics
@@ -333,6 +335,14 @@ class TripRecorderService : Service() {
      * worth of fixes, and an origin a whole night old is worse than one a minute old.
      */
     private val pendingFixes = ArrayDeque<Fix>()
+    /**
+     * How wrong the range estimate has been lately, refreshed when a drive closes.
+     *
+     * Recomputed there rather than per fix because it replays the history to score itself, and the
+     * answer cannot change until another drive has finished and been measured.
+     */
+    private var rangeAccuracy: RangeCalibration.Accuracy? = null
+
     /** What the last run left behind, held until there is a trip to attach it to. */
     private var recovery = TripRecovery.Recovery()
     /**
@@ -394,6 +404,8 @@ class TripRecorderService : Service() {
                     )
                 }
             }
+
+            refreshRangeAccuracy(dao)
 
             odoBaseKm = `in`.odograph.tracker.core.Odometer.liveOdoKm(settings, dao.trackedDistanceM() / 1000.0)
             _state.value = LiveState(tripId = tripId, odoKm = odoBaseKm)
@@ -544,7 +556,8 @@ class TripRecorderService : Service() {
                             batteryEnergyKwh = ch.batteryEnergyKwh,
                             chargeTimeRemainingMin = ch.chargeTimeRemainingMin,
                             distanceSinceLastChargeKm = ch.distanceSinceLastChargeKm,
-                            powerUsageSinceLastChargeKwh = ch.powerUsageSinceLastChargeKwh
+                            powerUsageSinceLastChargeKwh = ch.powerUsageSinceLastChargeKwh,
+                            exteriorTempC = status.exteriorTemperature
                         )
                     )
                 }
@@ -596,7 +609,15 @@ class TripRecorderService : Service() {
                         // and a long single drive keeps correcting the estimate on the drive screen.
                         val liveEff = kmPerKwh?.let { 100.0 / it }
                         val rollingEffs = if (liveEff != null) listOf(liveEff) + effs else effs
-                        val rolling = BatteryMath.rollingKwhPer100Km(rollingEffs)
+                        // Corrected by how wrong the estimate has actually been. The rolling figure
+                        // observes what drives cost; it never asks whether its own predictions came
+                        // true, so a bias in the same direction can sit there for months unnoticed.
+                        // The correction is measured out of sample — each past drive scored against
+                        // a model built only from the drives before it — and is refreshed on the
+                        // same cadence as everything else here rather than on every fix.
+                        val rolling = BatteryMath.rollingKwhPer100Km(rollingEffs)?.let { raw ->
+                            RangeCalibration.calibrate(raw, rangeAccuracy)
+                        }
                         val rangeAtFull = if (
                             rollingEffs.size >= BatteryMath.MIN_TRIPS_FOR_REAL_ESTIMATE &&
                             rolling != null
@@ -764,7 +785,26 @@ class TripRecorderService : Service() {
         startedAt = null
         pendingFixes.clear()
         track = LiveTrack()
+        refreshRangeAccuracy(dao)
         Diagnostics.crumb("trip closed on arrival trip=$closed")
+    }
+
+    /**
+     * Re-scores the range estimate against the drives it has now seen.
+     *
+     * Every score is out of sample by construction — a drive is predicted by a model built only
+     * from the drives before it — because scoring a model against its own training data reports a
+     * perfect estimate for any model at all.
+     */
+    private fun refreshRangeAccuracy(dao: OdographDao) {
+        runCatching {
+            val samples = dao.efficiencySamples().map {
+                EfficiencyStats.Sample(it.startedAt, it.distanceM, it.movingS, it.energyKwh, it.avgTempC)
+            }
+            rangeAccuracy = RangeCalibration.accuracy(
+                RangeCalibration.backtest(samples, settings.zone)
+            )
+        }
     }
 
     /** Gap since the previous fix, seconds. Zero when this is the first one. */

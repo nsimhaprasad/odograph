@@ -29,6 +29,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import `in`.odograph.tracker.core.Analytics
+import `in`.odograph.tracker.core.BatteryHealth
+import `in`.odograph.tracker.core.DriveContext
+import `in`.odograph.tracker.core.EfficiencyStats
+import `in`.odograph.tracker.core.RangeCalibration
 import `in`.odograph.tracker.core.BatteryMath
 import `in`.odograph.tracker.data.OdographDb
 import `in`.odograph.tracker.data.PeriodCharges
@@ -49,6 +53,14 @@ private data class InsightsUi(
     val rankings: Analytics.Rankings = Analytics.Rankings(emptyList(), emptyList()),
     val drains: List<Analytics.DrainWindow> = emptyList(),
     val domains: Map<Long, String> = emptyMap(),
+    /** What the car costs by when it was driven, how it was driven, and how hot it was. */
+    val byTimeOfDay: Map<DriveContext.TimeOfDay, EfficiencyStats.Bucket> = emptyMap(),
+    val byCharacter: Map<DriveContext.Character, EfficiencyStats.Bucket> = emptyMap(),
+    val byTemperature: Map<DriveContext.TempBand, EfficiencyStats.Bucket> = emptyMap(),
+    /** What the pack measures, and how far the estimate has been missing. */
+    val health: BatteryHealth.Health? = null,
+    val accuracy: RangeCalibration.Accuracy? = null,
+    val capacityKwh: Double = BatteryMath.DEFAULT_CAPACITY_KWH,
     val loaded: Boolean = false
 )
 
@@ -83,7 +95,12 @@ fun InsightsScreen(palette: Palette) {
         val next = withContext(Dispatchers.IO) {
             runCatching {
                 val dao = OdographDb.get(ctx).dao()
-                val capacity = BatteryMath.DEFAULT_CAPACITY_KWH
+                val capacity = Settings(ctx).batteryCapacityKwh
+                val samples = dao.efficiencySamples().map {
+                    EfficiencyStats.Sample(
+                        it.startedAt, it.distanceM, it.movingS, it.energyKwh, it.avgTempC
+                    )
+                }
                 InsightsUi(
                     cost = dao.periodCost(fromMs),
                     charges = dao.periodCharges(fromMs),
@@ -91,6 +108,14 @@ fun InsightsScreen(palette: Palette) {
                     rankings = Analytics.routeRankings(dao.routeTripsForEfficiency()),
                     drains = Analytics.drainWindows(dao.parkedBatteryFrames(), capacity),
                     domains = dao.allPlaces().associate { it.id to it.displayName },
+                    byTimeOfDay = EfficiencyStats.byTimeOfDay(samples, zone),
+                    byCharacter = EfficiencyStats.byCharacter(samples),
+                    byTemperature = EfficiencyStats.byTemperature(samples),
+                    health = BatteryHealth.measure(
+                        dao.highSocBattery(BatteryHealth.MIN_SOC_PERCENT), capacity
+                    ),
+                    accuracy = RangeCalibration.accuracy(RangeCalibration.backtest(samples, zone)),
+                    capacityKwh = capacity,
                     loaded = true
                 )
             }.getOrElse { InsightsUi(loaded = true) }
@@ -116,6 +141,9 @@ fun InsightsScreen(palette: Palette) {
 
             costSection(ui, palette, m)
             rangeSection(ui, palette, m)
+            conditionsSection(ui, palette, m)
+            healthSection(ui, palette, m)
+            accuracySection(ui, palette, m)
             routeSection(ui, palette, m)
             drainSection(ui, palette, m)
         }
@@ -187,6 +215,156 @@ private fun rangeSection(ui: InsightsUi, palette: Palette, m: Metrics) {
         }
         drawPath(path, color = palette.accent, style = Stroke(width = 2.5.dp.toPx()))
     }
+}
+
+/** One conditioned figure: what it costs, how far that goes, and how much is behind it. */
+@Composable
+private fun conditionRow(
+    label: String,
+    bucket: EfficiencyStats.Bucket,
+    capacityKwh: Double,
+    palette: Palette,
+    m: Metrics
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(vertical = m.gap / 4),
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+        Text(label, color = palette.dim, fontSize = m.body, maxLines = 1)
+        Text(
+            text = "%.1f kWh/100km  ·  %.0f km  ·  %d drives".format(
+                bucket.kwhPer100Km, bucket.rangeAtFullKm(capacityKwh), bucket.drives
+            ),
+            color = palette.numeral,
+            fontSize = m.body,
+            maxLines = 1
+        )
+    }
+}
+
+/**
+ * What the car costs under particular conditions, and how far a full pack goes under each.
+ *
+ * The whole point of splitting it: a single figure describes the average of a midnight run and a
+ * 2 p.m. crawl and is right about neither.
+ */
+@Composable
+private fun conditionsSection(ui: InsightsUi, palette: Palette, m: Metrics) {
+    if (ui.byTimeOfDay.isEmpty() && ui.byCharacter.isEmpty() && ui.byTemperature.isEmpty()) return
+
+    Text(
+        text = "WHAT IT COSTS  ·  BY CONDITIONS",
+        color = palette.label,
+        fontSize = m.label,
+        letterSpacing = 2.2.sp,
+        modifier = Modifier.padding(top = m.gap, bottom = m.gap / 2)
+    )
+    ui.byTimeOfDay[DriveContext.TimeOfDay.DAY]?.let {
+        conditionRow("DAY", it, ui.capacityKwh, palette, m)
+    }
+    ui.byTimeOfDay[DriveContext.TimeOfDay.NIGHT]?.let {
+        conditionRow("NIGHT", it, ui.capacityKwh, palette, m)
+    }
+    ui.byCharacter[DriveContext.Character.CITY]?.let {
+        conditionRow("CITY CRAWL", it, ui.capacityKwh, palette, m)
+    }
+    ui.byCharacter[DriveContext.Character.MIXED]?.let {
+        conditionRow("MIXED", it, ui.capacityKwh, palette, m)
+    }
+    ui.byCharacter[DriveContext.Character.HIGHWAY]?.let {
+        conditionRow("OPEN ROAD", it, ui.capacityKwh, palette, m)
+    }
+    listOf(
+        DriveContext.TempBand.COOL to "UNDER 20°",
+        DriveContext.TempBand.MILD to "20–28°",
+        DriveContext.TempBand.WARM to "28–35°",
+        DriveContext.TempBand.HOT to "OVER 35°"
+    ).forEach { (band, label) ->
+        ui.byTemperature[band]?.let { conditionRow(label, it, ui.capacityKwh, palette, m) }
+    }
+}
+
+/**
+ * What the pack measures against what it was sold as.
+ *
+ * The car never states its capacity, but near a full charge it reports the energy held and the
+ * percentage that represents, and those two together are a direct measurement.
+ */
+@Composable
+private fun healthSection(ui: InsightsUi, palette: Palette, m: Metrics) {
+    val health = ui.health ?: return
+    Text(
+        text = "BATTERY HEALTH",
+        color = palette.label,
+        fontSize = m.label,
+        letterSpacing = 2.2.sp,
+        modifier = Modifier.padding(top = m.gap, bottom = m.gap / 2)
+    )
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(vertical = m.gap / 4),
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+        Text("MEASURED AT FULL", color = palette.dim, fontSize = m.body)
+        Text(
+            text = "%.1f kWh of %.1f  ·  %.0f%%".format(
+                health.capacityKwh, ui.capacityKwh, health.sohPercent ?: 0.0
+            ),
+            // Scattered readings are quoted with a warning colour rather than silently, because a
+            // capacity that will not sit still is a reason to distrust the figure, not to round it.
+            color = if (health.consistent) palette.numeral else palette.caution,
+            fontSize = m.body
+        )
+    }
+    Text(
+        text = if (health.consistent) {
+            "from %d readings near full".format(health.readings)
+        } else {
+            "from %d readings near full, spread %.1f kWh — treat as provisional".format(
+                health.readings, health.spreadKwh
+            )
+        },
+        color = palette.label,
+        fontSize = m.label
+    )
+}
+
+/**
+ * How wrong the range estimate has been, measured against drives it had not yet seen.
+ *
+ * Shown rather than only applied, because a correction quietly folded into the number would hide
+ * the thing worth knowing: whether the estimate can be trusted at all.
+ */
+@Composable
+private fun accuracySection(ui: InsightsUi, palette: Palette, m: Metrics) {
+    val accuracy = ui.accuracy ?: return
+    Text(
+        text = "RANGE ESTIMATE  ·  SELF-CHECK",
+        color = palette.label,
+        fontSize = m.label,
+        letterSpacing = 2.2.sp,
+        modifier = Modifier.padding(top = m.gap, bottom = m.gap / 2)
+    )
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(vertical = m.gap / 4),
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+        Text("BIAS", color = palette.dim, fontSize = m.body)
+        Text(
+            text = if (accuracy.medianErrorPercent > 0)
+                "%.0f%% optimistic".format(accuracy.medianErrorPercent)
+            else "%.0f%% cautious".format(-accuracy.medianErrorPercent),
+            color = if (kotlin.math.abs(accuracy.medianErrorPercent) < 10) palette.good
+            else palette.caution,
+            fontSize = m.body
+        )
+    }
+    Text(
+        text = "typical miss %.0f%% over %d drives, corrected automatically".format(
+            accuracy.typicalMissPercent, accuracy.scored
+        ),
+        color = palette.label,
+        fontSize = m.label
+    )
 }
 
 @Composable

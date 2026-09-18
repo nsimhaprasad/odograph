@@ -36,7 +36,15 @@ data class TripEntity(
     /** Metres climbed this drive, deadbanded against GNSS altitude noise. Battery consumption depends on it. */
     val elevGainM: Double = 0.0,
     /** Metres descended this drive. Always >= 0, so a there-and-back shows both directions. */
-    val elevLossM: Double = 0.0
+    val elevLossM: Double = 0.0,
+    /**
+     * Mean outside temperature over the drive, °C, from its own battery samples.
+     *
+     * Denormalised on purpose: every efficiency question asked of the history is "what did this
+     * cost, and in what conditions", and rejoining thousands of samples to answer it is the shape
+     * of query that stops being free once there are years of them.
+     */
+    val avgTempC: Double? = null
 )
 
 @Entity(tableName = "points", indices = [Index(value = ["tripId", "t"])])
@@ -80,7 +88,15 @@ data class BatteryEntity(
     /** km driven since the last charge finished, per the car. Null while actually charging. */
     val distanceSinceLastChargeKm: Double? = null,
     /** kW·h used since the last charge, per the car. Null while actually charging. */
-    val powerUsageSinceLastChargeKwh: Double? = null
+    val powerUsageSinceLastChargeKwh: Double? = null,
+    /**
+     * Outside air temperature the car reported with this frame, °C.
+     *
+     * The single strongest thing after speed for explaining why the same drive costs different
+     * energy on different days — a cabin cooled from 38 °C spends a good deal of the pack doing
+     * it. The car has been sending this on every frame all along; nothing was keeping it.
+     */
+    val exteriorTempC: Int? = null
 )
 
 /**
