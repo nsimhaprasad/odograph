@@ -129,11 +129,69 @@ object SheetsSync {
         }
     }
 
+    /**
+     * Rebuilds this box's database from the workbook.
+     *
+     * The reason the sheet carries places and battery frames at all. A box that has died, been
+     * reflashed or been replaced has a URL and nothing else, and this is the path from that back
+     * to a history — which is the difference between the sheet being a report and being a backup.
+     *
+     * Destructive by design and by necessity: see [SheetsRestore.apply] for why merging two
+     * histories that reference each other by row id cannot be made to work. The caller is
+     * responsible for asking first.
+     *
+     * The watermarks are moved to the restored maxima afterwards. Without that the next export
+     * would treat the entire restored history as new and push all of it back to the sheet it just
+     * came from — harmless, because the script overwrites by key, but a pointless upload of
+     * everything on a connection that is often a phone hotspot.
+     */
+    fun restoreFromSheet(ctx: Context, url: String): SheetsRestore.Result {
+        if (url.isBlank()) return SheetsRestore.Result(false, "No docs link configured.")
+        if (Outbound.isSpreadsheetLink(url)) return SheetsRestore.Result(false, spreadLinkHelp())
+
+        val body = runCatching { Outbound.getBody(exportUrl(url), RESTORE_READ_TIMEOUT_MS) }
+            .getOrElse {
+                return SheetsRestore.Result(
+                    false, "Could not read the sheet: ${it.message ?: it::class.java.simpleName}"
+                )
+            }
+        val snapshot = SheetsRestore.parse(body).getOrElse {
+            return SheetsRestore.Result(false, "That sheet cannot be restored: ${it.message}")
+        }
+
+        val db = OdographDb.get(ctx)
+        val result = SheetsRestore.apply(db.dao(), snapshot) { db.clearAllTables() }
+        if (result.ok) advanceWatermarks(Settings(ctx), snapshot)
+        return result
+    }
+
+    /** A full backup can be tens of megabytes of history; Apps Script builds it a tab at a time. */
+    private const val RESTORE_READ_TIMEOUT_MS = 180_000
+
+    /** Appends the export parameter to whatever query the configured /exec URL already carries. */
+    internal fun exportUrl(url: String): String =
+        url + (if (url.contains('?')) "&" else "?") + "export=all"
+
+    private fun advanceWatermarks(settings: Settings, snapshot: SheetsRestore.Snapshot) {
+        snapshot.trips.maxOfOrNull { it.id }?.let { settings.lastDocsTripId = it }
+        snapshot.charges.maxOfOrNull { it.id }?.let { settings.lastDocsChargeId = it }
+        snapshot.battery.maxOfOrNull { it.id }?.let { settings.lastDocsBatteryId = it }
+        snapshot.telemetry.maxOfOrNull { it.day }?.let { settings.lastDocsDay = it }
+    }
+
+    /**
+     * The one fixable cause behind most sync failures, phrased for someone at a keyboard.
+     *
+     * Shared by every path, so it says nothing about direction. It used to end by reassuring the
+     * reader that the sheet link "stays valid for reading", which stopped being true the moment a
+     * restore also went through the script — a backup cannot be read back from a link that serves
+     * a web page.
+     */
     private fun spreadLinkHelp(): String =
-        "This is a spreadsheet link, and a spreadsheet cannot receive posts directly. " +
-            "Open the sheet → Extensions → Apps Script, paste the bundled script, " +
+        "This is the spreadsheet itself, not the script that serves it — the box cannot talk to " +
+            "it directly. Open the sheet → Extensions → Apps Script, paste the bundled script, " +
             "Deploy → New deployment → Web app → Execute as me, access Anyone, then paste " +
-            "the /exec URL into this box. The sheet link stays valid for reading once that is done."
+            "the /exec URL into this box. Uploads and restores both go through that one URL."
 }
 
 /**

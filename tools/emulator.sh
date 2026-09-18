@@ -126,11 +126,18 @@ cmd_start() {
   step "Booting $AVD_NAME"
   # -no-snapshot-load forces a cold boot, which is what verification wants: a restored snapshot can
   # carry a stale copy of the app and an already-migrated database, so a broken migration passes.
+  #
+  # Software rendering rather than the host GPU, deliberately. With -gpu auto the emulator's render
+  # thread wedges after a dozen or so reinstalls: the app's main thread then blocks forever inside
+  # RenderProxy::setStopped and the whole screen ANRs with not one app frame in the trace. That
+  # looks exactly like a UI regression and costs an hour to prove it is not one, twice now. This
+  # AVD exists to take screenshots and UI dumps, never to measure frame times, so the slower
+  # renderer costs nothing that matters here.
   local log="${TMPDIR:-/tmp}/odograph-emulator.log"
   nohup "$EMULATOR" -avd "$AVD_NAME" \
     -no-snapshot-load \
     -no-boot-anim \
-    -gpu auto \
+    -gpu swiftshader_indirect \
     > "$log" 2>&1 &
 
   echo "  waiting for the device to appear ..."

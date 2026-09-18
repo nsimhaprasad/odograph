@@ -61,6 +61,13 @@ function doPost(e) {
       'odometer_km','battery_kwh','exterior_temp_c'];
     upsertRows(batterySheet, batteryCols, battery.map(batteryRow), 0);
 
+    // The schema the writing app used, kept where a later restore can ask the sheet what shape
+    // it is rather than taking the reader's word for it. A restore that trusts the caller's claim
+    // is not a version check at all.
+    if (meta.schema) {
+      PropertiesService.getDocumentProperties().setProperty('schema', String(meta.schema));
+    }
+
     var logSheet = tab(ss, 'SyncLog');
     logSheet.appendRow([new Date(), body.device || '', trips.length, points.length,
       charges.length, days.length, places.length, battery.length, meta.schema || '']);
@@ -81,9 +88,51 @@ function doPost(e) {
 }
 
 /** The box's import: returns the Control tab's values as JSON. */
-function doGet() {
+/**
+ * Reads a tab back as objects, keyed by its header row.
+ *
+ * Blank cells come back as null rather than empty string or zero, because the app writes a blank
+ * for "not measured" and a restore that turns those into numbers rebuilds a car that was measured
+ * when it was not.
+ */
+function readTab(ss, name) {
+  var sheet = ss.getSheetByName(name);
+  if (!sheet || sheet.getLastRow() < 2) return [];
+  var values = sheet.getDataRange().getValues();
+  var header = values[0];
+  var rows = [];
+  for (var r = 1; r < values.length; r++) {
+    var obj = {};
+    for (var c = 0; c < header.length; c++) {
+      var key = String(header[c]);
+      var cell = values[r][c];
+      obj[key] = (cell === '' || cell === null || cell === undefined) ? null : cell;
+    }
+    rows.push(obj);
+  }
+  return rows;
+}
+
+function doGet(e) {
   try {
     var ss = SpreadsheetApp.getActiveSpreadsheet();
+
+    // The whole sheet, for restoring a box that has lost its database. Behind a parameter so the
+    // ordinary control read stays small and cheap — this one can be megabytes.
+    if (e && e.parameter && e.parameter.export === 'all') {
+      return json({
+        kind: 'odograph-backup',
+        schema: writtenSchema(),
+        exportedAt: new Date().getTime(),
+        trips: readTab(ss, 'Trips'),
+        points: readTab(ss, 'Points'),
+        charges: readTab(ss, 'Charges'),
+        telemetry: readTab(ss, 'Telemetry'),
+        places: readTab(ss, 'Places'),
+        battery: readTab(ss, 'Battery')
+      });
+    }
+
     var control = ss.getSheetByName('Control');
     var out = {};
     if (control) {
@@ -97,6 +146,18 @@ function doGet() {
   } catch (err) {
     return json({ error: String(err) });
   }
+}
+
+/**
+ * The schema version the app that filled this workbook was writing, or null if it never said.
+ *
+ * Null means a workbook written before this was recorded, not a workbook of version zero, and the
+ * two must not be confused: the reader treats null as "assume my own era", which is safe only
+ * because every tab is read by column name.
+ */
+function writtenSchema() {
+  var v = PropertiesService.getDocumentProperties().getProperty('schema');
+  return v ? Number(v) : null;
 }
 
 function tab(ss, name) {

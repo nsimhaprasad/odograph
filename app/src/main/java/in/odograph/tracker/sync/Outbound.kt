@@ -22,12 +22,19 @@ object Outbound {
     /** Shared HTTP POST for every sync path. */
     fun postJson(url: String, body: String): Int = post(url, body)
 
-    /** Reads a body over HTTP GET, used by the docs link import. Throws on transport failure. */
-    fun getBody(url: String): String {
+    /**
+     * Reads a body over HTTP GET, used by the docs link import. Throws on transport failure.
+     *
+     * The timeout is a parameter because the two readers want very different patience. A control
+     * read is four numbers and should fail fast; a full backup is the entire history, which Apps
+     * Script assembles a tab at a time and can take minutes on a long one. Twenty seconds applied
+     * to the second would report a broken sheet every time and be believed.
+     */
+    fun getBody(url: String, readTimeoutMs: Int = 20_000): String {
         val conn = (URL(url).openConnection() as HttpURLConnection).apply {
             requestMethod = "GET"
             connectTimeout = 15_000
-            readTimeout = 20_000
+            readTimeout = readTimeoutMs
             instanceFollowRedirects = true
             setRequestProperty("User-Agent", "Odograph/0.1")
         }

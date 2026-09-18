@@ -106,7 +106,28 @@ step "Starting clean"
 adb_ logcat -c >/dev/null 2>&1 || true
 adb_ shell am force-stop "$PKG" >/dev/null 2>&1 || true
 adb_ shell am start -n "$ACTIVITY" >/dev/null 2>&1 || fail "could not start $ACTIVITY"
-sleep 8
+
+# Wait for the first frame rather than guessing at it. A fixed sleep is fine on a warm emulator
+# and wrong on a cold one: the first launch after a boot draws through a software renderer with an
+# empty page cache, misses the input-dispatch window and logs a real ANR that has nothing to do
+# with the app. That reads exactly like a UI regression, and the screen is fine thirty seconds
+# later — so the run is thrown away and re-run by hand, which is the worst of both.
+echo "  waiting for the first frame"
+painted=no
+for _ in $(seq 1 40); do
+  drawn="$(adb_ shell uiautomator dump /sdcard/ui.xml >/dev/null 2>&1; \
+    adb_ shell cat /sdcard/ui.xml 2>/dev/null | grep -o 'text="[^"]\+"' | wc -l | tr -d ' ')"
+  if [ "${drawn:-0}" -ge 3 ]; then painted=yes; break; fi
+  sleep 2
+done
+
+# Only once the app has actually painted is the warm-up noise safe to discard: reaching a drawn
+# screen is proof it survived whatever the boot logged. If it never painted, the log is the only
+# evidence of why, and throwing it away would turn a startup crash into "it rendered nothing".
+if [ "$painted" = yes ]; then
+  adb_ logcat -c >/dev/null 2>&1 || true
+  sleep 2
+fi
 check_healthy "launch"
 adb_ exec-out screencap -p > "$OUT/00-launch.png" 2>/dev/null
 find_tap DRIVE >/dev/null

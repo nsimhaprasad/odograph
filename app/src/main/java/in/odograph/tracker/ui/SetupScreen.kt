@@ -466,6 +466,9 @@ fun SetupScreen(
                     { deviceName = it }, palette, m,
                     placeholder = "how this box signs its uploads e.g. windsor"
                 )
+                var restoring by remember { mutableStateOf(false) }
+                var confirmRestore by remember { mutableStateOf(false) }
+                var restoreNote by remember { mutableStateOf("") }
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(m.gap / 2)) {
                     var syncing by remember { mutableStateOf(false) }
                     Chip("SAVE", false, palette, m) {
@@ -503,6 +506,48 @@ fun SetupScreen(
                             }
                         }
                     }
+                    // Pulling the whole workbook back. Two taps, because unlike everything else on
+                    // this row it replaces the history rather than adding to it, and a mis-tap on a
+                    // screen being used at arm's length in a car is not a rare event.
+                    val restoreLabel = when {
+                        restoring -> "RESTORING…"
+                        confirmRestore -> "TAP AGAIN TO REPLACE"
+                        else -> "RESTORE FROM SHEET"
+                    }
+                    Chip(restoreLabel, restoring || confirmRestore, palette, m) {
+                        if (restoring) return@Chip
+                        if (!confirmRestore) {
+                            confirmRestore = true
+                            restoreNote = ""
+                            return@Chip
+                        }
+                        confirmRestore = false
+                        restoring = true
+                        scope.launch {
+                            val r = withContext(Dispatchers.IO) {
+                                SheetsSync.restoreFromSheet(ctx, settings.webhookUrl)
+                            }
+                            restoreNote = r.message
+                            restoring = false
+                        }
+                    }
+                }
+                // Beside the chip, not in the shared note far below it. A confirmation whose
+                // wording is off-screen at the moment it is given is not a confirmation — the
+                // driver would be agreeing to a label — and an outcome nobody scrolls to is how a
+                // refused restore gets mistaken for a completed one.
+                when {
+                    confirmRestore -> Text(
+                        "This replaces every drive, place and charge on this box with the " +
+                            "sheet's copy. Nothing here is merged. Tap again to go ahead.",
+                        color = palette.warn, fontSize = m.body,
+                        modifier = Modifier.padding(top = m.gap / 3)
+                    )
+                    restoreNote.isNotEmpty() -> Text(
+                        restoreNote,
+                        color = palette.accent, fontSize = m.body,
+                        modifier = Modifier.padding(top = m.gap / 3)
+                    )
                 }
             }
 
