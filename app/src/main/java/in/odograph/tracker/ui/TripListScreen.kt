@@ -11,12 +11,14 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -30,6 +32,7 @@ import androidx.compose.ui.unit.sp
 import `in`.odograph.tracker.core.Fix
 import `in`.odograph.tracker.core.BatteryMath
 import `in`.odograph.tracker.data.OdographDb
+import `in`.odograph.tracker.data.TRIP_PAGE_SIZE
 import `in`.odograph.tracker.data.TripEntity
 import `in`.odograph.tracker.ui.map.BareRouteTrace
 import `in`.odograph.tracker.ui.map.RouteMap
@@ -47,6 +50,14 @@ private enum class TripSort { RECENT, KM }
 private enum class TripView { MAP, DETAILS }
 
 /** Technical/functional facts about one drive, resolved off the UI thread. */
+/**
+ * How close to the end of the loaded rows the scroll must come before the next page is fetched.
+ *
+ * Far enough ahead that the list never visibly stops, close enough that opening the screen does
+ * not quietly pull the whole history in anyway.
+ */
+private const val PREFETCH_ROWS = 10
+
 private data class TripDetail(
     val startPlace: String?,
     val endPlace: String?,
@@ -83,8 +94,28 @@ fun TripListScreen(showTiles: Boolean, palette: Palette) {
             .apply { timeZone = Settings(ctx).zone }
     }
 
+    // Paged, and fetched as the list is scrolled rather than all at once. Rendering was always
+    // lazy — LazyColumn only composes what fits — but the loading was not: every drive ever made
+    // came into memory to show the dozen on the glass. Fine for a year of driving and not for a
+    // decade, and the cost falls exactly where it is least welcome, on opening the screen.
+    var loadedPages by remember { mutableStateOf(0) }
+    var allLoaded by remember { mutableStateOf(false) }
+    var loadingPage by remember { mutableStateOf(false) }
+
+    suspend fun loadNextPage() {
+        if (allLoaded || loadingPage) return
+        loadingPage = true
+        val page = withContext(Dispatchers.IO) {
+            OdographDb.get(ctx).dao().tripsPage(TRIP_PAGE_SIZE, loadedPages * TRIP_PAGE_SIZE)
+        }
+        trips = trips + page
+        loadedPages += 1
+        if (page.size < TRIP_PAGE_SIZE) allLoaded = true
+        loadingPage = false
+    }
+
     LaunchedEffect(Unit) {
-        trips = withContext(Dispatchers.IO) { OdographDb.get(ctx).dao().allTrips() }
+        loadNextPage()
         selected = trips.firstOrNull()
     }
     LaunchedEffect(selected?.id) {
@@ -103,7 +134,7 @@ fun TripListScreen(showTiles: Boolean, palette: Palette) {
             TripDetail(
                 startPlace = t.startPlaceId?.let { dao.placeById(it)?.displayName },
                 endPlace = t.endPlaceId?.let { dao.placeById(it)?.displayName },
-                points = dao.pointsFor(t.id).size,
+                points = dao.pointCountFor(t.id),
                 kwhPer100 = kwhPer100?.let { BatteryMath.round2(it) },
                 rangeAtFullKm = kwhPer100?.let {
                     BatteryMath.round2(
@@ -166,7 +197,21 @@ fun TripListScreen(showTiles: Boolean, palette: Palette) {
                     modifier = Modifier.padding(m.pad)
                 )
             }
-            LazyColumn {
+            val listState = rememberLazyListState()
+
+            // Fetch the next page once the tail is in sight, so the list never stops under a
+            // finger. Keyed on the last visible index, so it fires when scrolling arrives rather
+            // than on every frame of the scroll.
+            val lastVisible by remember {
+                derivedStateOf {
+                    listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
+                }
+            }
+            LaunchedEffect(lastVisible, rows.size) {
+                if (rows.isNotEmpty() && lastVisible >= rows.size - PREFETCH_ROWS) loadNextPage()
+            }
+
+            LazyColumn(state = listState) {
                 items(rows, key = {
                     when (it) {
                         is TripRowItem.Header -> "h:${it.date}"

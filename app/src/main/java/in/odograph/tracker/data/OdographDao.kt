@@ -20,6 +20,19 @@ interface OdographDao {
     @Query("SELECT * FROM trips WHERE endedAt IS NULL ORDER BY startedAt DESC LIMIT 1")
     fun openTrip(): TripEntity?
 
+    /**
+     * One page of drives, newest first.
+     *
+     * The list screen reads this rather than the whole table. Rendering was always lazy, but the
+     * loading was not: every drive ever made came into memory to show the dozen that fit on the
+     * glass, which is fine for a year and not for a decade.
+     */
+    @Query("SELECT * FROM trips ORDER BY startedAt DESC LIMIT :limit OFFSET :offset")
+    fun tripsPage(limit: Int, offset: Int): List<TripEntity>
+
+    @Query("SELECT COUNT(*) FROM trips")
+    fun tripCount(): Int
+
     @Query("SELECT * FROM trips ORDER BY startedAt DESC")
     fun allTrips(): List<TripEntity>
 
@@ -33,6 +46,10 @@ interface OdographDao {
 
     @Query("SELECT * FROM trips WHERE id = :id")
     fun tripById(id: Long): TripEntity?
+
+    /** How many points a drive has, without reading a single one of them. */
+    @Query("SELECT COUNT(*) FROM points WHERE tripId = :tripId")
+    fun pointCountFor(tripId: Long): Int
 
     @Query("SELECT * FROM points WHERE tripId = :tripId ORDER BY t ASC")
     fun pointsFor(tripId: Long): List<PointEntity>
@@ -66,8 +83,23 @@ interface OdographDao {
     fun setTripCost(id: Long, costInr: Double?)
 
     /** Every instrumented trip's energy, newest first, for rolling efficiency. */
+    /**
+     * Recent instrumented drives, newest first, for the rolling efficiency figure.
+     *
+     * Bounded because the consumer only ever looks at the last handful — BatteryMath's window is
+     * ten — while this query would otherwise return every instrumented drive the car has ever
+     * made, growing without limit for the life of the app to answer a question about ten of them.
+     */
+    @Query(
+        """SELECT distanceM, energyKwh FROM trips
+           WHERE endedAt IS NOT NULL AND energyKwh IS NOT NULL
+           ORDER BY startedAt DESC LIMIT :limit"""
+    )
+    fun tripEnergies(limit: Int = RECENT_EFFICIENCY_TRIPS): List<TripEnergy>
+
+    /** Every instrumented drive. Only for the analyses that genuinely need the whole history. */
     @Query("SELECT distanceM, energyKwh FROM trips WHERE endedAt IS NOT NULL AND energyKwh IS NOT NULL ORDER BY startedAt DESC")
-    fun tripEnergies(): List<TripEnergy>
+    fun allTripEnergies(): List<TripEnergy>
 
     /** Sum of the (positive) energy every drive consumed, kW·h — the car's lifetime fuel bill. */
     @Query("SELECT COALESCE(SUM(CASE WHEN energyKwh > 0 THEN energyKwh ELSE 0 END), 0) FROM trips")
@@ -427,6 +459,12 @@ interface OdographDao {
     )
     fun routeTripsForEfficiency(): List<RouteTripEff>
 }
+
+/** How many recent drives the rolling efficiency figure is allowed to consider. */
+const val RECENT_EFFICIENCY_TRIPS = 50
+
+/** Drives per page in the trip list. Comfortably more than fills any window the box can give us. */
+const val TRIP_PAGE_SIZE = 40
 
 data class RouteSummary(
     val startId: Long,

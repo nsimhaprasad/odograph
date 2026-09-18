@@ -94,7 +94,16 @@ fun PlacesScreen(palette: Palette) {
     // Live, so the answer moves with the car rather than with the screen being reopened.
     val live by TripRecorderService.state.collectAsState()
 
-    LaunchedEffect(reload, live.lat, live.batterySocPercent) {
+    // Keyed on a coarse position, not the raw one. A fix arrives about once a second, and this
+    // effect reads every place and every instrumented drive to rebuild the route profiles — so
+    // keying it on live.lat meant a full pass over the history every second the screen was open
+    // while driving. Rounded to roughly a hundred metres, it runs when the answer could actually
+    // have changed and not merely when the car moved a wheel's width.
+    val here = live.lat?.let { lat ->
+        live.lon?.let { lon -> Math.round(lat * 1_000) to Math.round(lon * 1_000) }
+    }
+
+    LaunchedEffect(reload, here, live.batterySocPercent?.let { Math.round(it) }) {
         val loaded = withContext(Dispatchers.IO) {
             runCatching {
                 val dao = OdographDb.get(ctx).dao()
