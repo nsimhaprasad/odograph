@@ -148,6 +148,21 @@ object Odometer {
     }
 
     /**
+     * The baseline that makes the displayed odometer read exactly [carOdoKm] right now.
+     *
+     * The screen shows `base + liveTripKm × factor`, so the base is that arithmetic run backwards.
+     * Deriving it any other way is how the two came apart: the baseline was rebuilt from closed
+     * trips alone while the screen went on adding the open trip, so the odometer ran ahead of the
+     * car's dash by exactly the distance of the drive in progress — 21,073 on the dash, 21,111 on
+     * the glass, and a drift readout of -38.1 that was reporting the fault precisely.
+     *
+     * [liveTripKm] must be the same open-trip distance the screen adds, which is why both now come
+     * from one place rather than from two views of the same journey.
+     */
+    fun baseForCarOdo(carOdoKm: Double, liveTripKm: Double, factor: Double): Double =
+        carOdoKm - liveTripKm * factor
+
+    /**
      * What a calibration would look like before it is applied: the expected reading and how far
      * the typed one is off. Lets the UI warn instead of silently rewriting a window of trips.
      */

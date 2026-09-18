@@ -755,8 +755,7 @@ class TripRecorderService : Service() {
             tripId = tripId,
             overLimit = overLimit,
             speedLimitKmh = speedLimitKmh,
-            odoKm = odoBaseKm + (if (moving) track.distanceM else 0.0) / 1000.0 *
-                `in`.odograph.tracker.core.Odometer.factor(settings),
+            odoKm = odoBaseKm + liveTripKm() * `in`.odograph.tracker.core.Odometer.factor(settings),
             lat = fix.lat,
             lon = fix.lon
         )
@@ -967,14 +966,27 @@ class TripRecorderService : Service() {
      * number plus however much the app has measured since that quote. The base shifts once, live;
      * trips are untouched.
      */
+    /**
+     * The open drive's distance, as the odometer readout counts it.
+     *
+     * One definition, used by both the anchor and the screen. They used to have their own: the
+     * anchor read the live state's distance, which is zero whenever no trip is open, while the
+     * screen added the track's. A telematics frame landing in that window anchored as though the
+     * drive had not happened, and the screen then added it a second time — the odometer ran ahead
+     * of the dash by exactly the distance of the trip in progress.
+     */
+    private fun liveTripKm(): Double =
+        if (tripId == NO_TRIP) 0.0 else track.distanceM / 1000.0
+
     private fun adoptMgOdometerAnchor(carOdoKm: Double?, dao: `in`.odograph.tracker.data.OdographDao) {
         if (carOdoKm == null || carOdoKm <= 0.0) return
-        val state = _state.value
-        val measuredNow = dao.trackedDistanceM() / 1000.0 + state.distanceM / 1000.0
+        val tripKm = liveTripKm()
+        val measuredNow = dao.trackedDistanceM() / 1000.0 + tripKm
         if (!`in`.odograph.tracker.core.Odometer.adoptCarOdo(settings, carOdoKm, measuredNow)) return
-        odoBaseKm = `in`.odograph.tracker.core.Odometer.liveOdoKm(settings, dao.trackedDistanceM() / 1000.0)
-        _state.update { it.copy(odoKm = odoBaseKm + it.distanceM / 1000.0 *
-            `in`.odograph.tracker.core.Odometer.factor(settings)) }
+        // Run the screen's own arithmetic backwards, so the reading it produces is the car's dash.
+        val factor = `in`.odograph.tracker.core.Odometer.factor(settings)
+        odoBaseKm = `in`.odograph.tracker.core.Odometer.baseForCarOdo(carOdoKm, tripKm, factor)
+        _state.update { it.copy(odoKm = odoBaseKm + tripKm * factor) }
     }
 
     /**

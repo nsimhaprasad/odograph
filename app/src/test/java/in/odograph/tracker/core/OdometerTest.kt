@@ -162,4 +162,48 @@ class OdometerTest {
         assertThat(Odometer.drift(20000.0, Odometer.liveOdoKm(s, 500.0)))
             .isEqualTo(0.0, within(0.001))
     }
+
+    // ------------------------------------------------ the odometer must read what the dash reads
+
+    /**
+     * Reported from the car: the dash read 21,073 on a 38.1 km drive and the app read 21,111,
+     * with a drift readout of -38.1 that was describing the fault exactly. The baseline was being
+     * rebuilt from closed trips alone while the screen went on adding the open trip, so the drive
+     * in progress was counted twice.
+     *
+     * The baseline is now the screen's own arithmetic run backwards, which makes the two
+     * incapable of disagreeing: whatever the open trip's distance, the reading is the dash.
+     */
+    @Test
+    fun `the displayed odometer equals the car's dash whatever the open trip has covered`() {
+        val dash = 21_073.0
+        listOf(0.0, 0.4, 12.0, 38.1, 250.0).forEach { tripKm ->
+            val base = Odometer.baseForCarOdo(dash, tripKm, factor = 1.0)
+            val shown = base + tripKm * 1.0
+            assertThat(shown)
+                .`as`("a $tripKm km drive in progress must not move the odometer off the dash")
+                .isEqualTo(dash, within(0.0001))
+        }
+    }
+
+    @Test
+    fun `the reported case reproduces exactly`() {
+        val base = Odometer.baseForCarOdo(carOdoKm = 21_073.0, liveTripKm = 38.1, factor = 1.0)
+        assertThat(base + 38.1).isEqualTo(21_073.0, within(0.0001))
+        assertThat(base + 38.1).isNotEqualTo(21_111.0)
+    }
+
+    @Test
+    fun `a calibration factor is applied to the open trip on both sides of the arithmetic`() {
+        val dash = 21_073.0
+        val factor = 1.04
+        val base = Odometer.baseForCarOdo(dash, liveTripKm = 38.1, factor = factor)
+        assertThat(base + 38.1 * factor).isEqualTo(dash, within(0.0001))
+    }
+
+    @Test
+    fun `a parked car anchors straight to the dash`() {
+        assertThat(Odometer.baseForCarOdo(21_073.0, liveTripKm = 0.0, factor = 1.0))
+            .isEqualTo(21_073.0)
+    }
 }
