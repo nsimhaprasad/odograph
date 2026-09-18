@@ -232,8 +232,9 @@ private fun conditionRow(
     ) {
         Text(label, color = palette.dim, fontSize = m.body, maxLines = 1)
         Text(
-            text = "%.1f kWh/100km  ·  %.0f km  ·  %d drives".format(
-                bucket.kwhPer100Km, bucket.rangeAtFullKm(capacityKwh), bucket.drives
+            text = "%.1f kWh/100km  ·  %.0f km  ·  %.0f km/h  ·  %d drives".format(
+                bucket.kwhPer100Km, bucket.rangeAtFullKm(capacityKwh),
+                bucket.avgMovingKmh, bucket.drives
             ),
             color = palette.numeral,
             fontSize = m.body,

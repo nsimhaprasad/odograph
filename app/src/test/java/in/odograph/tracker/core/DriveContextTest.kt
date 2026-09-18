@@ -70,9 +70,39 @@ class DriveContextTest {
 
     @Test
     fun `a mixed drive lands in the middle`() {
-        // 45 km/h.
-        assertThat(DriveContext.character(45_000.0, movingS = 3_600))
+        // 38 km/h: faster than a crawl, short of sustained running.
+        assertThat(DriveContext.character(38_000.0, movingS = 3_600))
             .isEqualTo(DriveContext.Character.MIXED)
+    }
+
+    /**
+     * The driver's own description of a long drive: "held at fifty to sixty, consistently". The
+     * threshold has to meet that, and the trap is that it is a dial reading rather than an
+     * average. Average moving speed still carries every deceleration and junction, so a drive
+     * cruising at fifty to sixty averages in the high forties — which a threshold set at the dial
+     * would file as mixed, leaving the bucket that matters almost empty.
+     */
+    @Test
+    fun `a drive held at fifty to sixty is a long drive, not a mixed one`() {
+        // Cruising at 55 with the usual slowing: 48 km/h average moving speed.
+        assertThat(DriveContext.character(48_000.0, movingS = 3_600))
+            .isEqualTo(DriveContext.Character.HIGHWAY)
+        // And squarely at 55 average.
+        assertThat(DriveContext.character(55_000.0, movingS = 3_600))
+            .isEqualTo(DriveContext.Character.HIGHWAY)
+    }
+
+    /** Stop-and-go still reaches thirty between the halts; it is the halts that make it a crawl. */
+    @Test
+    fun `stop and go traffic is a city drive`() {
+        assertThat(DriveContext.character(22_000.0, movingS = 3_600))
+            .isEqualTo(DriveContext.Character.CITY)
+    }
+
+    @Test
+    fun `the thresholds match how the driving is described`() {
+        assertThat(DriveContext.CITY_MAX_KMH).isEqualTo(30.0)
+        assertThat(DriveContext.HIGHWAY_MIN_KMH).isEqualTo(45.0)
     }
 
     @Test

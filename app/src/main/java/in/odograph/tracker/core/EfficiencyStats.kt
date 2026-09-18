@@ -30,7 +30,19 @@ object EfficiencyStats {
     )
 
     /** What a group of drives cost, and how much of it there is to believe. */
-    data class Bucket(val kwhPer100Km: Double, val drives: Int, val distanceKm: Double) {
+    data class Bucket(
+        val kwhPer100Km: Double,
+        val drives: Int,
+        val distanceKm: Double,
+        /**
+         * The average moving speed of the drives in this bucket, km/h.
+         *
+         * Carried so the classification can be checked rather than taken on trust: a bucket
+         * labelled OPEN ROAD whose drives average thirty is a threshold set wrongly, and without
+         * this there is no way to see that from the screen.
+         */
+        val avgMovingKmh: Double
+    ) {
         /** Range from a full pack at this consumption, km. */
         fun rangeAtFullKm(capacityKwh: Double): Double =
             BatteryMath.rangeAtFullKwh(capacityKwh, kwhPer100Km)
@@ -51,10 +63,12 @@ object EfficiencyStats {
         if (usable.size < MIN_DRIVES) return null
         val per100 = usable.mapNotNull { BatteryMath.kwhPer100Km(it.energyKwh, it.distanceM) }
         if (per100.size < MIN_DRIVES) return null
+        val movingS = usable.sumOf { it.movingS }
         return Bucket(
             kwhPer100Km = median(per100),
             drives = usable.size,
-            distanceKm = usable.sumOf { it.distanceM } / 1000.0
+            distanceKm = usable.sumOf { it.distanceM } / 1000.0,
+            avgMovingKmh = if (movingS > 0) usable.sumOf { it.distanceM } / movingS * 3.6 else 0.0
         )
     }
 

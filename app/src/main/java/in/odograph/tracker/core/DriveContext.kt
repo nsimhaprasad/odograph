@@ -39,11 +39,27 @@ object DriveContext {
      */
     enum class Character { CITY, MIXED, HIGHWAY }
 
-    /** Below this average moving speed a drive is stop-start, km/h. */
-    const val CITY_MAX_KMH = 35.0
+    /**
+     * Below this average moving speed a drive is stop-start, km/h.
+     *
+     * Lower than it looks, because the figure excludes time spent stationary: a crawl through
+     * dense traffic still reaches thirty between the halts, and it is the halts rather than the
+     * speed between them that the driver experiences as a crawl.
+     */
+    const val CITY_MAX_KMH = 30.0
 
-    /** Above this it is sustained running, km/h. */
-    const val HIGHWAY_MIN_KMH = 60.0
+    /**
+     * At or above this a drive is sustained running, km/h.
+     *
+     * Forty-five, and deliberately below the speed a driver would name.
+     *
+     * Average moving speed is not the reading on the dial. It excludes time stationary but still
+     * carries every deceleration, junction and slow stretch, so a drive held at a steady fifty to
+     * sixty averages in the high forties. A threshold set at the dial reading files most long
+     * drives as mixed and leaves the bucket that matters almost empty — which is exactly what
+     * fifty did, and what a test written from the driver's own description of a long drive caught.
+     */
+    const val HIGHWAY_MIN_KMH = 45.0
 
     /**
      * Temperature bands, chosen for what they do to the pack rather than for round numbers.
