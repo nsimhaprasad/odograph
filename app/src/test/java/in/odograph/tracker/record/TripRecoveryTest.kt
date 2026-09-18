@@ -304,4 +304,121 @@ class TripRecoveryTest {
         // Unknown energy is an honest null, not a zero.
         assertThat(TripRecovery.driveCost(dao, energy = null, tripStart = 10_000L)).isNull()
     }
+
+    // ---------------------------------------------------------------- interrupted, not finished
+
+    /**
+     * The bug these exist for: the recorder shares a process with the screen, so anything that
+     * kills the process mid-drive — memory pressure from the map, a crash, Android reclaiming the
+     * app — closed the drive on the way back up and opened a fresh one at the next movement. One
+     * outing became two and the readout went back to zero, which from the driver's seat is a trip
+     * that reset itself for no reason.
+     */
+    @Test
+    fun `a restart moments into a drive picks the same trip back up`() {
+        val dao = db.dao()
+        val id = dao.startTrip(1_000_000L)
+        dao.appendPoint(PointEntity(0, id, 1_000_000L, 12.9700, 77.5900, 0f, null, 900.0, 5f, false))
+        dao.appendPoint(PointEntity(0, id, 1_060_000L, 12.9800, 77.5900, 15f, null, 905.0, 5f, false))
+
+        // Five seconds later, near enough to where it was: the process restarted, the car did not.
+        val outcome = TripRecovery.resumeOrClose(dao, fixAt(1_065_000L, 12.9800, 77.5901))
+
+        assertThat(outcome).isInstanceOf(TripRecovery.Interrupted.Resume::class.java)
+        val resume = outcome as TripRecovery.Interrupted.Resume
+        assertThat(resume.tripId).isEqualTo(id)
+        assertThat(resume.startedAt).`as`("the drive keeps the time it actually began").isEqualTo(1_000_000L)
+        assertThat(dao.tripById(id)!!.endedAt).`as`("it is still running").isNull()
+    }
+
+    /** The readout has to come back with the drive, or the odometer loses what it already covered. */
+    @Test
+    fun `a resumed drive carries the points it had already recorded`() {
+        val dao = db.dao()
+        val id = dao.startTrip(1_000_000L)
+        dao.appendPoint(PointEntity(0, id, 1_000_000L, 12.9700, 77.5900, 0f, null, 900.0, 5f, false))
+        dao.appendPoint(PointEntity(0, id, 1_060_000L, 12.9800, 77.5900, 15f, null, 905.0, 5f, false))
+
+        val resume = TripRecovery.resumeOrClose(dao, fixAt(1_065_000L, 12.9800, 77.5901))
+            as TripRecovery.Interrupted.Resume
+
+        assertThat(resume.fixes).hasSize(2)
+        val replayed = `in`.odograph.tracker.core.LiveTrack().also { t -> resume.fixes.forEach(t::add) }
+        assertThat(replayed.distanceM)
+            .`as`("the kilometres already driven survive the restart")
+            .isGreaterThan(1_000.0)
+    }
+
+    /**
+     * The other half of the same rule. A gap longer than the shortest stillness that ends a drive
+     * cannot be called an interruption, because the existing rules would have closed the trip
+     * during it — resuming would silently merge two outings into one.
+     */
+    @Test
+    fun `a gap longer than the resume window closes the trip as an orphan`() {
+        val dao = db.dao()
+        val id = dao.startTrip(1_000_000L)
+        dao.appendPoint(PointEntity(0, id, 1_000_000L, 12.9700, 77.5900, 0f, null, 900.0, 5f, false))
+        dao.appendPoint(PointEntity(0, id, 1_060_000L, 12.9800, 77.5900, 15f, null, 905.0, 5f, false))
+
+        val later = 1_060_000L + TripRecovery.RESUME_WINDOW_MS + 1_000L
+        val outcome = TripRecovery.resumeOrClose(dao, fixAt(later, 12.9800, 77.5901))
+
+        assertThat(outcome).isInstanceOf(TripRecovery.Interrupted.Closed::class.java)
+        assertThat(dao.tripById(id)!!.endedAt).isEqualTo(1_060_000L)
+    }
+
+    /**
+     * A drive with a hole in it is worse than two drives that meet at the hole: the distance
+     * across the gap becomes a straight line where the road was not, and nothing downstream can
+     * tell that it was invented.
+     */
+    @Test
+    fun `a car that travelled during the gap is not resumed across it`() {
+        val dao = db.dao()
+        val id = dao.startTrip(1_000_000L)
+        dao.appendPoint(PointEntity(0, id, 1_000_000L, 12.9700, 77.5900, 0f, null, 900.0, 5f, false))
+        dao.appendPoint(PointEntity(0, id, 1_060_000L, 12.9800, 77.5900, 15f, null, 905.0, 5f, false))
+
+        // Well inside the time window, but several kilometres away.
+        val outcome = TripRecovery.resumeOrClose(dao, fixAt(1_070_000L, 13.0400, 77.5900))
+
+        assertThat(outcome).isInstanceOf(TripRecovery.Interrupted.Closed::class.java)
+    }
+
+    /** A clock that runs backwards is a broken reading, not a drive that has not happened yet. */
+    @Test
+    fun `a fix older than the last recorded point does not resume`() {
+        val dao = db.dao()
+        val id = dao.startTrip(1_000_000L)
+        dao.appendPoint(PointEntity(0, id, 1_000_000L, 12.9700, 77.5900, 0f, null, 900.0, 5f, false))
+        dao.appendPoint(PointEntity(0, id, 1_060_000L, 12.9800, 77.5900, 15f, null, 905.0, 5f, false))
+
+        val outcome = TripRecovery.resumeOrClose(dao, fixAt(1_000_500L, 12.9800, 77.5901))
+
+        assertThat(outcome).isInstanceOf(TripRecovery.Interrupted.Closed::class.java)
+    }
+
+    @Test
+    fun `a boot with nothing left open has nothing to decide`() {
+        val outcome = TripRecovery.resumeOrClose(db.dao(), fixAt(1_000_000L, 12.97, 77.59))
+
+        assertThat(outcome).isInstanceOf(TripRecovery.Interrupted.Closed::class.java)
+        assertThat(db.dao().allTrips()).isEmpty()
+    }
+
+    /** An open trip with no points is still the parked session it always was, not a drive. */
+    @Test
+    fun `an open trip that never got a fix is still discarded`() {
+        val dao = db.dao()
+        val id = dao.startTrip(1_000_000L)
+
+        val outcome = TripRecovery.resumeOrClose(dao, fixAt(1_000_500L, 12.97, 77.59))
+
+        assertThat(outcome).isInstanceOf(TripRecovery.Interrupted.Closed::class.java)
+        assertThat(dao.tripById(id)).isNull()
+    }
+
+    private fun fixAt(t: Long, lat: Double, lon: Double) =
+        `in`.odograph.tracker.core.Fix(t, lat, lon, 15f, 5f, false, 905.0)
 }

@@ -1,6 +1,8 @@
 package `in`.odograph.tracker.record
 
+import `in`.odograph.tracker.core.Arrival
 import `in`.odograph.tracker.core.BatteryMath
+import `in`.odograph.tracker.core.Geo
 import `in`.odograph.tracker.core.Fix
 import `in`.odograph.tracker.core.TripStats
 import `in`.odograph.tracker.data.OdographDao
@@ -24,6 +26,80 @@ object TripRecovery {
      * and sits there has nothing to attach an origin to.
      */
     data class Recovery(val seedLat: Double? = null, val seedLon: Double? = null)
+
+    /**
+     * How long a drive may go unrecorded and still be the same drive.
+     *
+     * Matched to [Arrival.BUS_ASLEEP_STILL_MS], the shortest stillness that ends a drive: inside
+     * that window the existing rules would not have closed the trip anyway, so resuming cannot
+     * merge two outings the recorder would otherwise have kept apart. A process restart plus a
+     * warm GNSS re-acquisition fits inside it comfortably. A device that power-cycled does not,
+     * and should not — the box is powered by the car, so losing power means the ignition went off.
+     */
+    const val RESUME_WINDOW_MS = Arrival.BUS_ASLEEP_STILL_MS
+
+    /**
+     * How far the car may have got during that gap and still be resumable.
+     *
+     * A drive with a hole in it is worse than two drives that meet at the hole. The distance
+     * across the gap becomes a straight line where the road was not, and every figure derived
+     * from it — consumption, average speed, the odometer — inherits that error with nothing left
+     * to show where it came from.
+     */
+    const val RESUME_RADIUS_M = 250.0
+
+    /** What to do with a trip the previous run left open. */
+    sealed interface Interrupted {
+        /** The recorder was interrupted mid-drive: pick the same trip back up. */
+        data class Resume(val tripId: Long, val startedAt: Long, val fixes: List<Fix>) : Interrupted
+
+        /** The drive was over, or too much of it was missed to claim otherwise. */
+        data class Closed(val recovery: Recovery) : Interrupted
+    }
+
+    /**
+     * Decides whether the open trip is an interrupted drive or an orphan, once the first fix
+     * after a restart has arrived.
+     *
+     * Deferred to that first fix deliberately, rather than settled at startup. The question is how
+     * long the drive has gone unrecorded, and the only two timestamps that can answer it — the
+     * trip's last stored point and the fix now in hand — are both GNSS. The box has no SIM and so
+     * no NITZ, which leaves its own clock free to be hours out; deciding this by comparing a GNSS
+     * timestamp against `System.currentTimeMillis()` would be deciding it at random.
+     *
+     * The bug this exists for: the recorder shares a process with the screen, so anything that
+     * kills the process mid-drive — memory pressure, a crash, Android reclaiming the app — used
+     * to close the drive and start a fresh one when the car was next seen to move. One outing
+     * became two, the live readout went back to zero kilometres, and from the driver's seat the
+     * trip had simply reset itself.
+     */
+    fun resumeOrClose(
+        dao: OdographDao,
+        fix: Fix,
+        capacityKwh: Double = BatteryMath.DEFAULT_CAPACITY_KWH,
+        homeRateInr: Double = 8.0,
+        outsideRateInr: Double = 25.0
+    ): Interrupted {
+        val open = dao.openTrip() ?: return Interrupted.Closed(Recovery())
+        val points = dao.pointsFor(open.id)
+        val last = points.lastOrNull()
+            ?: return Interrupted.Closed(close(dao, open.id, capacityKwh, homeRateInr, outsideRateInr))
+
+        val gapMs = fix.t - last.t
+        val movedM = Geo.haversineMetres(last.lat, last.lon, fix.lat, fix.lon)
+        val interrupted = gapMs in 0..RESUME_WINDOW_MS && movedM <= RESUME_RADIUS_M
+
+        if (!interrupted) {
+            return Interrupted.Closed(close(dao, open.id, capacityKwh, homeRateInr, outsideRateInr))
+        }
+        return Interrupted.Resume(
+            tripId = open.id,
+            startedAt = open.startedAt,
+            fixes = points.map {
+                Fix(it.t, it.lat, it.lon, it.speedMps, it.accuracyM, it.interpolated, it.altitudeM)
+            }
+        )
+    }
 
     /**
      * Closes or discards whatever trip the last run left open, and reports where it ended.

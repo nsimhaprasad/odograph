@@ -35,6 +35,7 @@ import `in`.odograph.tracker.core.Departure
 import `in`.odograph.tracker.core.EfficiencyStats
 import `in`.odograph.tracker.core.RangeCalibration
 import `in`.odograph.tracker.core.SpeedSanity
+import `in`.odograph.tracker.core.TripStats
 import `in`.odograph.tracker.core.TripRepair
 import `in`.odograph.tracker.core.Telematics
 import io.windsor.telematics.TelematicsClient
@@ -312,11 +313,36 @@ class TripRecorderService : Service() {
 
     private lateinit var source: LocationSource
     private val io = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    /**
+     * Fixes are recorded one at a time, on one thread.
+     *
+     * [record] and everything it calls read and write a dozen unsynchronised fields — the open
+     * trip id, the live track, the held departure window, the stillness clock — and were written
+     * as if only one thread ever touched them. Launching each fix onto [Dispatchers.IO] made that
+     * untrue: it is a pool, so two fixes arriving together ran the whole recording path
+     * concurrently. Two of them got through the "no trip is open yet" check at once and opened two
+     * trips for a single departure, milliseconds apart, with the points of one drive then split
+     * between them. Serialising the pump restores the invariant the code already assumed, and is
+     * free — fixes arrive about once a second and a fix takes microseconds to record.
+     */
+    private val recorder = CoroutineScope(
+        SupervisorJob() + Dispatchers.IO.limitedParallelism(1)
+    )
     private var tripId: Long = -1
     private var lastFix: Fix? = null
     private var startedAt: Long? = null
     /** Wall-clock the car last moved over a fix. When stale, the car is parked and may be draining. */
     private var lastMovedAt = Long.MIN_VALUE
+
+    /**
+     * How much of the current stillness was spent with no fixes at all, milliseconds.
+     *
+     * Reset the moment the car is seen to move again, because it only ever describes the stretch
+     * of stillness in progress. See [Arrival.stillForMs] for why a blind stretch cannot be counted
+     * as a stationary one.
+     */
+    private var blindMs = 0L
     /** Consecutive driving fixes, so a single GPS blip can't end a real charge. */
     private var drivingFixStreak = 0
     /** True once the current drive has already ended whatever charge was open. */
@@ -345,6 +371,14 @@ class TripRecorderService : Service() {
 
     /** What the last run left behind, held until there is a trip to attach it to. */
     private var recovery = TripRecovery.Recovery()
+
+    /**
+     * A trip the previous run left open, still undecided.
+     *
+     * True from startup until the first fix arrives and settles whether the recorder was
+     * interrupted mid-drive or is booting after one ended.
+     */
+    private var pendingInterruption = false
     /**
      * The car's own account of being shut down, from the most recent telematics frame.
      *
@@ -379,14 +413,16 @@ class TripRecorderService : Service() {
             // Closes whatever the last run left open, but opens nothing: a trip begins when the
             // car does. Booting into an open 0 km row is what put a dummy drive at the top of the
             // history every time the box powered up in a car that then sat still.
-            recovery = TripRecovery.recover(
-                dao,
-                capacityKwh = settings.batteryCapacityKwh,
-                homeRateInr = settings.homeRateInr,
-                outsideRateInr = settings.outsideRateInr
-            )
+            // Whatever the last run left open is decided by the first fix, not here — see
+            // TripRecovery.resumeOrClose. Closing it now would end a drive that may still be in
+            // progress, which is what turned a process restart mid-drive into a trip that reset
+            // itself, and what split one outing into two.
+            pendingInterruption = dao.openTrip() != null
             tripId = NO_TRIP
-            Diagnostics.crumb("recovery done, awaiting movement")
+            Diagnostics.crumb(
+                if (pendingInterruption) "a trip was left open; the first fix decides it"
+                else "recovery done, awaiting movement"
+            )
             // One-off, and only once: every drive recorded before the plausibility rules existed
             // kept whatever the worst single fix claimed. The points are still on disk, so the
             // honest figure can be worked out again. Guarded by a revision so a later correction
@@ -411,7 +447,7 @@ class TripRecorderService : Service() {
             _state.value = LiveState(tripId = tripId, odoKm = odoBaseKm)
             // A charge owed an answer is the first thing a boot should ask again.
             raisePendingPriceReminder(dao)
-            source.start { fix -> io.launch { record(fix) } }
+            source.start { fix -> recorder.launch { record(fix) } }
 
             // Everything below is best-effort and entirely optional. The hotspot is usually up,
             // but recording must behave identically when it is not, so both are wrapped and
@@ -477,6 +513,10 @@ class TripRecorderService : Service() {
                 client = null
                 creds = null
                 _state.value = _state.value.copy(batterySocPercent = null, batteryCharging = null, telematicsConnected = null, odoDriftKm = null)
+                // A car reading only speaks for as long as the link that produced it. Keeping the
+                // last one after the link went down is how a frame taken in the car park goes on
+                // ending drives hours later, with nothing on screen to suggest where it came from.
+                carState = Arrival.CarState()
                 // Deliberately off is not an outage; drop any reminder so it cannot nag on.
                 clearMgLostNotification()
                 continue
@@ -488,6 +528,7 @@ class TripRecorderService : Service() {
             if (!hasValidatedNetwork()) {
                 Diagnostics.crumb("mg: no validated network, poll skipped")
                 _state.update { it.copy(telematicsConnected = false) }
+                carState = Arrival.CarState()
                 notifyMgLost()
                 continue
             }
@@ -529,7 +570,14 @@ class TripRecorderService : Service() {
                 val now = System.currentTimeMillis()
                 // What the car says about being shut down. Only the CAN bus: a locked car is not a
                 // parked one, because the doors lock themselves above walking pace.
-                carState = Arrival.CarState(canBusActive = status.canBusActive)
+                // Stamped on the fix clock, because that is the clock the stillness is measured
+                // on. The box has no SIM and so no NITZ; pairing a System.currentTimeMillis()
+                // stamp with a GNSS-timed lastMovedAt would compare two unrelated clocks and
+                // decide freshness at random.
+                carState = Arrival.CarState(
+                    canBusActive = status.canBusActive,
+                    observedAt = lastFix?.t ?: 0L
+                )
                 val powerKw = Telematics.chargePowerKw(ch)
                 // A snapshot without a SOC reading is not charge data — it is noise that would
                 // make a battery-less trip look instrumented. The car can cut power any moment,
@@ -677,6 +725,7 @@ class TripRecorderService : Service() {
             }.onFailure {
                 Diagnostics.crumb("telematics poll failed: $it")
                 _state.update { it.copy(telematicsConnected = false) }
+                carState = Arrival.CarState()
                 // A stale session is the usual culprit; the next round logs in again.
                 runCatching { c.login() }
             }
@@ -727,6 +776,69 @@ class TripRecorderService : Service() {
         // Parked frames are meter records, not history: anything past 60 days is unneeded for a
         // drain read and would otherwise pile up forever under trip -1. Indexed, so this is cheap.
         runCatching { dao.pruneParkedFrames(now - 60L * 24 * 3_600_000L) }
+    }
+
+    /**
+     * Settles what the previous run left open, using the first fix as the clock.
+     *
+     * On resume the whole live readout is rebuilt from the points the drive already wrote, not
+     * started from zero. Without that the trip would carry on in the database while the screen
+     * showed 0.0 km — and the odometer, which adds the live figure to the lifetime total, would
+     * quietly lose the distance covered before the interruption.
+     */
+    private fun resolveInterruption(dao: OdographDao, fix: Fix) {
+        pendingInterruption = false
+        val outcome = runCatching {
+            TripRecovery.resumeOrClose(
+                dao, fix,
+                capacityKwh = settings.batteryCapacityKwh,
+                homeRateInr = settings.homeRateInr,
+                outsideRateInr = settings.outsideRateInr
+            )
+        }.getOrElse { TripRecovery.Interrupted.Closed(TripRecovery.Recovery()) }
+
+        when (outcome) {
+            is TripRecovery.Interrupted.Closed -> {
+                recovery = outcome.recovery
+                // The orphan has only now joined the closed trips, so the lifetime base it
+                // contributes to was computed without it at startup.
+                odoBaseKm = `in`.odograph.tracker.core.Odometer.liveOdoKm(
+                    settings, dao.trackedDistanceM() / 1000.0
+                )
+                _state.value = _state.value.copy(tripId = NO_TRIP, odoKm = odoBaseKm)
+            }
+
+            is TripRecovery.Interrupted.Resume -> {
+                tripId = outcome.tripId
+                startedAt = outcome.startedAt
+                pendingFixes.clear()
+                track = LiveTrack().also { t -> outcome.fixes.forEach(t::add) }
+
+                val stats = TripStats.compute(outcome.fixes)
+                // The last moment the car was actually seen moving, so a drive that was already
+                // sitting still when the recorder died can still arrive on schedule instead of
+                // having its stillness clock reset by the restart.
+                lastMovedAt = outcome.fixes.lastOrNull { it.speedMps >= Arrival.STILL_SPEED_MPS }?.t
+                    ?: outcome.fixes.firstOrNull()?.t ?: fix.t
+                lastAcceptedSpeedMps = outcome.fixes.lastOrNull()?.speedMps
+                // The recorder was not watching while it was dead, so that stretch is blind time
+                // rather than a car standing still — exactly the distinction a tunnel needs.
+                blindMs = (fix.t - (outcome.fixes.lastOrNull()?.t ?: fix.t)).coerceAtLeast(0L)
+                _state.value = _state.value.copy(
+                    tripId = tripId,
+                    distanceM = track.distanceM,
+                    movingS = stats.movingS,
+                    maxSpeedMps = stats.maxSpeedMps,
+                    elevGainM = track.elevGainM,
+                    elevLossM = track.elevLossM
+                )
+                Diagnostics.crumb(
+                    "resumed trip=$tripId at %.2f km after a %.0fs gap".format(
+                        track.distanceM / 1000.0, (fix.t - (outcome.fixes.lastOrNull()?.t ?: fix.t)) / 1000.0
+                    )
+                )
+            }
+        }
     }
 
     /**
@@ -850,6 +962,8 @@ class TripRecorderService : Service() {
         if (restoring) return
         val dao = OdographDb.get(this).dao()
 
+        if (pendingInterruption) resolveInterruption(dao, fix)
+
         if (tripId == NO_TRIP) {
             // No trip yet, so nothing to write these against. They are held instead, and the
             // window is rebuilt into the track each time so a car standing still under GPS jitter
@@ -900,11 +1014,33 @@ class TripRecorderService : Service() {
             driveEndedCharge = false
         }
 
-        if (effectiveSpeedMps >= Arrival.STILL_SPEED_MPS) lastMovedAt = fix.t
+        // A gap in the fixes is time nobody can account for. Counted here so the stillness test
+        // below measures how long the car has been seen to be stationary, not how long it has been
+        // since anything was seen at all.
+        val gapMs = lastFix?.let { fix.t - it.t }?.coerceAtLeast(0L) ?: 0L
+        if (gapMs >= Arrival.BLIND_GAP_MS) {
+            blindMs += gapMs
+            Diagnostics.crumb("no fixes for ${gapMs / 1000}s — not counting it as the car standing still")
+        }
+        if (effectiveSpeedMps >= Arrival.STILL_SPEED_MPS) {
+            lastMovedAt = fix.t
+            blindMs = 0L
+        }
 
         // A drive that has arrived is written now rather than at the next boot, so an outing with
         // a stop in the middle is two trips rather than one that begins and ends at home.
-        if (tripId != NO_TRIP && Arrival.arrived(Arrival.stillForMs(lastMovedAt, fix.t), carState)) {
+        val stillForMs = Arrival.stillForMs(lastMovedAt, fix.t, blindMs)
+        if (tripId != NO_TRIP && Arrival.arrived(stillForMs, carState, lastMovedAt)) {
+            // Why, not just that. "I don't know how the trip got ended" is not a question the
+            // driver should have to ask twice, and a closed drive leaves no other trace of what
+            // convinced the recorder the car had parked.
+            Diagnostics.crumb(
+                "closing trip=%d: still for %ds%s".format(
+                    tripId, stillForMs / 1000,
+                    if (carState.saysParked(lastMovedAt)) " with the car's bus reported asleep"
+                    else " (the ${Arrival.STILL_MS / 60_000}-minute stillness limit)"
+                )
+            )
             closeTripOnArrival(dao)
             publishLiveState(fix, effectiveSpeedMps, moving = false)
             lastFix = fix
@@ -1172,6 +1308,7 @@ class TripRecorderService : Service() {
         if (this::alertSound.isInitialized) runCatching { alertSound.release() }
         if (this::source.isInitialized) source.stop()
         io.cancel()
+        recorder.cancel()
         super.onDestroy()
     }
 }

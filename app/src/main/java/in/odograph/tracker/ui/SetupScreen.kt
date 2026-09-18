@@ -29,6 +29,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import `in`.odograph.tracker.alert.AlertMode
+import `in`.odograph.tracker.BuildConfig
 import `in`.odograph.tracker.data.OdographDb
 import `in`.odograph.tracker.export.Exporters
 import `in`.odograph.tracker.export.shareFile
@@ -149,6 +150,24 @@ fun SetupScreen(
             Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(m.pad),
             verticalArrangement = Arrangement.spacedBy(m.gap)
         ) {
+            // First thing on the screen, because the first question about any reported problem is
+            // which build it happened on — and answering it by hunting for a feature that did or
+            // did not exist yet is guesswork on both sides.
+            Section("BUILD", palette, m) {
+                Text(
+                    text = "Odograph ${BuildConfig.VERSION_NAME}  ·  build ${BuildConfig.VERSION_CODE}",
+                    color = palette.numeral,
+                    fontSize = m.stat,
+                    fontFamily = FontFamily.Monospace
+                )
+                Text(
+                    text = "Quote this when something goes wrong.",
+                    color = palette.dim,
+                    fontSize = m.body,
+                    modifier = Modifier.padding(top = m.gap / 4)
+                )
+            }
+
             Section("CLUSTER", palette, m) {
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(m.gap / 2)) {
                     Direction.entries.forEach { d ->

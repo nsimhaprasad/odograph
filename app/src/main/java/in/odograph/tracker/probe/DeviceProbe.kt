@@ -40,6 +40,10 @@ data class ProbeReport(
 ) {
     fun asText(): String = buildString {
         appendLine("ODOGRAPH DEVICE PROBE")
+        // First line after the title: a probe that does not say which build produced it leaves
+        // every other line in it unattributable.
+        appendLine("BUILD         : ${`in`.odograph.tracker.BuildConfig.VERSION_NAME}" +
+            " (${`in`.odograph.tracker.BuildConfig.VERSION_CODE})")
         appendLine("SDK           : $sdkInt (Android $release)")
         appendLine("DEVICE        : $manufacturer $model")
         appendLine("SCREEN        : ${widthPx}x$heightPx @ ${densityDpi}dpi ${refreshHz}Hz")
