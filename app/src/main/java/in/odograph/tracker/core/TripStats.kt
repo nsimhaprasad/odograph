@@ -128,8 +128,13 @@ object TripStats {
 
         val durationS = (sorted.last().t - sorted.first().t) / 1000
         val movingS = movingMs / 1000
-        val maxSpeed = sorted.filter { it.sane() && it.accuracyM <= SPEED_ACCURACY_LIMIT_M }
-            .maxOfOrNull { it.speedMps } ?: 0f
+        // Not simply the highest reading. The receiver's own accuracy estimate is no defence
+        // against a spike, because a spike routinely arrives with a confident accuracy attached —
+        // which is how a 38 km drive came to record 195 km/h in a car that will not do 140, and
+        // keep it, because the figure is stored with the trip.
+        val maxSpeed = SpeedSanity.plausibleMaxSpeedMps(
+            sorted.filter { it.sane() && it.accuracyM <= SPEED_ACCURACY_LIMIT_M }
+        )
         val avg = if (movingS > 0) distance / movingS else 0.0
         return Stats(
             distance, durationS, movingS, maxSpeed, avg, slowestKm(sorted), elevGain, elevLoss

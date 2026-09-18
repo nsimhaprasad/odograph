@@ -32,6 +32,7 @@ import `in`.odograph.tracker.sync.SheetsSync
 import `in`.odograph.tracker.ui.theme.Settings
 import `in`.odograph.tracker.core.Arrival
 import `in`.odograph.tracker.core.Departure
+import `in`.odograph.tracker.core.SpeedSanity
 import `in`.odograph.tracker.core.Telematics
 import io.windsor.telematics.TelematicsClient
 import kotlinx.coroutines.CoroutineScope
@@ -310,6 +311,11 @@ class TripRecorderService : Service() {
     /** True once the current drive has already ended whatever charge was open. */
     private var driveEndedCharge = false
     private var track = LiveTrack()
+    /**
+     * The last speed that passed the plausibility test, so a rejected spike never becomes the
+     * reference the next reading is judged against.
+     */
+    private var lastAcceptedSpeedMps: Float? = null
     /**
      * Fixes seen before the car was judged to be moving.
      *
@@ -734,6 +740,10 @@ class TripRecorderService : Service() {
         Diagnostics.crumb("trip closed on arrival trip=$closed")
     }
 
+    /** Gap since the previous fix, seconds. Zero when this is the first one. */
+    private fun secondsSinceLastFix(fix: Fix): Float =
+        lastFix?.let { (fix.t - it.t) / 1000f } ?: 0f
+
     /** The live readout, which a parked car still gets — it just is not recording a drive. */
     private fun publishLiveState(
         fix: Fix,
@@ -748,7 +758,15 @@ class TripRecorderService : Service() {
             speedMps = speedMps,
             distanceM = if (moving) track.distanceM else 0.0,
             elapsedS = if (moving) (fix.t - (startedAt ?: fix.t)) / 1000 else 0,
-            maxSpeedMps = if (moving) maxOf(cur.maxSpeedMps, speedMps) else 0f,
+            // The same test the stored trip applies, so the live readout and the saved figure
+            // cannot disagree about what the car was doing — and a spike cannot park itself at the
+            // top of the screen for the rest of the drive.
+            maxSpeedMps = when {
+                !moving -> 0f
+                SpeedSanity.isPlausible(lastAcceptedSpeedMps, speedMps, secondsSinceLastFix(fix)) ->
+                    maxOf(cur.maxSpeedMps, speedMps).also { lastAcceptedSpeedMps = speedMps }
+                else -> cur.maxSpeedMps
+            },
             movingS = if (moving && speedMps > 0.5f) cur.movingS + 1 else if (moving) cur.movingS else 0,
             elevGainM = if (moving) track.elevGainM else 0.0,
             elevLossM = if (moving) track.elevLossM else 0.0,

@@ -6,3 +6,7 @@ keystore.properties
 *.jks
 .DS_Store
 .idea/
+
+# Intermediate build artefacts. dist/odograph.apk is the served one and stays tracked; the
+# per-version copies are ten megabytes each and would bloat the history for no benefit.
+dist/odograph-0.*.apk
