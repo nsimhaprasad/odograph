@@ -54,8 +54,16 @@ adb_ forward "tcp:${HOST_PORT}" "tcp:${APP_PORT}" >/dev/null 2>&1 \
 live() { curl -s -m 5 "http://127.0.0.1:${HOST_PORT}/api/live" 2>/dev/null; }
 field() { live | sed -n "s/.*\"$1\":\([0-9.eE+-]*\).*/\1/p" | head -1; }
 
-probe="$(live)"
-[ -n "$probe" ] || fail "the app's API did not answer on :${APP_PORT} — is the LAN server enabled?"
+# Wait for the server rather than probing once. It binds a moment after the app starts, so a
+# single probe straight after an install fails against an app that is perfectly healthy — which it
+# did, and reported as a broken LAN server.
+probe=""
+for _ in $(seq 1 20); do
+  probe="$(live)"
+  [ -n "$probe" ] && break
+  sleep 1
+done
+[ -n "$probe" ] || fail "the app's API did not answer on :${APP_PORT} after 20s — is the LAN server enabled?"
 ok "API answering"
 
 step "Granting location and starting from a standstill"

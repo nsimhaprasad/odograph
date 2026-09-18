@@ -62,6 +62,17 @@ class Settings(ctx: Context) {
     var lastDocsChargeId: Long
         get() = prefs.getLong(KEY_DOCS_CHARGE, 0L)
         set(value) = prefs.edit().putLong(KEY_DOCS_CHARGE, value).apply()
+    /**
+     * The last battery frame the backup uploaded.
+     *
+     * Its own watermark rather than riding on the trip one, because parked frames belong to no
+     * trip: they carry the overnight drain and the near-full readings the pack is measured from,
+     * and a watermark keyed on trips would never send them.
+     */
+    var lastDocsBatteryId: Long
+        get() = prefs.getLong(KEY_LAST_DOCS_BATTERY, 0L)
+        set(value) = prefs.edit().putLong(KEY_LAST_DOCS_BATTERY, value).apply()
+
     var lastDocsDay: Int
         get() = prefs.getInt(KEY_DOCS_DAY, 0)
         set(value) = prefs.edit().putInt(KEY_DOCS_DAY, value).apply()
@@ -226,6 +237,7 @@ class Settings(ctx: Context) {
 
     private companion object {
         const val KEY_REPAIR_REVISION = "repair_revision"
+        const val KEY_LAST_DOCS_BATTERY = "last_docs_battery_id"
         const val KEY_TZ = "time_zone_id"
         const val KEY_LIMIT = "speed_limit_kmh"
         const val KEY_ALERT = "alert_mode"

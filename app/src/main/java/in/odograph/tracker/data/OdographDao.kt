@@ -309,6 +309,17 @@ interface OdographDao {
     @Query("SELECT * FROM charge_events WHERE kind IS NOT NULL AND id > :fromId ORDER BY id ASC")
     fun docsNewCharges(fromId: Long): List<ChargeEventEntity>
 
+    /**
+     * Battery frames the backup has not yet sent, oldest first.
+     *
+     * Bounded per sync so one upload cannot grow without limit after a long gap; the watermark
+     * simply advances and the rest follows on the next run. Parked frames are included — they
+     * carry the overnight drain and the near-full readings the pack is measured from, so a backup
+     * without them restores a car with no battery history.
+     */
+    @Query("SELECT * FROM battery WHERE id > :fromId ORDER BY id ASC LIMIT :limit")
+    fun docsNewBattery(fromId: Long, limit: Int = 2_000): List<BatteryEntity>
+
     /** Coverage days newer than the watermark, oldest first (today's mutable row included). */
     @Query("SELECT * FROM daily_telemetry WHERE day > :fromDay ORDER BY day ASC")
     fun telemetryDaysAfter(fromDay: Int): List<DailyTelemetryEntity>

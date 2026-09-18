@@ -27,6 +27,8 @@ function doPost(e) {
     var points = body.points || [];
     var charges = body.charges || [];
     var days = body.telemetry || [];
+    var places = body.places || [];
+    var battery = body.battery || [];
     var meta = body.meta || {};
 
     var tripSheet = tab(ss, 'Trips');
@@ -47,9 +49,21 @@ function doPost(e) {
     var teleCols = ['day','first_poll_ms','last_poll_ms'];
     upsertRows(teleSheet, teleCols, days.map(function (d) { return [d.day, d.firstPollAt, d.lastPollAt]; }), 0);
 
+    // Places and battery frames are what make this sheet a backup rather than a report. Without
+    // places a restored trip knows where it went but not what that place is called, and every
+    // route grouping is lost; without battery frames the pack has no measured health.
+    var placeSheet = tab(ss, 'Places');
+    var placeCols = ['id','lat','lon','visits','label','auto_name','geocoded_at'];
+    upsertRows(placeSheet, placeCols, places.map(placeRow), 0);
+
+    var batterySheet = tab(ss, 'Battery');
+    var batteryCols = ['id','trip_id','t_ms','soc_pct','charging','range_km','charge_kw',
+      'odometer_km','battery_kwh','exterior_temp_c'];
+    upsertRows(batterySheet, batteryCols, battery.map(batteryRow), 0);
+
     var logSheet = tab(ss, 'SyncLog');
     logSheet.appendRow([new Date(), body.device || '', trips.length, points.length,
-      charges.length, days.length]);
+      charges.length, days.length, places.length, battery.length, meta.schema || '']);
     if (logSheet.getLastRow() > 300) {
       logSheet.deleteRows(2, logSheet.getLastRow() - 250);
     }
@@ -59,7 +73,8 @@ function doPost(e) {
     afterPost(ss);
 
     return json({ status: 'ok', trips: trips.length, points: points.length,
-      charges: charges.length, telemetry: days.length });
+      charges: charges.length, telemetry: days.length,
+      places: places.length, battery: battery.length });
   } catch (err) {
     return json({ status: 'error', message: String(err) });
   }
@@ -121,6 +136,19 @@ function upsertRows(sheet, header, rows, keyCol) {
   if (fresh.length) {
     sheet.getRange(sheet.getLastRow() + 1, 1, fresh.length, header.length).setValues(fresh);
   }
+}
+
+function placeRow(p) {
+  return [p.id, p.lat, p.lon, p.visits, p.label || '', p.autoName || '', p.geocodedAt || ''];
+}
+
+function batteryRow(b) {
+  // Blank rather than zero for a missing reading: "not measured" and "measured as nothing" are
+  // different facts, and flattening the first into the second restores a car that was measured
+  // when it was not.
+  function n(v) { return (v === null || v === undefined) ? '' : v; }
+  return [b.id, b.tripId, b.t, n(b.socPercent), n(b.charging), n(b.rangeKm),
+    n(b.chargingPowerKw), n(b.odometerKm), n(b.batteryEnergyKwh), n(b.exteriorTempC)];
 }
 
 /** Append a trip's points once, and once only. */

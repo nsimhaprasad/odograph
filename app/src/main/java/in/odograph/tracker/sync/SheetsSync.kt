@@ -49,18 +49,24 @@ object SheetsSync {
             val charges = dao.docsNewCharges(s.lastDocsChargeId)
             val today = dayOf(today(), zone)
             val days = DocsDelta.selectDays(dao.telemetryDaysAfter(s.lastDocsDay), today)
+            val battery = dao.docsNewBattery(s.lastDocsBatteryId)
 
-            if (trips.isEmpty() && charges.isEmpty() && days.isEmpty()) {
+            if (trips.isEmpty() && charges.isEmpty() && days.isEmpty() && battery.isEmpty()) {
                 return Outbound.Result(0, 0, null)
             }
 
             val points = trips.flatMap { dao.pointsFor(it.id) }
+            // Every place, every time: the table is small, and a backup carrying trips that
+            // reference places it does not contain restores a history with no route names in it.
+            val places = dao.allPlaces()
             val body = SheetsJson.stats(
                 deviceId = deviceId,
                 trips = trips,
                 points = points,
                 charges = charges,
                 days = days,
+                places = places,
+                battery = battery,
                 capacityKwh = s.batteryCapacityKwh,
                 homeRateInr = s.homeRateInr,
                 outsideRateInr = s.outsideRateInr,
@@ -74,6 +80,7 @@ object SheetsSync {
             }
             trips.maxOfOrNull { it.id }?.let { s.lastDocsTripId = it }
             charges.maxOfOrNull { it.id }?.let { s.lastDocsChargeId = it }
+            battery.maxOfOrNull { it.id }?.let { s.lastDocsBatteryId = it }
             s.lastDocsDay = DocsDelta.nextDayWatermark(s.lastDocsDay, days, today)
             val rows = trips.size + points.size + charges.size + days.size
             Outbound.Result(rows, rows)

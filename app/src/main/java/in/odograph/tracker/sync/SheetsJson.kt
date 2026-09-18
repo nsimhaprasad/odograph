@@ -1,5 +1,7 @@
 package `in`.odograph.tracker.sync
 
+import `in`.odograph.tracker.data.PlaceEntity
+import `in`.odograph.tracker.data.BatteryEntity
 import `in`.odograph.tracker.data.ChargeEventEntity
 import `in`.odograph.tracker.data.DailyTelemetryEntity
 import `in`.odograph.tracker.data.PointEntity
@@ -22,12 +24,17 @@ object SheetsJson {
         points: List<PointEntity>,
         charges: List<ChargeEventEntity>,
         days: List<DailyTelemetryEntity>,
+        places: List<PlaceEntity>,
+        battery: List<BatteryEntity>,
         capacityKwh: Double,
         homeRateInr: Double,
         outsideRateInr: Double,
         gstRatePct: Double
     ): String {
         val meta = "{" +
+            // The schema this data came out of. A restore that cannot tell which shape it is
+            // reading is a restore that will one day put the wrong columns in the right names.
+            "\"schema\":$SCHEMA_VERSION," +
             "\"capacityKwh\":${num(capacityKwh)}," +
             "\"homeRateInr\":${num(homeRateInr)}," +
             "\"outsideRateInr\":${num(outsideRateInr)}," +
@@ -41,9 +48,41 @@ object SheetsJson {
             "\"trips\":[${trips.joinToString(",") { trip(it) }}]," +
             "\"points\":[${points.joinToString(",") { point(it) }}]," +
             "\"charges\":[${charges.joinToString(",") { charge(it) }}]," +
-            "\"telemetry\":[${days.joinToString(",") { day(it) }}]" +
+            "\"telemetry\":[${days.joinToString(",") { day(it) }}]," +
+            // Places and battery frames are what turn a readable report into a restorable backup.
+            // Without places a restored trip knows where it went but not what that place is
+            // called, and every route grouping is lost; without battery frames the pack has no
+            // measured health and no charge summaries to recompute from.
+            "\"places\":[${places.joinToString(",") { place(it) }}]," +
+            "\"battery\":[${battery.joinToString(",") { batterySample(it) }}]" +
             "}"
     }
+
+    /** The database shape this export was produced from. Bumped with every Room migration. */
+    const val SCHEMA_VERSION = 9
+
+    private fun place(p: PlaceEntity): String = "{" +
+        "\"id\":${p.id}," +
+        "\"lat\":${num(p.lat)}," +
+        "\"lon\":${num(p.lon)}," +
+        "\"visits\":${p.visits}," +
+        "\"label\":${p.label?.let { "\"${esc(it)}\"" } ?: "null"}," +
+        "\"autoName\":${p.autoName?.let { "\"${esc(it)}\"" } ?: "null"}," +
+        "\"geocodedAt\":${p.geocodedAt ?: "null"}" +
+        "}"
+
+    private fun batterySample(b: BatteryEntity): String = "{" +
+        "\"id\":${b.id}," +
+        "\"tripId\":${b.tripId}," +
+        "\"t\":${b.t}," +
+        "\"socPercent\":${numOrNull(b.socPercent)}," +
+        "\"charging\":${b.charging?.toString() ?: "null"}," +
+        "\"rangeKm\":${numOrNull(b.rangeKm)}," +
+        "\"chargingPowerKw\":${numOrNull(b.chargingPowerKw)}," +
+        "\"odometerKm\":${numOrNull(b.odometerKm)}," +
+        "\"batteryEnergyKwh\":${numOrNull(b.batteryEnergyKwh)}," +
+        "\"exteriorTempC\":${b.exteriorTempC ?: "null"}" +
+        "}"
 
     private fun trip(t: TripEntity): String = "{" +
         "\"id\":${t.id}," +
@@ -100,6 +139,9 @@ object SheetsJson {
         "\"firstPollAt\":${d.firstPollAt}," +
         "\"lastPollAt\":${d.lastPollAt}" +
         "}"
+
+    /** A number, or a JSON null. "No reading" and "a reading of zero" are different facts. */
+    private fun numOrNull(d: Double?): String = d?.let { num(it) } ?: "null"
 
     private fun num(d: Double): String {
         val s = "%.4f".format(d).trimEnd('0').trimEnd('.')
