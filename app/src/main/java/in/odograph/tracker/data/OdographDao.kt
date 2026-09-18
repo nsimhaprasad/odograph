@@ -234,6 +234,19 @@ interface OdographDao {
     @Query("UPDATE trips SET startedAt = :startedAt WHERE id = :id")
     fun setStartedAt(id: Long, startedAt: Long)
 
+    /**
+     * Corrects one stored top speed, leaving everything else about the trip alone.
+     *
+     * Surgical on purpose: recomputing a whole finished trip would also move its distance, its
+     * energy and its cost, and a repair that quietly rewrites what a drive cost is not a repair.
+     */
+    @Query("UPDATE trips SET maxSpeedMps = :maxSpeedMps WHERE id = :id")
+    fun setMaxSpeed(id: Long, maxSpeedMps: Float)
+
+    /** Closed drives, oldest first, for a pass that has to look at each one's points. */
+    @Query("SELECT * FROM trips WHERE endedAt IS NOT NULL ORDER BY startedAt ASC")
+    fun closedTrips(): List<TripEntity>
+
     @Query("UPDATE trips SET clusterId = :clusterId WHERE id = :id")
     fun setCluster(id: Long, clusterId: Long)
 

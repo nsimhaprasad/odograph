@@ -33,6 +33,7 @@ import `in`.odograph.tracker.ui.theme.Settings
 import `in`.odograph.tracker.core.Arrival
 import `in`.odograph.tracker.core.Departure
 import `in`.odograph.tracker.core.SpeedSanity
+import `in`.odograph.tracker.core.TripRepair
 import `in`.odograph.tracker.core.Telematics
 import io.windsor.telematics.TelematicsClient
 import kotlinx.coroutines.CoroutineScope
@@ -181,6 +182,14 @@ class TripRecorderService : Service() {
 
         /** Consecutive driving fixes that confirm a real pull-away before a charge ends. */
         private const val DRIVE_START_CONFIRM_FIXES = 3
+
+        /**
+         * The revision of the stored-history repair this build carries.
+         *
+         * Bumped when a new correction is added, which reruns the pass over drives an earlier
+         * revision already visited.
+         */
+        private const val REPAIR_REVISION = 1
 
         /** No trip is open. Battery frames recorded under it are parked readings, not a drive. */
         const val NO_TRIP = -1L
@@ -368,6 +377,24 @@ class TripRecorderService : Service() {
             )
             tripId = NO_TRIP
             Diagnostics.crumb("recovery done, awaiting movement")
+            // One-off, and only once: every drive recorded before the plausibility rules existed
+            // kept whatever the worst single fix claimed. The points are still on disk, so the
+            // honest figure can be worked out again. Guarded by a revision so a later correction
+            // can run over the same drives without a second flag, and so this does not walk the
+            // whole history on every boot.
+            if (settings.repairRevision < REPAIR_REVISION) {
+                val outcome = runCatching { TripRepair.repairMaxSpeeds(dao) }.getOrNull()
+                if (outcome != null) {
+                    settings.repairRevision = REPAIR_REVISION
+                    Diagnostics.crumb(
+                        "repair: examined ${outcome.examined} drives, corrected ${outcome.corrected}" +
+                            (if (outcome.corrected > 0)
+                                ", worst was %.0f km/h".format(outcome.worstBeforeMps * 3.6f)
+                            else "")
+                    )
+                }
+            }
+
             odoBaseKm = `in`.odograph.tracker.core.Odometer.liveOdoKm(settings, dao.trackedDistanceM() / 1000.0)
             _state.value = LiveState(tripId = tripId, odoKm = odoBaseKm)
             // A charge owed an answer is the first thing a boot should ask again.

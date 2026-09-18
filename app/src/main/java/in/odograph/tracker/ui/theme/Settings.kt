@@ -194,6 +194,16 @@ class Settings(ctx: Context) {
         get() = prefs.getFloat(KEY_ODO_MG_ANCHOR_CAR, 0f).toDouble()
         set(value) = prefs.edit().putFloat(KEY_ODO_MG_ANCHOR_CAR, value.toFloat().coerceIn(0f, 2_000_000f)).apply()
 
+    /**
+     * Which revision of the stored-history repair has already been applied.
+     *
+     * A number rather than a flag, so a later correction can run over drives an earlier one has
+     * already been through without needing a second key. Zero means nothing has been repaired.
+     */
+    var repairRevision: Int
+        get() = prefs.getInt(KEY_REPAIR_REVISION, 0)
+        set(value) = prefs.edit().putInt(KEY_REPAIR_REVISION, value).apply()
+
     /** The app's measured km (closed trips + the open drive) at the moment [odoMgAnchorCarKm] was quoted. */
     var odoMgAnchorMeasuredKm: Double
         get() = prefs.getFloat(KEY_ODO_MG_ANCHOR_MEASURED, 0f).toDouble()
@@ -215,6 +225,7 @@ class Settings(ctx: Context) {
             ?: TimeZone.getDefault()
 
     private companion object {
+        const val KEY_REPAIR_REVISION = "repair_revision"
         const val KEY_TZ = "time_zone_id"
         const val KEY_LIMIT = "speed_limit_kmh"
         const val KEY_ALERT = "alert_mode"
