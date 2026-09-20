@@ -446,6 +446,7 @@ fun ChargingScreen(palette: Palette) {
     var editingPlaceName by remember { mutableStateOf("unknown") }
     var editingPlaceLabel by remember { mutableStateOf<String?>(null) }
     var placeStats by remember { mutableStateOf<List<ChargePlaceStatsRow>>(emptyList()) }
+    var failure by remember { mutableStateOf<Throwable?>(null) }
 
     // The place name/label under edit comes from Room, which is off-limits on the main thread.
     val editingId = editing?.id
@@ -464,15 +465,30 @@ fun ChargingScreen(palette: Palette) {
     val scope = rememberCoroutineScope()
 
     LaunchedEffect(Unit) {
-        withContext(Dispatchers.IO) {
-            val dao = OdographDb.get(ctx).dao()
-            events = dao.allChargeEvents().sortedByDescending { it.startTime }
-            placeStats = dao.chargePlaceStats()
+        // A ledger that cannot be read turns this one screen off, and nothing else. The drive is
+        // still being recorded while the driver is looking at it.
+        when (val load = withContext(Dispatchers.IO) {
+            loaded {
+                val dao = OdographDb.get(ctx).dao()
+                dao.allChargeEvents().sortedByDescending { it.startTime } to dao.chargePlaceStats()
+            }
+        }) {
+            is Loaded.Failed -> failure = load.error
+            is Loaded.Ready -> {
+                events = load.value.first
+                placeStats = load.value.second
+            }
+            Loaded.Loading -> Unit
         }
     }
 
     BoxWithConstraints(Modifier.fillMaxSize().background(palette.ground)) {
     val m = rememberMetrics(maxWidth, maxHeight)
+    val broken = failure
+    if (broken != null) {
+        FeatureUnavailable("CHARGING", broken, palette, m) { failure = null }
+        return@BoxWithConstraints
+    }
 
     // Adding a fill by hand. The poller cannot see most of them — the box is powered by the car,
     // so it is off for the whole of a typical overnight charge — and a driver holding a receipt
@@ -481,6 +497,7 @@ fun ChargingScreen(palette: Palette) {
         scope.launch {
             val now = System.currentTimeMillis()
             val fresh = withContext(Dispatchers.IO) {
+                loaded {
                 val dao = OdographDb.get(ctx).dao()
                 val id = dao.insertChargeEvent(
                     ChargeEventEntity(
@@ -495,9 +512,11 @@ fun ChargingScreen(palette: Palette) {
                     )
                 )
                 dao.chargeEventById(id)
+                }.let { if (it is Loaded.Ready) it.value else null }
             }
             withContext(Dispatchers.IO) {
-                events = OdographDb.get(ctx).dao().allChargeEvents().sortedByDescending { it.startTime }
+                loaded { OdographDb.get(ctx).dao().allChargeEvents().sortedByDescending { it.startTime } }
+                    .let { if (it is Loaded.Ready) events = it.value }
             }
             editing = fresh
         }
@@ -628,16 +647,26 @@ fun ChargingScreen(palette: Palette) {
                     editing = null
                     scope.launch {
                         withContext(Dispatchers.IO) {
+                            loaded {
                             val dao = OdographDb.get(ctx).dao()
                             saveChargeEdit(
                                 dao, e.id, energy, delivered, kind, rate, bill, gst,
                                 settings.homeRateInr, settings.outsideRateInr, newLabel,
                                 startSoc, endSoc
                             )
+                            }
                         }
                         withContext(Dispatchers.IO) {
-                            events = OdographDb.get(ctx).dao().allChargeEvents().sortedByDescending { it.startTime }
-                            placeStats = OdographDb.get(ctx).dao().chargePlaceStats()
+                            loaded {
+                                val dao = OdographDb.get(ctx).dao()
+                                dao.allChargeEvents().sortedByDescending { it.startTime } to
+                                    dao.chargePlaceStats()
+                            }.let {
+                                if (it is Loaded.Ready) {
+                                    events = it.value.first
+                                    placeStats = it.value.second
+                                }
+                            }
                         }
                     }
                 },

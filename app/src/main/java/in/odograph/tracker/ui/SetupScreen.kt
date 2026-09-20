@@ -95,9 +95,17 @@ fun SetupScreen(
     var trackedKm by remember { mutableStateOf(0.0) }
     var carOdoKm by remember { mutableStateOf<Double?>(null) }
     LaunchedEffect(Unit) {
+        // Setup is the screen a driver reaches for when something is already wrong, so it is the
+        // last one that may fail. An unreadable odometer leaves those two figures at their
+        // defaults and every other control on the screen still works.
         withContext(Dispatchers.IO) {
-            trackedKm = dao.trackedDistanceM() / 1000.0
-            carOdoKm = dao.latestCarOdoKm()
+            loaded { dao.trackedDistanceM() / 1000.0 to dao.latestCarOdoKm() }
+                .let {
+                    if (it is Loaded.Ready) {
+                        trackedKm = it.value.first
+                        carOdoKm = it.value.second
+                    }
+                }
         }
     }
     val currentOdoKm = remember(trackedKm) { `in`.odograph.tracker.core.Odometer.liveOdoKm(settings, trackedKm) }
@@ -417,6 +425,7 @@ fun SetupScreen(
                         odoReading.toDoubleOrNull()?.let { reading ->
                             scope.launch {
                                 val msg = withContext(Dispatchers.IO) {
+                                    loaded {
                                     val ok = `in`.odograph.tracker.core.Odometer
                                         .adoptCarOdo(settings, reading, trackedKm)
                                     if (ok) {
@@ -424,6 +433,10 @@ fun SetupScreen(
                                         "Odometer set to %.0f km — trips untouched.".format(reading)
                                     } else {
                                         "Not recorded: that reading is behind the anchored odometer."
+                                    }
+                                    }.let {
+                                        if (it is Loaded.Ready) it.value
+                                        else "Could not write that now — try again."
                                     }
                                 }
                                 note = msg

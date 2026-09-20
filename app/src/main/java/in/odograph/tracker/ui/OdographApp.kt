@@ -121,8 +121,10 @@ fun OdographApp() {
     // as a prompt until the driver APPLYs or IGNOREs it — a dismissal at the car no longer
     // erases the debt silently.
     LaunchedEffect(Unit) {
+        // The shell is the one thing that must never fail: it draws the tab bar, and the tab bar
+        // is how the driver reaches every screen that still works.
         withContext(Dispatchers.IO) {
-            TripRecorderService.raisePendingPriceReminder(OdographDb.get(ctx).dao())
+            loaded { TripRecorderService.raisePendingPriceReminder(OdographDb.get(ctx).dao()) }
         }
     }
 
@@ -213,6 +215,7 @@ fun OdographApp() {
                     onSave = { rate, bill ->
                         scope.launch {
                             withContext(Dispatchers.IO) {
+                                loaded {
                                 val dao = OdographDb.get(ctx).dao()
                                 if (prompt.isOpen) {
                                     dao.setChargeCostLedger(prompt.sessionId, rate, bill, gstRatePct)
@@ -222,6 +225,7 @@ fun OdographApp() {
                                 // Priced, so the durable ask is officially answered: delete the
                                 // reminder row and clear the prompt.
                                 TripRecorderService.acceptChargePrompt(prompt.sessionId, dao)
+                                }
                             }
                         }
                     },
@@ -230,9 +234,11 @@ fun OdographApp() {
                             withContext(Dispatchers.IO) {
                                 // Declined for now: the ask stops resurfacing, but the session's
                                 // default pricing is untouched.
-                                TripRecorderService.ignoreChargePrompt(
-                                    prompt.sessionId, OdographDb.get(ctx).dao()
-                                )
+                                loaded {
+                                    TripRecorderService.ignoreChargePrompt(
+                                        prompt.sessionId, OdographDb.get(ctx).dao()
+                                    )
+                                }
                             }
                         }
                     }

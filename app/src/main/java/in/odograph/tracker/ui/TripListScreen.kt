@@ -103,6 +103,7 @@ fun TripListScreen(showTiles: Boolean, palette: Palette) {
     // lazy — LazyColumn only composes what fits — but the loading was not: every drive ever made
     // came into memory to show the dozen on the glass. Fine for a year of driving and not for a
     // decade, and the cost falls exactly where it is least welcome, on opening the screen.
+    var failure by remember { mutableStateOf<Throwable?>(null) }
     var loadedPages by remember { mutableStateOf(0) }
     var allLoaded by remember { mutableStateOf(false) }
     var loadingPage by remember { mutableStateOf(false) }
@@ -110,12 +111,19 @@ fun TripListScreen(showTiles: Boolean, palette: Palette) {
     suspend fun loadNextPage() {
         if (allLoaded || loadingPage) return
         loadingPage = true
-        val page = withContext(Dispatchers.IO) {
-            OdographDb.get(ctx).dao().tripsPage(TRIP_PAGE_SIZE, loadedPages * TRIP_PAGE_SIZE)
+        // A page that cannot be read stops the list rather than the app. The failure is kept so
+        // the screen can say which part is broken instead of sitting blank and looking empty.
+        when (val page = withContext(Dispatchers.IO) {
+            loaded { OdographDb.get(ctx).dao().tripsPage(TRIP_PAGE_SIZE, loadedPages * TRIP_PAGE_SIZE) }
+        }) {
+            is Loaded.Failed -> { failure = page.error; allLoaded = true }
+            is Loaded.Ready -> {
+                trips = trips + page.value
+                loadedPages += 1
+                if (page.value.size < TRIP_PAGE_SIZE) allLoaded = true
+            }
+            Loaded.Loading -> Unit
         }
-        trips = trips + page
-        loadedPages += 1
-        if (page.size < TRIP_PAGE_SIZE) allLoaded = true
         loadingPage = false
     }
 
@@ -125,13 +133,19 @@ fun TripListScreen(showTiles: Boolean, palette: Palette) {
     }
     LaunchedEffect(selected?.id) {
         val id = selected?.id ?: return@LaunchedEffect
+        // The route and the detail pane fail independently of the list and of each other: a drive
+        // whose points cannot be read should still show its numbers, and one whose numbers cannot
+        // be worked out should still draw its route.
         route = withContext(Dispatchers.IO) {
-            val fixes = OdographDb.get(ctx).dao().pointsFor(id).map {
-                Fix(it.t, it.lat, it.lon, it.speedMps, it.accuracyM, it.interpolated, it.altitudeM)
+            loaded {
+                val fixes = OdographDb.get(ctx).dao().pointsFor(id).map {
+                    Fix(it.t, it.lat, it.lon, it.speedMps, it.accuracyM, it.interpolated, it.altitudeM)
+                }
+                buildSmoothRoute(fixes)
             }
-            buildSmoothRoute(fixes)
-        }
+        }.let { if (it is Loaded.Ready) it.value else emptyList() }
         detail = withContext(Dispatchers.IO) {
+            loaded {
             val dao = OdographDb.get(ctx).dao()
             val t = dao.tripById(id) ?: return@withContext null
             val energyKwh = t.energyKwh
@@ -167,6 +181,7 @@ fun TripListScreen(showTiles: Boolean, palette: Palette) {
                 },
                 capacityKwh = Settings(ctx).batteryCapacityKwh
             )
+            }.let { if (it is Loaded.Ready) it.value else null }
         }
     }
     // A new sort mode resets the collapsible group state so nothing is hidden by surprise.
@@ -194,6 +209,13 @@ fun TripListScreen(showTiles: Boolean, palette: Palette) {
 
     BoxWithConstraints(Modifier.fillMaxSize().background(palette.ground)) {
     val m = rememberMetrics(maxWidth, maxHeight)
+    val broken = failure
+    if (broken != null) {
+        FeatureUnavailable("DRIVES", broken, palette, m) {
+            failure = null; trips = emptyList(); loadedPages = 0; allLoaded = false
+        }
+        return@BoxWithConstraints
+    }
     Row(Modifier.fillMaxSize()) {
         // Opaque pane so nothing from the map (or anything else) ever shows through the list.
         Column(Modifier.weight(0.34f).fillMaxHeight().background(palette.ground)) {

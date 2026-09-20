@@ -17,6 +17,11 @@ import `in`.odograph.tracker.ui.OdographApp
 
 class MainActivity : ComponentActivity() {
 
+    private companion object {
+        /** Up this long without dying: the last crash was incidental, not a loop. */
+        const val HEALTHY_AFTER_MS = 30_000L
+    }
+
     private val requestPermissions =
         registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
             startRecordingIfPermitted()
@@ -61,6 +66,10 @@ class MainActivity : ComponentActivity() {
         setContent { OdographApp() }
         Diagnostics.crumb("MainActivity.onCreate complete")
         Diagnostics.shipTrail()
+        // A run that gets this far, and then stays up, is a recovery rather than a loop. The
+        // streak is cleared on a delay rather than here, because reaching onCreate is exactly what
+        // a crash loop also does — it is surviving the next half-minute that distinguishes them.
+        window.decorView.postDelayed({ Diagnostics.markHealthy(this) }, HEALTHY_AFTER_MS)
     }
 
     /**

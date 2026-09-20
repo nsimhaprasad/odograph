@@ -183,10 +183,13 @@ fun PlacesScreen(palette: Palette) {
                     searching = true
                     searched = false
                     scope.launch {
+                        // A geocoder lookup goes over the hotspot, which on this box is a phone
+                        // in somebody's pocket. A failed search returns no results; it does not
+                        // end the app.
                         val hits = withContext(Dispatchers.IO) {
-                            PlaceNamer.search(query)
+                            loaded { PlaceNamer.search(query) }
                         }
-                        results = hits
+                        results = if (hits is Loaded.Ready) hits.value else emptyList()
                         searching = false
                         searched = true
                     }
@@ -307,7 +310,11 @@ fun PlacesScreen(palette: Palette) {
                                     val dao = OdographDb.get(ctx).dao()
                                     scope.launch {
                                         withContext(Dispatchers.IO) {
-                                            dao.setPlaceLabel(place.id, renameText.trim().ifBlank { null })
+                                            loaded {
+                                                dao.setPlaceLabel(
+                                                    place.id, renameText.trim().ifBlank { null }
+                                                )
+                                            }
                                         }
                                         renamingId = null
                                         reload++
@@ -321,7 +328,11 @@ fun PlacesScreen(palette: Palette) {
                                     val dao = OdographDb.get(ctx).dao()
                                     scope.launch {
                                         withContext(Dispatchers.IO) {
-                                            dao.setPlaceLabel(place.id, renameText.trim().ifBlank { null })
+                                            loaded {
+                                                dao.setPlaceLabel(
+                                                    place.id, renameText.trim().ifBlank { null }
+                                                )
+                                            }
                                         }
                                         renamingId = null
                                         reload++
