@@ -31,6 +31,7 @@ import `in`.odograph.tracker.sync.Outbound
 import `in`.odograph.tracker.sync.SheetsSync
 import `in`.odograph.tracker.ui.theme.Settings
 import `in`.odograph.tracker.core.Arrival
+import `in`.odograph.tracker.core.ChargeReconciler
 import `in`.odograph.tracker.core.Departure
 import `in`.odograph.tracker.core.EfficiencyStats
 import `in`.odograph.tracker.core.RangeCalibration
@@ -586,6 +587,16 @@ class TripRecorderService : Service() {
                 // moving it lands under the open trip, and once it has been parked (unplugged,
                 // no motion for [PARKED_MOVE_GAP_MS]) it carries trip -1 instead — invisible to
                 // every trip-scoped query but never lost, and source of the overnight drain read.
+                // What the app knew about the pack before this frame is written, because in a
+                // moment it will not be able to tell: the frame below goes straight into the
+                // battery table, and anything asking afterwards for "the last reading" would get
+                // this one back and compare it against itself.
+                val socBeforeThisFrame = runCatching {
+                    dao.lastSocBefore(now)?.let { row ->
+                        row.socPercent?.let { ChargeReconciler.Reading(it, row.t) }
+                    }
+                }.getOrNull()
+
                 if (Telematics.hasBatteryReading(ch) && ch != null) {
                     val t = lastFix?.t ?: now
                     val parked = ch.isCharging == false &&
@@ -623,10 +634,22 @@ class TripRecorderService : Service() {
                 // is powered by the vehicle, so it dies at the moment the vehicle is plugged in —
                 // and a fill nobody watched still has to appear in the history. Anything the
                 // sessions cannot account for is booked here from the state of charge itself.
-                val reconciled = runCatching { ledger.reconcileWithSoc(ch?.soc, ch?.isCharging, now) }
-                    .getOrElse { ChargeLedger.Change.None }
-                if (reconciled !is ChargeLedger.Change.None) {
-                    Diagnostics.crumb("charge reconciled from SOC: $reconciled")
+                val reconciled = runCatching {
+                    ledger.reconcileWithSoc(socBeforeThisFrame, ch?.soc, ch?.isCharging, now)
+                }.getOrElse { ChargeLedger.Change.None }
+                // Both halves of the decision, whenever the pack moved. The trigger for this runs
+                // only against the real car — there is no way to produce a telematics frame on a
+                // desk — so the box has to be able to say for itself what it compared and what it
+                // concluded. Silence here on a car that has plainly been charged is the symptom
+                // to look for.
+                val previousSoc = socBeforeThisFrame?.socPercent
+                if (ch?.soc != null && previousSoc != null && previousSoc != ch.soc) {
+                    Diagnostics.crumb(
+                        "charge check: %.0f%% → %.0f%% (charging=%s) → %s".format(
+                            previousSoc, ch.soc, ch.isCharging,
+                            if (reconciled is ChargeLedger.Change.None) "nothing to book" else reconciled
+                        )
+                    )
                 }
                 applyChargeChange(dao, reconciled)
 

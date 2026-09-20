@@ -301,7 +301,7 @@ class ChargeLedgerTest {
         dao.insertBattery(battery(t = 0L, soc = 40.0))
 
         // Morning, first poll after the car was started. Not charging any more; simply full.
-        val change = ledger().reconcileWithSoc(socPercent = 95.0, charging = false, now = 12 * 60 * min)
+        val change = poll(soc = 95.0, charging = false, now = 12 * 60 * min)
 
         assertThat(change).isInstanceOf(ChargeLedger.Change.Closed::class.java)
         val s = sessions().single()
@@ -326,7 +326,7 @@ class ChargeLedgerTest {
         dao.insertBattery(battery(t = 90 * min, soc = 60.0))
 
         // Hours later the car is started and says it is full.
-        ledger().reconcileWithSoc(socPercent = 100.0, charging = false, now = 8 * 60 * min)
+        poll(soc = 100.0, charging = false, now = 8 * 60 * min)
 
         val s = sessions().single()
         assertThat(s.endSoc).`as`("one session, carried to the end").isEqualTo(100.0)
@@ -340,10 +340,9 @@ class ChargeLedgerTest {
         val dao = db.dao()
         dao.insertBattery(battery(t = 0L, soc = 40.0))
 
-        ledger().reconcileWithSoc(95.0, charging = false, now = 6 * 60 * min)
+        poll(soc = 95.0, charging = false, now = 6 * 60 * min)
         val afterFirst = sessions().single()
-        dao.insertBattery(battery(t = 6 * 60 * min, soc = 95.0))
-        ledger().reconcileWithSoc(95.0, charging = false, now = 7 * 60 * min)
+        poll(soc = 95.0, charging = false, now = 7 * 60 * min)
 
         assertThat(sessions()).hasSize(1)
         assertThat(sessions().single().energyKwh).isEqualTo(afterFirst.energyKwh)
@@ -358,7 +357,7 @@ class ChargeLedgerTest {
         dao.insertBattery(battery(t = 0L, soc = 30.0))
         led.observe(true, 55.0, 7.4, 60 * min)
 
-        led.reconcileWithSoc(55.0, charging = true, now = 60 * min)
+        poll(soc = 55.0, charging = true, now = 60 * min, led = led)
 
         assertThat(sessions()).hasSize(1)
     }
@@ -367,7 +366,7 @@ class ChargeLedgerTest {
     fun `a pack that only emptied books nothing`() {
         db.dao().insertBattery(battery(t = 0L, soc = 80.0))
 
-        val change = ledger().reconcileWithSoc(52.0, charging = false, now = 4 * 60 * min)
+        val change = poll(soc = 52.0, charging = false, now = 4 * 60 * min)
 
         assertThat(change).isEqualTo(ChargeLedger.Change.None)
         assertThat(sessions()).isEmpty()
@@ -376,7 +375,7 @@ class ChargeLedgerTest {
     /** With no earlier reading there is no baseline, and no baseline is not a baseline of zero. */
     @Test
     fun `a first reading on a fresh box is not a charge from empty`() {
-        val change = ledger().reconcileWithSoc(72.0, charging = false, now = 60 * min)
+        val change = poll(soc = 72.0, charging = false, now = 60 * min)
 
         assertThat(change).isEqualTo(ChargeLedger.Change.None)
         assertThat(sessions()).isEmpty()
@@ -385,4 +384,30 @@ class ChargeLedgerTest {
     private fun battery(t: Long, soc: Double) = `in`.odograph.tracker.data.BatteryEntity(
         tripId = -1, t = t, socPercent = soc
     )
+
+    /**
+     * One poll, in the order the recorder actually performs it.
+     *
+     * The frame is written to the battery table first and reconciled afterwards, which is what the
+     * poller does and what makes the baseline worth being careful about: a ledger that looked up
+     * "the most recent reading" at reconcile time would find this very frame and compare it with
+     * itself. Every rise would come out as zero and the reconciliation would never once fire —
+     * while still passing any test that assembled the situation by hand instead of replaying it.
+     */
+    private fun poll(
+        soc: Double,
+        charging: Boolean,
+        now: Long,
+        led: ChargeLedger = ledger()
+    ): ChargeLedger.Change {
+        val before = db.dao().lastSocBefore(now)?.let { row ->
+            row.socPercent?.let { `in`.odograph.tracker.core.ChargeReconciler.Reading(it, row.t) }
+        }
+        // Stamped with the GPS fix rather than the poll, because that is what the recorder does —
+        // and the half-second between them is the whole bug. A frame written at exactly `now`
+        // slips past a `t < now` lookup and hides the fault; a frame written a moment earlier,
+        // which is every real frame, is found and compared against itself.
+        db.dao().insertBattery(battery(t = now - 500L, soc = soc))
+        return led.reconcileWithSoc(before, soc, charging, now)
+    }
 }

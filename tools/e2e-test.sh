@@ -105,6 +105,11 @@ PY
 step "Starting clean"
 adb_ logcat -c >/dev/null 2>&1 || true
 adb_ shell am force-stop "$PKG" >/dev/null 2>&1 || true
+# Let the old window actually die before asking for a new one. Force-stopping and relaunching in
+# the same breath races the renderer tearing the surface down against it building another, and on
+# the emulator that race is winnable: the app wedges inside HardwareRenderer.nSetStopped with not
+# one app frame in the trace, and the run reports a UI failure that belongs to the harness.
+sleep 3
 adb_ shell am start -n "$ACTIVITY" >/dev/null 2>&1 || fail "could not start $ACTIVITY"
 
 # Wait for the first frame rather than guessing at it. A fixed sleep is fine on a warm emulator

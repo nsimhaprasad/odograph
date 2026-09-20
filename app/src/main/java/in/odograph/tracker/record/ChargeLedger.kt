@@ -135,14 +135,29 @@ class ChargeLedger(
      * drive in between, is not a puzzle — it is forty percent of a pack that went in unwatched,
      * and it is booked. See [ChargeReconciler] for what may and may not be concluded from that.
      */
-    fun reconcileWithSoc(socPercent: Double?, charging: Boolean?, now: Long): Change {
+    fun reconcileWithSoc(
+        /**
+         * What the app knew about the pack *before* this frame, captured by the caller before the
+         * frame was written.
+         *
+         * A parameter rather than a lookup, and the distinction is the whole feature. The poller
+         * writes each frame to the battery table the instant it arrives, several steps before it
+         * gets here, so a ledger that went looking for "the most recent reading" would find the
+         * very frame it is being asked about — baseline and latest identical, every rise exactly
+         * zero, and a reconciliation that can never once fire. It passed every test that built the
+         * situation by hand and would have done nothing whatsoever on the car.
+         */
+        previous: ChargeReconciler.Reading?,
+        socPercent: Double?,
+        charging: Boolean?,
+        now: Long
+    ): Change {
         if (socPercent == null) return Change.None
         // A live session is the business of observe(): frames are arriving and it is already
         // advancing on them, so stepping in here would book the same energy twice.
         if (charging == true) return Change.None
+        if (previous == null) return Change.None
 
-        val previous = dao.lastSocBefore(now) ?: return Change.None
-        val previousSoc = previous.socPercent ?: return Change.None
         val latest = dao.latestChargeEvent()
         val session = latest?.let {
             ChargeReconciler.Session(
@@ -156,7 +171,7 @@ class ChargeLedger(
 
         return when (
             val action = ChargeReconciler.reconcile(
-                lastKnown = ChargeReconciler.Reading(previousSoc, previous.t),
+                lastKnown = previous,
                 latest = ChargeReconciler.Reading(socPercent, now),
                 lastSession = session,
                 drivenSinceM = driven
