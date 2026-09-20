@@ -30,6 +30,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import `in`.odograph.tracker.core.Fix
+import `in`.odograph.tracker.core.RangeCalibration
+import `in`.odograph.tracker.core.EfficiencyStats
 import `in`.odograph.tracker.core.BatteryMath
 import `in`.odograph.tracker.data.OdographDb
 import `in`.odograph.tracker.data.TRIP_PAGE_SIZE
@@ -64,7 +66,10 @@ private data class TripDetail(
     val points: Int,
     val kwhPer100: Double?,
     val rangeAtFullKm: Double?,
-    val impliedRateInr: Double?
+    val impliedRateInr: Double?,
+    /** How the range estimate did on this drive, or null when there was nothing to score. */
+    val verdict: RangeCalibration.Verdict? = null,
+    val capacityKwh: Double = BatteryMath.DEFAULT_CAPACITY_KWH
 )
 
 private sealed interface TripRowItem {
@@ -143,7 +148,24 @@ fun TripListScreen(showTiles: Boolean, palette: Palette) {
                 },
                 impliedRateInr = if (energyKwh != null && energyKwh > 0 && t.costInr != null) {
                     BatteryMath.round2(t.costInr!! / energyKwh)
-                } else null
+                } else null,
+                // Scored against the drives that came before this one and nothing else, so the
+                // figure is what the app would have told the driver that morning rather than one
+                // worked out afterwards with the answer already in hand.
+                verdict = energyKwh?.let {
+                    RangeCalibration.verdict(
+                        drive = EfficiencyStats.Sample(
+                            t.startedAt, t.distanceM, t.movingS, it, t.avgTempC
+                        ),
+                        before = dao.efficiencySamplesBefore(t.startedAt).map { row ->
+                            EfficiencyStats.Sample(
+                                row.startedAt, row.distanceM, row.movingS, row.energyKwh, row.avgTempC
+                            )
+                        },
+                        zone = Settings(ctx).zone
+                    )
+                },
+                capacityKwh = Settings(ctx).batteryCapacityKwh
             )
         }
     }
@@ -412,6 +434,50 @@ private fun TripDetailPane(
             modifier = Modifier.padding(top = m.gap / 3)
         )
 
+        // Above the route, because it is the question the driver actually arrives with. Everything
+        // below is what happened; this is whether we saw it coming.
+        detail.verdict?.let { v ->
+            val capacity = detail.capacityKwh
+            val predictedKm = v.predictedRangeAtFullKm(capacity)
+            val actualKm = v.actualRangeAtFullKm(capacity)
+            val off = kotlin.math.abs(v.errorPercent)
+            val close = off < RangeCalibration.CLOSE_ENOUGH_PERCENT
+
+            SectionLabel("PREDICTION", palette, m)
+            DetailRow(
+                "We expected",
+                "%.1f kWh/100km  ·  %.0f km at 100%%".format(v.predictedKwhPer100Km, predictedKm),
+                palette, m
+            )
+            DetailRow(
+                "It actually cost",
+                "%.1f kWh/100km  ·  %.0f km at 100%%".format(v.actualKwhPer100Km, actualKm),
+                palette, m
+            )
+            DetailRow(
+                "Verdict",
+                when {
+                    close -> "within %.0f%% — the estimate held".format(off)
+                    // Signed on purpose. "Out by 12%" leaves the driver to work out which way,
+                    // and only one of the two directions strands anybody.
+                    v.errorPercent > 0 -> "%.0f%% optimistic — %.0f km short of the promise"
+                        .format(off, predictedKm - actualKm)
+                    else -> "%.0f%% cautious — %.0f km further than promised"
+                        .format(off, actualKm - predictedKm)
+                },
+                palette, m,
+                valueColor = if (close) palette.good else palette.warn
+            )
+            DetailRow(
+                "Based on",
+                "%d earlier drives%s".format(
+                    v.basedOnDrives,
+                    if (v.corrected) ", bias-corrected" else ", uncorrected"
+                ),
+                palette, m
+            )
+        }
+
         SectionLabel("ROUTE", palette, m)
         DetailRow("Start", detail.startPlace ?: coords(t.startLat, t.startLon), palette, m)
         DetailRow("End", detail.endPlace ?: coords(t.endLat, t.endLon), palette, m)
@@ -463,13 +529,24 @@ private fun SectionLabel(title: String, palette: Palette, m: Metrics) {
 }
 
 @Composable
-private fun DetailRow(label: String, value: String, palette: Palette, m: Metrics) {
+private fun DetailRow(
+    label: String,
+    value: String,
+    palette: Palette,
+    m: Metrics,
+    valueColor: androidx.compose.ui.graphics.Color? = null
+) {
     Row(
         Modifier.fillMaxWidth().padding(vertical = m.gap / 4),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = androidx.compose.ui.Alignment.CenterVertically
     ) {
         Text(label, color = palette.dim, fontSize = m.body)
-        Text(value, color = palette.numeral, fontSize = m.body, fontWeight = FontWeight.Medium)
+        Text(
+            value,
+            color = valueColor ?: palette.numeral,
+            fontSize = m.body,
+            fontWeight = FontWeight.Medium
+        )
     }
 }

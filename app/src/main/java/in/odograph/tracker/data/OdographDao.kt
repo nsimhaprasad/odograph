@@ -471,6 +471,25 @@ interface OdographDao {
     fun efficiencySamples(limit: Int = EFFICIENCY_SAMPLE_LIMIT): List<EfficiencySampleRow>
 
     /**
+     * The same rows, but only for drives that started before a given moment. Newest first.
+     *
+     * What a single drive has to be scored against. Asking "how did the estimate do on this
+     * drive" with the drive itself in the sample is not a question — a model containing the
+     * answer predicts it perfectly however wrong it is about everything else, which is the same
+     * circularity the backtest exists to avoid, applied to one row instead of the history.
+     */
+    @Query(
+        """SELECT startedAt, distanceM, movingS, energyKwh, avgTempC FROM trips
+           WHERE endedAt IS NOT NULL AND energyKwh IS NOT NULL AND distanceM > 0
+             AND startedAt < :before
+           ORDER BY startedAt DESC LIMIT :limit"""
+    )
+    fun efficiencySamplesBefore(
+        before: Long,
+        limit: Int = EFFICIENCY_SAMPLE_LIMIT
+    ): List<EfficiencySampleRow>
+
+    /**
      * Recent battery frames taken near a full charge, for measuring what the pack holds.
      *
      * Near full because the capacity sum divides by the state of charge, so its error grows as

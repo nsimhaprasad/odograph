@@ -141,4 +141,112 @@ class RangeCalibrationTest {
         val tiny = (0..20).map { drive(it, 0.5, 16.0) }
         assertThat(RangeCalibration.backtest(tiny, ist)).isEmpty()
     }
+
+    // ------------------------------------------------- how did it do on this one drive
+
+    /**
+     * The question a driver arrives with. The aggregate answers "is the estimate biased", which is
+     * what the correction needs and not what anybody wants to know after a journey — a bias of
+     * zero is perfectly compatible with every individual drive being wildly out.
+     */
+    @Test
+    fun `a drive that cost more than predicted reads as an optimistic estimate`() {
+        val before = drives(count = 12, kwhPer100 = 15.0, from = 1_000_000L)
+        val drive = driveCosting(kwhPer100 = 18.0, at = 9_000_000L)
+
+        val v = RangeCalibration.verdict(drive, before, utc)!!
+
+        assertThat(v.errorPercent).`as`("18 against 15 is a fifth over").isCloseTo(20.0, within(1.0))
+        assertThat(v.actualKwhPer100Km).isGreaterThan(v.predictedKwhPer100Km)
+    }
+
+    @Test
+    fun `a drive that cost less than predicted reads as a cautious estimate`() {
+        val before = drives(count = 12, kwhPer100 = 18.0, from = 1_000_000L)
+        val drive = driveCosting(kwhPer100 = 15.0, at = 9_000_000L)
+
+        val v = RangeCalibration.verdict(drive, before, utc)!!
+
+        assertThat(v.errorPercent).isLessThan(0.0)
+    }
+
+    /**
+     * The trap the whole file exists to avoid, applied to one row instead of the history. A model
+     * that contains the drive it is predicting predicts it perfectly, however wrong it is about
+     * everything else, so the verdict would report a flawless estimate for a broken one.
+     */
+    @Test
+    fun `the drive being scored is never part of its own prediction`() {
+        val before = drives(count = 12, kwhPer100 = 15.0, from = 1_000_000L)
+        val drive = driveCosting(kwhPer100 = 30.0, at = 9_000_000L)
+
+        // Handed the drive itself among the history, exactly as a careless caller would.
+        val v = RangeCalibration.verdict(drive, listOf(drive) + before, utc)!!
+
+        assertThat(v.errorPercent)
+            .`as`("a drive twice the usual cost cannot come back as a perfect prediction")
+            .isGreaterThan(50.0)
+    }
+
+    /**
+     * Below the threshold the app quotes the car's own range rather than its own, and marking the
+     * car's guess right or wrong would be scoring somebody else's work.
+     */
+    @Test
+    fun `a drive made before the app had an estimate of its own is not scored`() {
+        val tooFew = drives(count = 2, kwhPer100 = 15.0, from = 1_000_000L)
+
+        assertThat(RangeCalibration.verdict(driveCosting(16.0, 9_000_000L), tooFew, utc)).isNull()
+        assertThat(RangeCalibration.verdict(driveCosting(16.0, 9_000_000L), emptyList(), utc)).isNull()
+    }
+
+    /** A drive too short to measure consumption on has no verdict to give, only a wrong one. */
+    @Test
+    fun `a drive too short to measure is not scored`() {
+        val before = drives(count = 12, kwhPer100 = 15.0, from = 1_000_000L)
+        val hop = EfficiencyStats.Sample(
+            startedAt = 9_000_000L,
+            distanceM = BatteryMath.MIN_EFFICIENCY_DISTANCE_M - 1.0,
+            movingS = 60L, energyKwh = 0.3, tempC = 28.0
+        )
+
+        assertThat(RangeCalibration.verdict(hop, before, utc)).isNull()
+    }
+
+    /** The range figures are the same fact in the units a driver thinks in. */
+    @Test
+    fun `the verdict states itself in kilometres as well as consumption`() {
+        val before = drives(count = 12, kwhPer100 = 15.0, from = 1_000_000L)
+        val v = RangeCalibration.verdict(driveCosting(18.0, 9_000_000L), before, utc)!!
+
+        assertThat(v.predictedRangeAtFullKm(52.9))
+            .`as`("a worse drive must not promise more range")
+            .isGreaterThan(v.actualRangeAtFullKm(52.9))
+    }
+
+    @Test
+    fun `a drive that landed on the estimate counts as close enough`() {
+        val before = drives(count = 12, kwhPer100 = 15.0, from = 1_000_000L)
+        val v = RangeCalibration.verdict(driveCosting(15.3, 9_000_000L), before, utc)!!
+
+        assertThat(kotlin.math.abs(v.errorPercent))
+            .isLessThan(RangeCalibration.CLOSE_ENOUGH_PERCENT)
+    }
+
+    private val utc: java.util.TimeZone get() = java.util.TimeZone.getTimeZone("UTC")
+
+    /** A run of identical drives, newest first, as the caller supplies them. */
+    private fun drives(count: Int, kwhPer100: Double, from: Long) =
+        (0 until count).map { driveCosting(kwhPer100, from + it * 3_600_000L) }.reversed()
+
+    private fun driveCosting(kwhPer100: Double, at: Long): EfficiencyStats.Sample {
+        val distanceM = 20_000.0
+        return EfficiencyStats.Sample(
+            startedAt = at,
+            distanceM = distanceM,
+            movingS = 1_800L,
+            energyKwh = kwhPer100 * distanceM / 1000.0 / 100.0,
+            tempC = 28.0
+        )
+    }
 }

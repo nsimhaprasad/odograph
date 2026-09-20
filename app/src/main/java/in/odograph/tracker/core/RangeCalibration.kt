@@ -121,6 +121,84 @@ object RangeCalibration {
     fun calibrate(kwhPer100Km: Double, accuracy: Accuracy?): Double =
         if (accuracy == null) kwhPer100Km else kwhPer100Km * accuracy.correction
 
+    /**
+     * What the estimate said before one drive, against what that drive turned out to cost.
+     *
+     * The aggregate figure in Insights answers "is the estimate biased", which is the question the
+     * correction needs. It is not the question a driver asks when they arrive, which is simply:
+     * how did it do this time. One number over twenty drives cannot answer that, and a bias of
+     * zero is perfectly compatible with every individual drive being wildly out.
+     */
+    data class Verdict(
+        val predictedKwhPer100Km: Double,
+        val actualKwhPer100Km: Double,
+        /** How many finished drives the prediction was built from. */
+        val basedOnDrives: Int,
+        /** Whether the bias correction was in force, so the figure is what was actually shown. */
+        val corrected: Boolean
+    ) {
+        /**
+         * Signed. Positive means the drive cost more than predicted, so the range shown before it
+         * was optimistic and the car would not have got as far as it claimed.
+         */
+        val errorPercent: Double
+            get() = if (predictedKwhPer100Km > 0.0) {
+                (actualKwhPer100Km / predictedKwhPer100Km - 1.0) * 100.0
+            } else 0.0
+
+        fun predictedRangeAtFullKm(capacityKwh: Double): Double =
+            BatteryMath.rangeAtFullKwh(capacityKwh, predictedKwhPer100Km)
+
+        fun actualRangeAtFullKm(capacityKwh: Double): Double =
+            BatteryMath.rangeAtFullKwh(capacityKwh, actualKwhPer100Km)
+    }
+
+    /**
+     * How far out a drive has to land before the estimate was meaningfully wrong about it, percent.
+     *
+     * Ten. Below that the difference is a passenger, a diversion, or an afternoon behind a lorry,
+     * and calling it a miss would teach the driver to distrust a number that was doing its job.
+     */
+    const val CLOSE_ENOUGH_PERCENT = 10.0
+
+    /**
+     * Scores one finished drive against the estimate as it stood before that drive.
+     *
+     * [before] is every finished drive that started earlier, newest first — the same order and the
+     * same rolling mean the drive screen itself uses, corrected by the same measured bias, so this
+     * reproduces the number the driver was actually shown rather than a tidier one invented
+     * afterwards.
+     *
+     * Returns null when there was no estimate to score. Below
+     * [BatteryMath.MIN_TRIPS_FOR_REAL_ESTIMATE] finished drives the app quotes the car's own
+     * figure rather than its own, and marking the car's guess right or wrong would be scoring
+     * somebody else's work.
+     */
+    fun verdict(
+        drive: EfficiencyStats.Sample,
+        before: List<EfficiencyStats.Sample>,
+        zone: TimeZone
+    ): Verdict? {
+        val actual = BatteryMath.kwhPer100Km(drive.energyKwh, drive.distanceM) ?: return null
+        if (drive.distanceM < BatteryMath.MIN_EFFICIENCY_DISTANCE_M) return null
+
+        val earlier = before.filter { it.startedAt < drive.startedAt }
+        val effs = earlier.mapNotNull { BatteryMath.kwhPer100Km(it.energyKwh, it.distanceM) }
+        if (effs.size < BatteryMath.MIN_TRIPS_FOR_REAL_ESTIMATE) return null
+
+        val raw = BatteryMath.rollingKwhPer100Km(effs) ?: return null
+        val accuracy = accuracy(backtest(earlier, zone))
+        val predicted = calibrate(raw, accuracy)
+        if (!predicted.isFinite() || predicted <= 0.0) return null
+
+        return Verdict(
+            predictedKwhPer100Km = predicted,
+            actualKwhPer100Km = actual,
+            basedOnDrives = effs.size,
+            corrected = accuracy != null
+        )
+    }
+
     private fun median(values: List<Double>): Double {
         val sorted = values.sorted()
         val mid = sorted.size / 2
