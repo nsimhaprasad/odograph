@@ -10,7 +10,7 @@ import java.io.File
 
 @Database(
     entities = [TripEntity::class, PointEntity::class, PlaceEntity::class, BatteryEntity::class, ChargeEventEntity::class, DailyTelemetryEntity::class, PriceReminderEntity::class],
-    version = 9,
+    version = 10,
     exportSchema = true
 )
 abstract class OdographDb : RoomDatabase() {
@@ -148,6 +148,20 @@ abstract class OdographDb : RoomDatabase() {
          * and inventing one would put fabricated conditions into the very history the efficiency
          * figures are learned from.
          */
+        /**
+         * Marks which charge sessions were watched and which were worked out afterwards.
+         *
+         * Everything already in the table was built from live frames, so false is the correct
+         * backfill rather than a convenient default.
+         */
+        val MIGRATION_9_10 = object : Migration(9, 10) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "ALTER TABLE `charge_events` ADD COLUMN `reconstructed` INTEGER NOT NULL DEFAULT 0"
+                )
+            }
+        }
+
         val MIGRATION_8_9 = object : Migration(8, 9) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("ALTER TABLE `battery` ADD COLUMN `exteriorTempC` INTEGER")
@@ -197,7 +211,7 @@ abstract class OdographDb : RoomDatabase() {
                 // The car cuts power without warning. Write-ahead logging means a torn write
                 // costs one in-flight row, never the database.
                 .setJournalMode(JournalMode.WRITE_AHEAD_LOGGING)
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10)
                 .build()
                 .also { instance = it }
         }

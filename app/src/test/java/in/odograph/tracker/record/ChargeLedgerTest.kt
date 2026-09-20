@@ -285,4 +285,104 @@ class ChargeLedgerTest {
     }
 
     private fun within(tolerance: Double) = org.assertj.core.data.Offset.offset(tolerance)
+
+    // ------------------------------------------- charges that happened with nobody watching
+
+    /**
+     * The whole reason this exists. The box is powered by the car, so it switches off at the exact
+     * moment the car gets plugged in: a fill that runs to 100% overnight produces no frames, no
+     * session, and no record that the energy ever arrived. The pack is simply fuller in the
+     * morning and the history cannot say why.
+     */
+    @Test
+    fun `a charge that happened while the box was off is worked out from the level`() {
+        val dao = db.dao()
+        // Last thing the app saw: parked at 40% in the evening.
+        dao.insertBattery(battery(t = 0L, soc = 40.0))
+
+        // Morning, first poll after the car was started. Not charging any more; simply full.
+        val change = ledger().reconcileWithSoc(socPercent = 95.0, charging = false, now = 12 * 60 * min)
+
+        assertThat(change).isInstanceOf(ChargeLedger.Change.Closed::class.java)
+        val s = sessions().single()
+        assertThat(s.startSoc).isEqualTo(40.0)
+        assertThat(s.endSoc).isEqualTo(95.0)
+        assertThat(s.energyKwh).`as`("55% of the pack").isGreaterThan(20.0)
+        assertThat(s.reconstructed).isTrue()
+        assertThat(s.costInr).`as`("priced at the home rate").isNotNull()
+    }
+
+    /**
+     * The driver's own report: the session was recorded, the box went off, and the charge carried
+     * on to 100%. One session that reaches 100%, not a stub at 60% plus a mystery.
+     */
+    @Test
+    fun `a session the box stopped watching is carried to where the charge actually ended`() {
+        val dao = db.dao()
+        val led = ledger()
+        led.observe(true, 25.0, 7.4, 0L)
+        led.observe(true, 60.0, 7.4, 60 * min)
+        led.observe(false, 60.0, 7.4, 90 * min)   // the plug appeared to come out; the box died
+        dao.insertBattery(battery(t = 90 * min, soc = 60.0))
+
+        // Hours later the car is started and says it is full.
+        ledger().reconcileWithSoc(socPercent = 100.0, charging = false, now = 8 * 60 * min)
+
+        val s = sessions().single()
+        assertThat(s.endSoc).`as`("one session, carried to the end").isEqualTo(100.0)
+        assertThat(s.startSoc).isEqualTo(25.0)
+        assertThat(s.reconstructed).isTrue()
+    }
+
+    /** Energy is not booked twice: a reconciled session is repriced, not duplicated. */
+    @Test
+    fun `reconciling twice does not book the same energy again`() {
+        val dao = db.dao()
+        dao.insertBattery(battery(t = 0L, soc = 40.0))
+
+        ledger().reconcileWithSoc(95.0, charging = false, now = 6 * 60 * min)
+        val afterFirst = sessions().single()
+        dao.insertBattery(battery(t = 6 * 60 * min, soc = 95.0))
+        ledger().reconcileWithSoc(95.0, charging = false, now = 7 * 60 * min)
+
+        assertThat(sessions()).hasSize(1)
+        assertThat(sessions().single().energyKwh).isEqualTo(afterFirst.energyKwh)
+    }
+
+    /** A live session belongs to observe(); reconciling alongside it must not double-book. */
+    @Test
+    fun `a charge in progress is left alone`() {
+        val dao = db.dao()
+        val led = ledger()
+        led.observe(true, 30.0, 7.4, 0L)
+        dao.insertBattery(battery(t = 0L, soc = 30.0))
+        led.observe(true, 55.0, 7.4, 60 * min)
+
+        led.reconcileWithSoc(55.0, charging = true, now = 60 * min)
+
+        assertThat(sessions()).hasSize(1)
+    }
+
+    @Test
+    fun `a pack that only emptied books nothing`() {
+        db.dao().insertBattery(battery(t = 0L, soc = 80.0))
+
+        val change = ledger().reconcileWithSoc(52.0, charging = false, now = 4 * 60 * min)
+
+        assertThat(change).isEqualTo(ChargeLedger.Change.None)
+        assertThat(sessions()).isEmpty()
+    }
+
+    /** With no earlier reading there is no baseline, and no baseline is not a baseline of zero. */
+    @Test
+    fun `a first reading on a fresh box is not a charge from empty`() {
+        val change = ledger().reconcileWithSoc(72.0, charging = false, now = 60 * min)
+
+        assertThat(change).isEqualTo(ChargeLedger.Change.None)
+        assertThat(sessions()).isEmpty()
+    }
+
+    private fun battery(t: Long, soc: Double) = `in`.odograph.tracker.data.BatteryEntity(
+        tripId = -1, t = t, socPercent = soc
+    )
 }

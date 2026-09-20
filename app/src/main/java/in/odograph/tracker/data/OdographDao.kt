@@ -214,6 +214,17 @@ interface OdographDao {
     )
 
     /**
+     * Corrects the charge levels a session ran between.
+     *
+     * The driver thinks in percent — "it went from 25 to 60" — and for an unwatched fill those two
+     * numbers are the only facts there are. Everything else about such a session is derived from
+     * them, so they have to be editable rather than frozen at whatever the last frame happened to
+     * catch.
+     */
+    @Query("UPDATE charge_events SET startSoc = :startSoc, endSoc = :endSoc WHERE id = :id")
+    fun setChargeSoc(id: Long, startSoc: Double?, endSoc: Double?)
+
+    /**
      * The most recent completed charge sessions that began before [ms] — the fills this drive
      * burned through. Priced-only, newest first, so a road trip where some refills were home and
      * some were fast gets both voices heard.
@@ -223,6 +234,47 @@ interface OdographDao {
 
     @Query("SELECT * FROM charge_events ORDER BY startTime ASC")
     fun allChargeEvents(): List<ChargeEventEntity>
+
+    // ---- keeping the ledger honest against the state of charge ----
+
+    /**
+     * The newest state-of-charge reading on record, from any source.
+     *
+     * Drive frames and parked frames alike: what matters is the last thing the car said about its
+     * pack, not which row it happens to live under. This is the baseline a later reading is
+     * compared against to find energy that arrived with nobody watching.
+     */
+    @Query(
+        "SELECT * FROM battery WHERE socPercent IS NOT NULL AND t < :before ORDER BY t DESC LIMIT 1"
+    )
+    fun lastSocBefore(before: Long): BatteryEntity?
+
+    @Query("SELECT * FROM charge_events WHERE id = :id")
+    fun chargeEventById(id: Long): ChargeEventEntity?
+
+    /** The most recent session in the ledger, open or closed. */
+    @Query("SELECT * FROM charge_events ORDER BY startTime DESC LIMIT 1")
+    fun latestChargeEvent(): ChargeEventEntity?
+
+    /**
+     * How far the car travelled between two moments.
+     *
+     * A window containing a drive cannot have its endpoints read as a pure charge: the pack was
+     * being emptied at the same time, so whatever rise survives is a floor on what went in rather
+     * than the whole of it.
+     */
+    @Query(
+        """SELECT COALESCE(SUM(distanceM), 0) FROM trips
+           WHERE startedAt >= :from AND startedAt <= :to"""
+    )
+    fun distanceBetween(from: Long, to: Long): Double
+
+    /** Writes a session the app worked out afterwards rather than watched happening. */
+    @Query(
+        """UPDATE charge_events SET endTime = :endTime, endSoc = :endSoc,
+           energyKwh = :energyKwh, reconstructed = 1 WHERE id = :id"""
+    )
+    fun extendReconstructed(id: Long, endTime: Long, endSoc: Double, energyKwh: Double)
 
     @Query("SELECT * FROM charge_events WHERE startTime >= :fromMs AND startTime < :toMs ORDER BY startTime DESC")
     fun chargeEventsBetween(fromMs: Long, toMs: Long): List<ChargeEventEntity>

@@ -151,7 +151,9 @@ fun saveChargeEdit(
     gstRatePct: Double,
     homeRate: Double,
     outsideRate: Double,
-    placeLabel: String?
+    placeLabel: String?,
+    startSoc: Double? = null,
+    endSoc: Double? = null
 ) {
     val cost = BatteryMath.round2(
         billInr
@@ -165,6 +167,9 @@ fun saveChargeEdit(
         sessionId, energyKwh, deliveredKwh, kind,
         rateInr, billInr, gstRatePct, cost
     )
+    // Written whenever the driver supplied them, so a corrected session states the levels it ran
+    // between rather than keeping whatever the last frame happened to catch before the box died.
+    if (startSoc != null || endSoc != null) dao.setChargeSoc(sessionId, startSoc, endSoc)
     // Renaming the charge spot is a quick convenience so the locations table stays meaningful
     // without a round-trip through the Places screen.
     val ev = dao.chargeEvent(sessionId)
@@ -184,9 +189,13 @@ fun ChargeEditDialog(
     e: ChargeEventEntity,
     placeLabel: String?,
     gstRatePct: Double,
+    capacityKwh: Double,
     palette: Palette,
     m: Metrics,
-    onSave: (energyKwh: Double, deliveredKwh: Double?, rateInr: Double?, billInr: Double?, kind: Int, placeLabel: String?) -> Unit,
+    onSave: (
+        energyKwh: Double, deliveredKwh: Double?, rateInr: Double?, billInr: Double?,
+        kind: Int, placeLabel: String?, startSoc: Double?, endSoc: Double?
+    ) -> Unit,
     onDismiss: () -> Unit
 ) {
     // Keyed by the session id so each tap starts from a clean slate; edits are abandoned cleanly.
@@ -196,6 +205,22 @@ fun ChargeEditDialog(
     var deliveredText by remember(e.id) { mutableStateOf(e.deliveredKwh?.let { "%.2f".format(it) } ?: "") }
     var placeText by remember(e.id) { mutableStateOf(placeLabel ?: "") }
     var kindState by remember(e.id) { mutableStateOf(e.kind ?: ChargeKind.SLOW.ordinal) }
+    var startSocText by remember(e.id) { mutableStateOf(e.startSoc?.let { "%.0f".format(it) } ?: "") }
+    var endSocText by remember(e.id) { mutableStateOf(e.endSoc?.let { "%.0f".format(it) } ?: "") }
+
+    // The percentages are the primary fact and the kilowatt-hours follow from them, because for a
+    // fill nobody watched the two ends are the only things anybody actually knows. Typing a level
+    // rewrites the energy; typing the energy directly is still allowed, for the driver who has a
+    // wall meter and would rather work from it.
+    fun energyFromSoc() {
+        val from = startSocText.toDoubleOrNull()
+        val to = endSocText.toDoubleOrNull()
+        if (from != null && to != null) {
+            energyText = "%.2f".format(
+                BatteryMath.rechargeEnergyKwh(from, to, capacityKwh)
+            )
+        }
+    }
 
     val loss = BatteryMath.lossPct(e.energyKwh, e.deliveredKwh)
 
@@ -237,6 +262,34 @@ fun ChargeEditDialog(
                     fontSize = m.label, fontWeight = if (!fast) FontWeight.Bold else FontWeight.Normal
                 )
             }
+        }
+
+        Text("CHARGE LEVELS", color = palette.label, fontSize = m.label, letterSpacing = 1.2.sp)
+        Row(horizontalArrangement = Arrangement.spacedBy(m.gap / 2)) {
+            OutlinedTextField(
+                value = startSocText,
+                onValueChange = {
+                    startSocText = it.filter { c -> c.isDigit() || c == '.' }
+                    energyFromSoc()
+                },
+                label = { Text("From %") },
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                colors = textFieldColors(palette),
+                modifier = Modifier.weight(1f)
+            )
+            OutlinedTextField(
+                value = endSocText,
+                onValueChange = {
+                    endSocText = it.filter { c -> c.isDigit() || c == '.' }
+                    energyFromSoc()
+                },
+                label = { Text("To %") },
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                colors = textFieldColors(palette),
+                modifier = Modifier.weight(1f)
+            )
         }
 
         OutlinedTextField(
@@ -304,7 +357,10 @@ fun ChargeEditDialog(
                 val delivered = deliveredText.toDoubleOrNull()
                 val bill = if (billText.isNotBlank()) billText.toDoubleOrNull() else null
                 val rate = if (bill == null && rateText.isNotBlank()) rateText.toDoubleOrNull() else null
-                onSave(energy, delivered, rate, bill, kindState, placeText)
+                onSave(
+                    energy, delivered, rate, bill, kindState, placeText,
+                    startSocText.toDoubleOrNull(), endSocText.toDoubleOrNull()
+                )
             }
             Chip("DISMISS", false, palette, m, onClick = onDismiss)
         }
@@ -418,15 +474,53 @@ fun ChargingScreen(palette: Palette) {
     BoxWithConstraints(Modifier.fillMaxSize().background(palette.ground)) {
     val m = rememberMetrics(maxWidth, maxHeight)
 
+    // Adding a fill by hand. The poller cannot see most of them — the box is powered by the car,
+    // so it is off for the whole of a typical overnight charge — and a driver holding a receipt
+    // for a charge the app never witnessed had no way at all to enter it.
+    val addSession: () -> Unit = {
+        scope.launch {
+            val now = System.currentTimeMillis()
+            val fresh = withContext(Dispatchers.IO) {
+                val dao = OdographDb.get(ctx).dao()
+                val id = dao.insertChargeEvent(
+                    ChargeEventEntity(
+                        startTime = now,
+                        endTime = now,
+                        startSoc = null,
+                        endSoc = null,
+                        energyKwh = 0.0,
+                        kind = ChargeKind.SLOW.ordinal,
+                        costInr = 0.0,
+                        reconstructed = true
+                    )
+                )
+                dao.chargeEventById(id)
+            }
+            withContext(Dispatchers.IO) {
+                events = OdographDb.get(ctx).dao().allChargeEvents().sortedByDescending { it.startTime }
+            }
+            editing = fresh
+        }
+    }
+
     if (events.isEmpty()) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            Text(
-                text = "No charge sessions yet.\nPlug in and the poller will record every fill.",
-                color = palette.dim,
-                fontSize = m.body,
-                textAlign = androidx.compose.ui.text.style.TextAlign.Center
-            )
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Text(
+                    text = "No charge sessions yet.\n" +
+                        "Most fills happen with the box switched off, so they are worked out from " +
+                        "the charge level afterwards — or you can enter one here.",
+                    color = palette.dim,
+                    fontSize = m.body,
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                )
+                Row(Modifier.padding(top = m.gap)) {
+                    Chip("ADD A CHARGE", true, palette, m, onClick = addSession)
+                }
+            }
         }
+        // The dialog still needs somewhere to render: adding the first session leaves the list
+        // non-empty, so this branch is gone by the time it opens.
         return@BoxWithConstraints
     }
 
@@ -439,6 +533,9 @@ fun ChargingScreen(palette: Palette) {
             letterSpacing = 2.sp,
             fontWeight = FontWeight.Medium
         )
+        Row(Modifier.padding(top = m.gap / 3)) {
+            Chip("ADD A CHARGE", false, palette, m, onClick = addSession)
+        }
         // Fast/slow share as a bar, then the headline split numbers below it.
         Box(
             Modifier.fillMaxWidth().height(6.dp).background(palette.track).padding(0.dp)
@@ -503,7 +600,10 @@ fun ChargingScreen(palette: Palette) {
 
         LazyColumn(Modifier.fillMaxWidth().padding(top = m.gap)) {
             items(events, key = { it.id }) { e ->
-                ChargeRow(e, fmt, palette, m) { if (e.kind != null) editing = e }
+                // Every session, not only the closed ones. A row is left open precisely when the
+                // box died mid-charge and never saw the plug come out — which is the session most
+                // in need of correcting, and the one the driver could not touch.
+                ChargeRow(e, fmt, palette, m) { editing = e }
             }
         }
     }
@@ -521,16 +621,18 @@ fun ChargingScreen(palette: Palette) {
                 e = e,
                 placeLabel = editingPlaceLabel,
                 gstRatePct = gst,
+                capacityKwh = settings.batteryCapacityKwh,
                 palette = palette,
                 m = m,
-                onSave = { energy, delivered, rate, bill, kind, newLabel ->
+                onSave = { energy, delivered, rate, bill, kind, newLabel, startSoc, endSoc ->
                     editing = null
                     scope.launch {
                         withContext(Dispatchers.IO) {
                             val dao = OdographDb.get(ctx).dao()
                             saveChargeEdit(
                                 dao, e.id, energy, delivered, kind, rate, bill, gst,
-                                settings.homeRateInr, settings.outsideRateInr, newLabel
+                                settings.homeRateInr, settings.outsideRateInr, newLabel,
+                                startSoc, endSoc
                             )
                         }
                         withContext(Dispatchers.IO) {
@@ -564,6 +666,11 @@ private fun ChargeRow(
         ChargeKind.FAST.ordinal -> "FAST"
         else -> "SLOW"
     }
+    // Said plainly rather than left to be inferred. A fill worked out from the charge level has
+    // real energy and no measured power behind it, so its speed is an assumption and its start
+    // and end times are only the window it must have happened inside — a driver checking a bill
+    // needs to know which rows the box watched and which it reconstructed afterwards.
+    val provenance = if (e.reconstructed) "FROM CHARGE LEVEL" else null
     Column(
         Modifier
             .fillMaxWidth()
@@ -578,6 +685,9 @@ private fun ChargeRow(
                 fontWeight = FontWeight.Medium
             )
             Text(text = kindLabel, color = kindColor, fontSize = m.label, letterSpacing = 1.3.sp)
+            provenance?.let {
+                Text(text = it, color = palette.label, fontSize = m.label, letterSpacing = 1.3.sp)
+            }
         }
         val cells = mutableListOf(
             e.startSoc?.let { "%.0f%%".format(it) } ?: "—",

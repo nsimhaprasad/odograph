@@ -615,9 +615,20 @@ class TripRecorderService : Service() {
                 // fast sessions surface a prompt so the driver can price the kWh they actually
                 // paid for. A slow session never prompts — the home rate stands.
                 val capacity = settings.batteryCapacityKwh
-                val change = ChargeLedger(dao, capacity, settings.homeRateInr, settings.outsideRateInr)
-                    .observe(ch?.isCharging, ch?.soc, powerKw, now)
-                applyChargeChange(dao, change)
+                val ledger = ChargeLedger(dao, capacity, settings.homeRateInr, settings.outsideRateInr)
+                applyChargeChange(dao, ledger.observe(ch?.isCharging, ch?.soc, powerKw, now))
+
+                // Then the same question from the other direction: does the ledger explain the
+                // pack? Almost all of this car's charging happens with the box switched off — it
+                // is powered by the vehicle, so it dies at the moment the vehicle is plugged in —
+                // and a fill nobody watched still has to appear in the history. Anything the
+                // sessions cannot account for is booked here from the state of charge itself.
+                val reconciled = runCatching { ledger.reconcileWithSoc(ch?.soc, ch?.isCharging, now) }
+                    .getOrElse { ChargeLedger.Change.None }
+                if (reconciled !is ChargeLedger.Change.None) {
+                    Diagnostics.crumb("charge reconciled from SOC: $reconciled")
+                }
+                applyChargeChange(dao, reconciled)
 
                 // Coverage honesty: note that the poller ran at all, so the dashboard can show
                 // the days it did not.

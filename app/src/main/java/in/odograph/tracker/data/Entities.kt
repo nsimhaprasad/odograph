@@ -168,7 +168,18 @@ data class ChargeEventEntity(
     /** Latitude the box saw when the session opened; kept raw for a nameless public spot. */
     val lat: Double? = null,
     /** Longitude the box saw when the session opened; kept raw for a nameless public spot. */
-    val lon: Double? = null
+    val lon: Double? = null,
+    /**
+     * True when the session was worked out from the state of charge rather than watched happening.
+     *
+     * The box is powered by the car, so most charging happens with the recorder switched off and
+     * no frames to build a session from. Those fills are reconstructed from the SOC either side
+     * of them, which recovers the energy but not the middle: no power readings, so no honest
+     * classification of how fast it was, and no real start and end time — only the window it must
+     * have happened inside. Flagged rather than silently mixed in, because a driver correcting a
+     * bill needs to know which rows the app saw and which it inferred.
+     */
+    val reconstructed: Boolean = false
 )
 
 /**

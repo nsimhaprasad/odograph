@@ -467,4 +467,33 @@ class MigrationTest {
             assertThat(c.getInt(0)).isEqualTo(0) // SLOW stays SLOW.
         }
     }
+
+    /**
+     * Every session already in the table was built from live frames, so false is the correct
+     * backfill and not merely a convenient default: marking existing rows as reconstructed would
+     * tell the driver the app had guessed at charges it actually watched happen.
+     */
+    @Test
+    fun `migrating from v9 marks existing sessions as watched rather than reconstructed`() {
+        val db = openV7()
+        OdographDb.MIGRATION_7_8.migrate(db)
+        OdographDb.MIGRATION_8_9.migrate(db)
+        db.execSQL(
+            """INSERT INTO charge_events (startTime, endTime, energyKwh, peakPowerKw, kind, costInr)
+               VALUES (1000, 1900000, 15.5, 7.4, 0, 124.0)"""
+        )
+
+        OdographDb.MIGRATION_9_10.migrate(db)
+
+        db.query("SELECT reconstructed FROM charge_events WHERE startTime = 1000").use { c ->
+            assertThat(c.moveToFirst()).isTrue()
+            assertThat(c.getInt(0)).`as`("a session the box watched").isEqualTo(0)
+        }
+        // And the column accepts what the reconciler writes.
+        db.execSQL("UPDATE charge_events SET reconstructed = 1 WHERE startTime = 1000")
+        db.query("SELECT reconstructed FROM charge_events WHERE startTime = 1000").use { c ->
+            assertThat(c.moveToFirst()).isTrue()
+            assertThat(c.getInt(0)).isEqualTo(1)
+        }
+    }
 }

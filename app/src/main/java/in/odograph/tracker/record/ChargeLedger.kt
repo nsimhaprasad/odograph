@@ -1,6 +1,7 @@
 package `in`.odograph.tracker.record
 
 import `in`.odograph.tracker.core.BatteryMath
+import `in`.odograph.tracker.core.ChargeReconciler
 import `in`.odograph.tracker.core.BatteryMath.ChargeKind
 import `in`.odograph.tracker.data.ChargeEventEntity
 import `in`.odograph.tracker.data.OdographDao
@@ -119,6 +120,99 @@ class ChargeLedger(
     fun endByDriving(now: Long): Change {
         val open = dao.openChargeEvent() ?: return Change.None
         return close(open, now, open.endSoc)
+    }
+
+    /**
+     * Books energy that arrived while nobody was watching.
+     *
+     * Everything above this needs frames to work with, and on this car there usually are none.
+     * The box is powered by the vehicle, so it switches off at exactly the moment the vehicle gets
+     * plugged in; a fill that runs to 100% overnight produces no frames and therefore no session,
+     * and the pack is simply fuller in the morning with nothing to explain it.
+     *
+     * So the state of charge is checked against what the ledger can account for, every time the
+     * car says anything at all. A car sitting at 80% after a session that ended at 60%, with no
+     * drive in between, is not a puzzle — it is forty percent of a pack that went in unwatched,
+     * and it is booked. See [ChargeReconciler] for what may and may not be concluded from that.
+     */
+    fun reconcileWithSoc(socPercent: Double?, charging: Boolean?, now: Long): Change {
+        if (socPercent == null) return Change.None
+        // A live session is the business of observe(): frames are arriving and it is already
+        // advancing on them, so stepping in here would book the same energy twice.
+        if (charging == true) return Change.None
+
+        val previous = dao.lastSocBefore(now) ?: return Change.None
+        val previousSoc = previous.socPercent ?: return Change.None
+        val latest = dao.latestChargeEvent()
+        val session = latest?.let {
+            ChargeReconciler.Session(
+                id = it.id,
+                endSoc = it.endSoc,
+                endedAt = it.endTime ?: it.startTime,
+                open = it.kind == null
+            )
+        }
+        val driven = session?.let { dao.distanceBetween(it.endedAt, now) } ?: 0.0
+
+        return when (
+            val action = ChargeReconciler.reconcile(
+                lastKnown = ChargeReconciler.Reading(previousSoc, previous.t),
+                latest = ChargeReconciler.Reading(socPercent, now),
+                lastSession = session,
+                drivenSinceM = driven
+            )
+        ) {
+            ChargeReconciler.Action.Nothing -> Change.None
+
+            is ChargeReconciler.Action.Extend -> {
+                val row = dao.chargeEventById(action.sessionId) ?: return Change.None
+                val energy = BatteryMath.round2(
+                    BatteryMath.rechargeEnergyKwh(row.startSoc, action.toSoc, capacityKwh)
+                )
+                dao.extendReconstructed(action.sessionId, action.at, action.toSoc, energy)
+                reprice(action.sessionId)
+                Change.Closed(
+                    row.copy(endTime = action.at, endSoc = action.toSoc, energyKwh = energy)
+                )
+            }
+
+            is ChargeReconciler.Action.Record -> {
+                val energy = BatteryMath.round2(
+                    BatteryMath.rechargeEnergyKwh(action.fromSoc, action.toSoc, capacityKwh)
+                )
+                // No power was ever measured, so there is no evidence of speed and no honest way
+                // to call it fast. Slow is not a guess dressed up as a fact: it is what an
+                // unwatched fill overwhelmingly is on this car, and it is the cheaper assumption,
+                // so an error here understates a bill rather than inventing one.
+                val kind = ChargeKind.SLOW
+                val event = ChargeEventEntity(
+                    startTime = action.from,
+                    startSoc = action.fromSoc,
+                    endTime = action.to,
+                    endSoc = action.toSoc,
+                    energyKwh = energy,
+                    kind = kind.ordinal,
+                    costInr = BatteryMath.round2(energy * homeRateInr),
+                    reconstructed = true
+                )
+                val id = dao.insertChargeEvent(event)
+                Change.Closed(event.copy(id = id))
+            }
+        }
+    }
+
+    /** Re-prices a session whose energy has changed, using the kind it was already given. */
+    private fun reprice(id: Long) {
+        val row = dao.chargeEventById(id) ?: return
+        val kind = row.kind ?: ChargeKind.SLOW.ordinal
+        val entered = BatteryMath.sessionCostInr(
+            row.energyKwh, row.deliveredKwh, row.enteredRateInr, row.enteredBillInr, row.gstRatePct
+        )
+        val cost = BatteryMath.round2(
+            if (kind == ChargeKind.FAST.ordinal) entered ?: row.energyKwh * outsideRateInr
+            else entered ?: row.energyKwh * homeRateInr
+        )
+        dao.closeChargeEvent(id, kind, cost)
     }
 
     private fun isStale(open: ChargeEventEntity, now: Long): Boolean =
