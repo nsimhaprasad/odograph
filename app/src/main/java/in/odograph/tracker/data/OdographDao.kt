@@ -47,6 +47,20 @@ interface OdographDao {
     @Query("SELECT * FROM trips WHERE id = :id")
     fun tripById(id: Long): TripEntity?
 
+    /**
+     * Closed rows that cannot be drives: too short, too brief, and never instrumented.
+     *
+     * Open trips are excluded by `endedAt IS NOT NULL`, which matters more than it looks — a drive
+     * in progress has no distance written yet, so without that clause the sweep would delete the
+     * journey the car is on.
+     */
+    @Query(
+        """SELECT * FROM trips
+           WHERE endedAt IS NOT NULL AND energyKwh IS NULL
+             AND distanceM < :metres AND durationS < :seconds"""
+    )
+    fun nonDrives(metres: Double, seconds: Long): List<TripEntity>
+
     /** How many points a drive has, without reading a single one of them. */
     @Query("SELECT COUNT(*) FROM points WHERE tripId = :tripId")
     fun pointCountFor(tripId: Long): Int

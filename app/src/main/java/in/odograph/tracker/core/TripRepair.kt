@@ -28,6 +28,57 @@ object TripRepair {
     data class Outcome(val examined: Int, val corrected: Int, val worstBeforeMps: Float)
 
     /**
+     * The longest a row can last and still be certainly not a drive, seconds.
+     *
+     * A minute. Nothing that moved a car anywhere is over in less, and the rows this removes were
+     * two and three seconds long.
+     */
+    const val NOT_A_DRIVE_S = 60L
+
+    /**
+     * The furthest a row can reach and still be certainly not a drive, metres.
+     *
+     * A hundred, which is parked GNSS wander on a bad fix rather than travel. The rows this
+     * removes are mostly zero and the largest is ninety-two.
+     */
+    const val NOT_A_DRIVE_M = 100.0
+
+    data class Swept(val removed: Int, val metresReclaimed: Double)
+
+    /**
+     * Removes rows that were never drives.
+     *
+     * A recorder that restarts opens a fresh trip when the car is next seen to move, and a
+     * recorder that restarts every two seconds opens one every two seconds. That happened: one
+     * evening produced three hundred rows, two hundred and twenty-three of them zero kilometres
+     * and most of the rest under a hundred metres, each lasting about as long as it takes to
+     * read this sentence. The cause is fixed — an interrupted drive is resumed now rather than
+     * abandoned, and the recording pump no longer races itself — but the wreckage stays until
+     * something clears it, and on that box it is three quarters of the history.
+     *
+     * Closing a trip already discards one that never moved; these survived only because parked
+     * GNSS wander cleared the noise floor and made them look like travel. The test here is
+     * deliberately cruder and much harder to argue with: under a hundred metres, under a minute,
+     * and never instrumented. Nothing that took a car anywhere fits all three.
+     *
+     * Energy is the third condition rather than a nicety. A row the telematics ever attached a
+     * reading to is a row something is known about, and known things are not swept up quietly.
+     */
+    fun removeNonDrives(dao: OdographDao): Swept {
+        val doomed = dao.nonDrives(NOT_A_DRIVE_M, NOT_A_DRIVE_S)
+        var metres = 0.0
+        doomed.forEach { trip ->
+            metres += trip.distanceM
+            // The same three tables a discarded trip has always taken with it. A points row left
+            // behind belongs to a trip id that no longer exists, which is worse than either.
+            dao.deletePointsFor(trip.id)
+            dao.deleteBatteryFor(trip.id)
+            dao.deleteTrip(trip.id)
+        }
+        return Swept(doomed.size, metres)
+    }
+
+    /**
      * Walks every closed drive and lowers any top speed its own points cannot support.
      *
      * Never raises one. A stored figure below what the points imply is not evidence of a spike,

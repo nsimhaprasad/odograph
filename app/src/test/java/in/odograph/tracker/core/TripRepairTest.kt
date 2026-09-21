@@ -2,6 +2,7 @@ package `in`.odograph.tracker.core
 
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
+import `in`.odograph.tracker.data.BatteryEntity
 import `in`.odograph.tracker.data.OdographDb
 import `in`.odograph.tracker.data.PointEntity
 import org.assertj.core.api.Assertions.assertThat
@@ -152,5 +153,86 @@ class TripRepairTest {
         val outcome = TripRepair.repairMaxSpeeds(db.dao())
         assertThat(outcome.examined).isEqualTo(0)
         assertThat(outcome.corrected).isEqualTo(0)
+    }
+
+    // ------------------------------------------- rows that were never drives
+
+    /**
+     * One evening a restarting recorder produced three hundred rows, two hundred and twenty-three
+     * of them zero kilometres, each lasting about two seconds — a fresh trip opened every time the
+     * service came back and the car was next seen to twitch. The cause is fixed; the wreckage is
+     * not, and on the real box it is three quarters of the history.
+     */
+    @Test
+    fun `the rows a restarting recorder left behind are swept`() {
+        val dao = db.dao()
+        // What the incident actually looked like: seconds long, metres at most, never instrumented.
+        repeat(20) { i ->
+            val id = dao.startTrip(1_000_000L + i * 3_000L)
+            dao.finishTrip(id, 1_000_000L + i * 3_000L + 2_000L, 18.0, 2, 2, 1f, 1.0, 0.0, 0.0, 0.0)
+        }
+
+        val swept = TripRepair.removeNonDrives(dao)
+
+        assertThat(swept.removed).isEqualTo(20)
+        assertThat(dao.allTrips()).isEmpty()
+    }
+
+    /** A real drive is never touched, however short the errand. */
+    @Test
+    fun `a genuine short drive survives the sweep`() {
+        val dao = db.dao()
+        val id = dao.startTrip(1_000_000L)
+        dao.finishTrip(id, 1_000_600L, 1_400.0, 600, 540, 12f, 9.0, 2.0, 0.0, 0.0)
+
+        TripRepair.removeNonDrives(dao)
+
+        assertThat(dao.allTrips()).hasSize(1)
+    }
+
+    /**
+     * A row the telematics ever attached a reading to is a row something is known about, and known
+     * things are not swept up quietly — whatever its distance says.
+     */
+    @Test
+    fun `a row with an energy reading is never swept`() {
+        val dao = db.dao()
+        val id = dao.startTrip(1_000_000L)
+        dao.finishTrip(id, 1_000_005L, 20.0, 5, 5, 1f, 1.0, 0.0, 0.0, 0.0)
+        dao.setChargeSummary(id, 80.0, 79.0, 0.53)
+
+        TripRepair.removeNonDrives(dao)
+
+        assertThat(dao.allTrips()).`as`("something is known about it").hasSize(1)
+    }
+
+    /**
+     * The drive in progress has no distance written yet — it is set when the trip closes — so a
+     * sweep that ignored that would delete the journey the car is actually on.
+     */
+    @Test
+    fun `the drive in progress is not swept out from under the car`() {
+        val dao = db.dao()
+        val open = dao.startTrip(1_000_000L)
+
+        TripRepair.removeNonDrives(dao)
+
+        assertThat(dao.tripById(open)).`as`("still driving it").isNotNull
+    }
+
+    /** A swept row takes its points and frames with it; an orphan row is worse than either. */
+    @Test
+    fun `a swept row leaves nothing pointing at it`() {
+        val dao = db.dao()
+        val id = dao.startTrip(1_000_000L)
+        dao.appendPoint(PointEntity(0, id, 1_000_000L, 12.97, 77.59, 0f, null, 900.0, 5f, false))
+        dao.insertBattery(BatteryEntity(tripId = id, t = 1_000_000L, socPercent = 80.0))
+        dao.finishTrip(id, 1_000_002L, 18.0, 2, 2, 1f, 1.0, 0.0, 0.0, 0.0)
+
+        TripRepair.removeNonDrives(dao)
+
+        assertThat(dao.allTrips()).isEmpty()
+        assertThat(dao.pointsFor(id)).isEmpty()
+        assertThat(dao.batteryRangeFor(id)).isEmpty()
     }
 }

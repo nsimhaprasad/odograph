@@ -193,7 +193,7 @@ class TripRecorderService : Service() {
          * Bumped when a new correction is added, which reruns the pass over drives an earlier
          * revision already visited.
          */
-        private const val REPAIR_REVISION = 1
+        private const val REPAIR_REVISION = 2
 
         /** No trip is open. Battery frames recorded under it are parked readings, not a drive. */
         const val NO_TRIP = -1L
@@ -430,13 +430,18 @@ class TripRecorderService : Service() {
             // whole history on every boot.
             if (settings.repairRevision < REPAIR_REVISION) {
                 val outcome = runCatching { TripRepair.repairMaxSpeeds(dao) }.getOrNull()
-                if (outcome != null) {
+                // The sweep of rows that were never drives rides the same revision: both are
+                // one-off corrections of history, and neither should walk the table again on
+                // every boot for the rest of the box's life.
+                val swept = runCatching { TripRepair.removeNonDrives(dao) }.getOrNull()
+                if (outcome != null && swept != null) {
                     settings.repairRevision = REPAIR_REVISION
                     Diagnostics.crumb(
                         "repair: examined ${outcome.examined} drives, corrected ${outcome.corrected}" +
                             (if (outcome.corrected > 0)
                                 ", worst was %.0f km/h".format(outcome.worstBeforeMps * 3.6f)
-                            else "")
+                            else "") +
+                            "; swept ${swept.removed} rows that were never drives"
                     )
                 }
             }
