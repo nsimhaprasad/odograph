@@ -467,14 +467,37 @@ private fun TripDetailPane(
             val close = off < RangeCalibration.CLOSE_ENOUGH_PERCENT
 
             SectionLabel("PREDICTION", palette, m)
+            // Mileage first, because that is the unit a driver judges a car in and the one this
+            // comparison is for: a prediction is useful exactly to the degree that its km/kWh
+            // lands on what the drive actually returned. The consumption figure stays beside it
+            // because it is what the range is computed from.
             DetailRow(
                 "We expected",
-                "%.1f kWh/100km  ·  %.0f km at 100%%".format(v.predictedKwhPer100Km, predictedKm),
+                "%.2f km/kWh  ·  %.1f kWh/100km".format(
+                    100.0 / v.predictedKwhPer100Km, v.predictedKwhPer100Km
+                ),
                 palette, m
             )
             DetailRow(
-                "It actually cost",
-                "%.1f kWh/100km  ·  %.0f km at 100%%".format(v.actualKwhPer100Km, actualKm),
+                "It actually did",
+                "%.2f km/kWh  ·  %.1f kWh/100km".format(
+                    100.0 / v.actualKwhPer100Km, v.actualKwhPer100Km
+                ),
+                palette, m
+            )
+            // The miss in the same unit, signed, so "how far out was it" needs no arithmetic.
+            DetailRow(
+                "Mileage error",
+                "%+.2f km/kWh (%+.0f%%)".format(
+                    100.0 / v.actualKwhPer100Km - 100.0 / v.predictedKwhPer100Km,
+                    (v.predictedKwhPer100Km / v.actualKwhPer100Km - 1.0) * 100.0
+                ),
+                palette, m,
+                valueColor = if (close) palette.good else palette.warn
+            )
+            DetailRow(
+                "Range from it",
+                "%.0f km expected  ·  %.0f km actual".format(predictedKm, actualKm),
                 palette, m
             )
             DetailRow(
