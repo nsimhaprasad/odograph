@@ -337,6 +337,16 @@ class TripRecorderService : Service() {
     private var lastMovedAt = Long.MIN_VALUE
 
     /**
+     * When the last fix arrived, on the monotonic clock.
+     *
+     * Deliberately not the fix's own timestamp. That is GNSS time and answers "when was the car
+     * there", which is a different question from "how long since anything was heard from the
+     * receiver" — and on a box with no SIM the two clocks can disagree by hours.
+     */
+    @Volatile
+    private var lastFixAtElapsed = 0L
+
+    /**
      * How much of the current stillness was spent with no fixes at all, milliseconds.
      *
      * Reset the moment the car is seen to move again, because it only ever describes the stretch
@@ -430,18 +440,20 @@ class TripRecorderService : Service() {
             // whole history on every boot.
             if (settings.repairRevision < REPAIR_REVISION) {
                 val outcome = runCatching { TripRepair.repairMaxSpeeds(dao) }.getOrNull()
-                // The sweep of rows that were never drives rides the same revision: both are
-                // one-off corrections of history, and neither should walk the table again on
-                // every boot for the rest of the box's life.
-                val swept = runCatching { TripRepair.removeNonDrives(dao) }.getOrNull()
-                if (outcome != null && swept != null) {
+                // Putting back together the drives a restarting recorder tore apart rides the
+                // same revision: both are one-off corrections of history, and neither should walk
+                // the table again on every boot for the rest of the box's life.
+                val stitched = runCatching { TripRepair.stitchShreddedDrives(dao) }.getOrNull()
+                if (outcome != null && stitched != null) {
                     settings.repairRevision = REPAIR_REVISION
                     Diagnostics.crumb(
                         "repair: examined ${outcome.examined} drives, corrected ${outcome.corrected}" +
                             (if (outcome.corrected > 0)
                                 ", worst was %.0f km/h".format(outcome.worstBeforeMps * 3.6f)
                             else "") +
-                            "; swept ${swept.removed} rows that were never drives"
+                            "; stitched ${stitched.fragmentsAbsorbed} fragments back into " +
+                            "${stitched.drivesRecovered} drives, recovering " +
+                            "%.1f km".format(stitched.metresRecovered / 1000.0)
                     )
                 }
             }
@@ -469,6 +481,7 @@ class TripRecorderService : Service() {
             // Whole-dataset export to the Google Docs link, on its own clock so it can never
             // hold up telematics or recording.
             io.launch { sheetsSyncLoop() }
+            io.launch { fixWatchdog() }
 
             telematicsLoop()
         }
@@ -943,6 +956,44 @@ class TripRecorderService : Service() {
         }
     }
 
+    /**
+     * How long the receiver may go quiet before the screen admits it, milliseconds.
+     *
+     * Fixes arrive about once a second. Six is long enough that ordinary jitter never trips it and
+     * short enough that the driver is not lied to for meaningful time — and it matches the gap
+     * after which [LiveTrack] already stops believing its own derived speed.
+     */
+    private val fixStaleMs = 6_000L
+
+    /**
+     * Tells the screen when the car has stopped being visible.
+     *
+     * Everything on the driving screen is published from [record], which only runs when a fix
+     * arrives. So when the signal goes — a basement, a tunnel, a multi-storey — nothing publishes
+     * anything, and the last frame simply stays on the glass: `hasFix` true, the needle wherever
+     * it was. A driver parked two floors underground watches the car apparently doing ten or
+     * twelve km/h, and the one reading on the screen that is always supposed to be true, the
+     * speedometer, is the one that is lying.
+     *
+     * Nothing else changes. The drive is not ended — losing sight of a car is not the same as the
+     * car stopping, which is what [Arrival.stillForMs]'s blind time is for — and no distance or
+     * duration is touched, because none of it is known. Only the two things that would otherwise
+     * be false are corrected: the speed, and the claim to have a fix at all.
+     */
+    private suspend fun fixWatchdog() {
+        while (true) {
+            delay(1_000L)
+            val last = lastFixAtElapsed
+            if (last == 0L) continue
+            val quietFor = SystemClock.elapsedRealtime() - last
+            val state = _state.value
+            if (quietFor >= fixStaleMs && (state.hasFix || state.speedMps != 0f)) {
+                _state.value = state.copy(hasFix = false, speedMps = 0f, overLimit = false)
+                Diagnostics.crumb("no fix for ${quietFor / 1000}s — speedometer zeroed, drive left open")
+            }
+        }
+    }
+
     /** Gap since the previous fix, seconds. Zero when this is the first one. */
     private fun secondsSinceLastFix(fix: Fix): Float =
         lastFix?.let { (fix.t - it.t) / 1000f } ?: 0f
@@ -1019,6 +1070,7 @@ class TripRecorderService : Service() {
             )
         )
 
+        lastFixAtElapsed = SystemClock.elapsedRealtime()
         val effectiveSpeedMps = track.speedMps
 
         val speedKmh = effectiveSpeedMps * 3.6f

@@ -176,7 +176,15 @@ check_has_content "detailed view"
 adb_ exec-out screencap -p > "$OUT/07-detailed.png" 2>/dev/null
 ok "$OUT/07-detailed.png"
 
-back="$(find_tap DETAILED)"
+# Wait for the relabel rather than assuming it has landed. The tap is handled, the state flips
+# and the chip recomposes — but a dump taken in the middle of that reports the old label, and the
+# run then fails claiming a working toggle is broken. Twice now.
+back=""
+for _ in $(seq 1 15); do
+  back="$(find_tap DETAILED)"
+  [ -n "$back" ] && break
+  sleep 1
+done
 [ -n "$back" ] || fail "the toggle did not relabel itself to DETAILED, so the view never switched"
 # shellcheck disable=SC2086
 adb_ shell input tap $back >/dev/null 2>&1

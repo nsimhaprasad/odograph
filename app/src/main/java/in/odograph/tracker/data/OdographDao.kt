@@ -48,18 +48,30 @@ interface OdographDao {
     fun tripById(id: Long): TripEntity?
 
     /**
-     * Closed rows that cannot be drives: too short, too brief, and never instrumented.
+     * Closed rows short enough to be fragments of a drive rather than drives.
+     *
+     * Oldest first, because they are only meaningful in sequence: what identifies a shredded
+     * journey is a run of these following each other within seconds.
      *
      * Open trips are excluded by `endedAt IS NOT NULL`, which matters more than it looks — a drive
-     * in progress has no distance written yet, so without that clause the sweep would delete the
-     * journey the car is on.
+     * in progress has no distance written yet, so without that clause the journey the car is
+     * currently on would look like the smallest fragment of all.
      */
     @Query(
         """SELECT * FROM trips
            WHERE endedAt IS NOT NULL AND energyKwh IS NULL
-             AND distanceM < :metres AND durationS < :seconds"""
+             AND distanceM < :metres AND durationS < :seconds
+           ORDER BY startedAt ASC"""
     )
-    fun nonDrives(metres: Double, seconds: Long): List<TripEntity>
+    fun driveFragments(metres: Double, seconds: Long): List<TripEntity>
+
+    /** Hands a fragment's points to the drive it is being stitched back into. */
+    @Query("UPDATE points SET tripId = :into WHERE tripId = :from")
+    fun movePointsTo(from: Long, into: Long)
+
+    /** And its battery frames, so nothing is left pointing at a row that is about to go. */
+    @Query("UPDATE battery SET tripId = :into WHERE tripId = :from")
+    fun moveBatteryTo(from: Long, into: Long)
 
     /** How many points a drive has, without reading a single one of them. */
     @Query("SELECT COUNT(*) FROM points WHERE tripId = :tripId")

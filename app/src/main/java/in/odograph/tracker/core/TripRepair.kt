@@ -1,6 +1,7 @@
 package `in`.odograph.tracker.core
 
 import `in`.odograph.tracker.data.OdographDao
+import `in`.odograph.tracker.data.TripEntity
 
 /**
  * Correcting top speeds that a GNSS spike wrote into the history.
@@ -28,54 +29,116 @@ object TripRepair {
     data class Outcome(val examined: Int, val corrected: Int, val worstBeforeMps: Float)
 
     /**
-     * The longest a row can last and still be certainly not a drive, seconds.
+     * The longest a row can last and still be a fragment rather than a drive, seconds.
      *
-     * A minute. Nothing that moved a car anywhere is over in less, and the rows this removes were
-     * two and three seconds long.
+     * A minute. Nothing that took a car anywhere is over in less, and the fragments this stitches
+     * back together were two and three seconds long.
      */
-    const val NOT_A_DRIVE_S = 60L
+    const val FRAGMENT_MAX_S = 60L
 
     /**
-     * The furthest a row can reach and still be certainly not a drive, metres.
+     * The furthest a row can reach and still be a fragment, metres.
      *
-     * A hundred, which is parked GNSS wander on a bad fix rather than travel. The rows this
-     * removes are mostly zero and the largest is ninety-two.
+     * A hundred. Not because a hundred metres of driving is nothing, but because a row that short
+     * cannot have measured what it did: distance accumulates between fixes, and a trip lasting two
+     * seconds holds one or two of them.
      */
-    const val NOT_A_DRIVE_M = 100.0
-
-    data class Swept(val removed: Int, val metresReclaimed: Double)
+    const val FRAGMENT_MAX_M = 100.0
 
     /**
-     * Removes rows that were never drives.
+     * The longest silence between two fragments that still makes them the same drive, ms.
      *
-     * A recorder that restarts opens a fresh trip when the car is next seen to move, and a
-     * recorder that restarts every two seconds opens one every two seconds. That happened: one
-     * evening produced three hundred rows, two hundred and twenty-three of them zero kilometres
-     * and most of the rest under a hundred metres, each lasting about as long as it takes to
-     * read this sentence. The cause is fixed — an interrupted drive is resumed now rather than
-     * abandoned, and the recording pump no longer races itself — but the wreckage stays until
-     * something clears it, and on that box it is three quarters of the history.
-     *
-     * Closing a trip already discards one that never moved; these survived only because parked
-     * GNSS wander cleared the noise floor and made them look like travel. The test here is
-     * deliberately cruder and much harder to argue with: under a hundred metres, under a minute,
-     * and never instrumented. Nothing that took a car anywhere fits all three.
-     *
-     * Energy is the third condition rather than a nicety. A row the telematics ever attached a
-     * reading to is a row something is known about, and known things are not swept up quietly.
+     * The fragments arrive two or three seconds apart because that is how fast the recorder was
+     * restarting. A minute is far longer than that and far shorter than any real gap between
+     * journeys, and the run has to break somewhere or every stub the car ever produced would be
+     * stitched into one absurd drive spanning months.
      */
-    fun removeNonDrives(dao: OdographDao): Swept {
-        val doomed = dao.nonDrives(NOT_A_DRIVE_M, NOT_A_DRIVE_S)
+    const val STITCH_GAP_MS = 60_000L
+
+    /** Fewer fragments than this in a row is not a shredded drive, just a short stop. */
+    const val MIN_RUN = 3
+
+    data class Stitched(val drivesRecovered: Int, val fragmentsAbsorbed: Int, val metresRecovered: Double)
+
+    /**
+     * Puts back together the drives a restarting recorder tore apart.
+     *
+     * A recorder that restarts opens a fresh trip when the car is next seen to move, and one that
+     * restarts every two seconds opens one every two seconds. That happened: a single evening
+     * produced three hundred rows, most of them zero kilometres, each lasting about as long as it
+     * takes to read this sentence.
+     *
+     * The first attempt at this deleted them, on the reasoning that nothing under a hundred metres
+     * and a minute can be a drive. The reasoning was wrong and the data said so plainly: those
+     * three hundred rows ran from 17:12 to 17:29 and stepped through fourteen distinct places in
+     * strict order, and the next surviving trip carried on from the fourteenth. The car was not
+     * sitting still producing noise — it was being driven, and the recorder was shredding the
+     * journey as it went. Each piece read nearly zero because distance accumulates *between*
+     * fixes and a two-second trip holds one or two; the kilometres were destroyed by the
+     * fragmentation, not absent from the world. Deleting the pieces would have erased the only
+     * remaining evidence that the drive ever happened.
+     *
+     * So they are stitched instead. A run of fragments following each other within
+     * [STITCH_GAP_MS] becomes the one drive it always was: the earliest row survives, every
+     * other row's points and frames are handed to it, and the totals are recomputed from the
+     * combined track — which is where the lost distance comes back, because the fixes either side
+     * of each seam were always there, just filed under different trips.
+     */
+    fun stitchShreddedDrives(dao: OdographDao): Stitched {
+        val fragments = dao.driveFragments(FRAGMENT_MAX_M, FRAGMENT_MAX_S)
+        var drives = 0
+        var absorbed = 0
         var metres = 0.0
-        doomed.forEach { trip ->
-            metres += trip.distanceM
-            // The same three tables a discarded trip has always taken with it. A points row left
-            // behind belongs to a trip id that no longer exists, which is worse than either.
-            dao.deletePointsFor(trip.id)
-            dao.deleteBatteryFor(trip.id)
-            dao.deleteTrip(trip.id)
+
+        runs(fragments).forEach { run ->
+            val keeper = run.first()
+            val before = run.sumOf { it.distanceM }
+
+            run.drop(1).forEach { fragment ->
+                dao.movePointsTo(fragment.id, keeper.id)
+                dao.moveBatteryTo(fragment.id, keeper.id)
+                dao.deleteTrip(fragment.id)
+            }
+
+            val fixes = dao.pointsFor(keeper.id).map {
+                Fix(it.t, it.lat, it.lon, it.speedMps, it.accuracyM, it.interpolated, it.altitudeM)
+            }
+            if (fixes.isNotEmpty()) {
+                val stats = TripStats.compute(fixes)
+                dao.finishTrip(
+                    keeper.id, fixes.last().t, stats.distanceM, stats.durationS,
+                    stats.movingS, stats.maxSpeedMps, stats.avgSpeedMps, stats.slowestKmSpeedMps,
+                    stats.elevGainM, stats.elevLossM
+                )
+                dao.setOrigin(keeper.id, fixes.first().lat, fixes.first().lon)
+                dao.setDestination(keeper.id, fixes.last().lat, fixes.last().lon)
+                metres += stats.distanceM - before
+            }
+            // The places were already resolved on the fragments; the drive ran from where the
+            // first one began to where the last one ended, which is the sequence they recorded.
+            dao.setTripPlaces(keeper.id, run.first().startPlaceId, run.last().endPlaceId)
+            drives += 1
+            absorbed += run.size - 1
         }
-        return Swept(doomed.size, metres)
+        return Stitched(drives, absorbed, metres)
+    }
+
+    /** Fragments grouped into the drives they were torn from, by the silence between them. */
+    private fun runs(fragments: List<TripEntity>): List<List<TripEntity>> {
+        val out = mutableListOf<List<TripEntity>>()
+        var current = mutableListOf<TripEntity>()
+        fragments.forEach { f ->
+            val previous = current.lastOrNull()
+            val continues = previous != null &&
+                f.startedAt - (previous.endedAt ?: previous.startedAt) <= STITCH_GAP_MS
+            if (!continues) {
+                if (current.size >= MIN_RUN) out += current.toList()
+                current = mutableListOf()
+            }
+            current += f
+        }
+        if (current.size >= MIN_RUN) out += current.toList()
+        return out
     }
 
     /**

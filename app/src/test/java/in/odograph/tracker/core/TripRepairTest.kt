@@ -155,84 +155,140 @@ class TripRepairTest {
         assertThat(outcome.corrected).isEqualTo(0)
     }
 
-    // ------------------------------------------- rows that were never drives
+    // ------------------------------------------- drives a restarting recorder tore apart
 
     /**
-     * One evening a restarting recorder produced three hundred rows, two hundred and twenty-three
-     * of them zero kilometres, each lasting about two seconds — a fresh trip opened every time the
-     * service came back and the car was next seen to twitch. The cause is fixed; the wreckage is
-     * not, and on the real box it is three quarters of the history.
+     * Builds the damage as it actually happened: a car driving a straight road while the recorder
+     * restarts every three seconds, so each trip holds a couple of fixes and measures almost
+     * nothing of the ground it covered.
      */
-    @Test
-    fun `the rows a restarting recorder left behind are swept`() {
+    private fun shredADrive(fragments: Int = 12, metresApart: Double = 40.0): List<Long> {
         val dao = db.dao()
-        // What the incident actually looked like: seconds long, metres at most, never instrumented.
-        repeat(20) { i ->
-            val id = dao.startTrip(1_000_000L + i * 3_000L)
-            dao.finishTrip(id, 1_000_000L + i * 3_000L + 2_000L, 18.0, 2, 2, 1f, 1.0, 0.0, 0.0, 0.0)
+        val ids = mutableListOf<Long>()
+        var lat = 12.9716
+        var t = 1_000_000L
+        repeat(fragments) {
+            val id = dao.startTrip(t)
+            // Two fixes per fragment, the car moving the whole time.
+            repeat(2) {
+                dao.appendPoint(PointEntity(0, id, t, lat, 77.5946, 13f, null, 900.0, 5f, false))
+                lat += metresApart / 111_320.0
+                t += 1_500L
+            }
+            dao.finishTrip(id, t, 0.0, 3, 3, 1f, 1.0, 0.0, 0.0, 0.0)
+            ids += id
+            t += 1_500L
         }
-
-        val swept = TripRepair.removeNonDrives(dao)
-
-        assertThat(swept.removed).isEqualTo(20)
-        assertThat(dao.allTrips()).isEmpty()
+        return ids
     }
 
-    /** A real drive is never touched, however short the errand. */
+    /**
+     * The point of the whole thing. The fragments each recorded nearly nothing, but their fixes
+     * are real and the kilometres are in the gaps *between* them — which is exactly what deleting
+     * the rows would have thrown away.
+     */
     @Test
-    fun `a genuine short drive survives the sweep`() {
+    fun `stitching a shredded drive recovers the distance the fragments lost`() {
         val dao = db.dao()
-        val id = dao.startTrip(1_000_000L)
-        dao.finishTrip(id, 1_000_600L, 1_400.0, 600, 540, 12f, 9.0, 2.0, 0.0, 0.0)
+        shredADrive(fragments = 12, metresApart = 40.0)
+        assertThat(dao.allTrips().sumOf { it.distanceM }).`as`("shredded").isLessThan(1.0)
 
-        TripRepair.removeNonDrives(dao)
+        val stitched = TripRepair.stitchShreddedDrives(dao)
+
+        assertThat(stitched.drivesRecovered).isEqualTo(1)
+        assertThat(stitched.fragmentsAbsorbed).isEqualTo(11)
+        val drive = dao.allTrips().single()
+        assertThat(drive.distanceM)
+            .`as`("23 hops of 40 m, back from the dead")
+            .isGreaterThan(800.0)
+    }
+
+    /** One drive out of three hundred rows, not three hundred rows deleted. */
+    @Test
+    fun `the fragments become one drive rather than disappearing`() {
+        val dao = db.dao()
+        shredADrive(fragments = 20)
+
+        TripRepair.stitchShreddedDrives(dao)
 
         assertThat(dao.allTrips()).hasSize(1)
     }
 
-    /**
-     * A row the telematics ever attached a reading to is a row something is known about, and known
-     * things are not swept up quietly — whatever its distance says.
-     */
+    /** Every fix survives the stitch: the route is the reason for doing this at all. */
     @Test
-    fun `a row with an energy reading is never swept`() {
+    fun `no point is lost or left orphaned`() {
         val dao = db.dao()
-        val id = dao.startTrip(1_000_000L)
-        dao.finishTrip(id, 1_000_005L, 20.0, 5, 5, 1f, 1.0, 0.0, 0.0, 0.0)
-        dao.setChargeSummary(id, 80.0, 79.0, 0.53)
+        val ids = shredADrive(fragments = 10)
+        val before = ids.sumOf { dao.pointCountFor(it) }
 
-        TripRepair.removeNonDrives(dao)
+        TripRepair.stitchShreddedDrives(dao)
 
-        assertThat(dao.allTrips()).`as`("something is known about it").hasSize(1)
+        val keeper = dao.allTrips().single()
+        assertThat(dao.pointCountFor(keeper.id)).isEqualTo(before)
+        ids.drop(1).forEach {
+            assertThat(dao.tripById(it)).`as`("absorbed row $it").isNull()
+        }
     }
 
     /**
-     * The drive in progress has no distance written yet — it is set when the trip closes — so a
-     * sweep that ignored that would delete the journey the car is actually on.
+     * Two separate outings, each shredded, must not become one drive with a straight line across
+     * the hours between them.
      */
     @Test
-    fun `the drive in progress is not swept out from under the car`() {
+    fun `fragments separated by a real gap stay separate drives`() {
         val dao = db.dao()
-        val open = dao.startTrip(1_000_000L)
+        shredADrive(fragments = 6)
+        // Hours later, another shredded outing.
+        val t = 1_000_000L + 6 * 3_600_000L
+        var lat = 13.10
+        repeat(6) {
+            val id = dao.startTrip(t + it * 3_000L)
+            dao.appendPoint(PointEntity(0, id, t + it * 3_000L, lat, 77.6, 13f, null, 900.0, 5f, false))
+            lat += 0.0004
+            dao.finishTrip(id, t + it * 3_000L + 2_000L, 0.0, 2, 2, 1f, 1.0, 0.0, 0.0, 0.0)
+        }
 
-        TripRepair.removeNonDrives(dao)
+        val stitched = TripRepair.stitchShreddedDrives(dao)
+
+        assertThat(stitched.drivesRecovered).isEqualTo(2)
+        assertThat(dao.allTrips()).hasSize(2)
+    }
+
+    /** A genuine short errand is not a fragment of anything and is left exactly alone. */
+    @Test
+    fun `a real short drive is not stitched into its neighbours`() {
+        val dao = db.dao()
+        val id = dao.startTrip(1_000_000L)
+        dao.finishTrip(id, 1_000_600L, 1_400.0, 600, 540, 12f, 9.0, 2.0, 0.0, 0.0)
+
+        TripRepair.stitchShreddedDrives(dao)
+
+        assertThat(dao.allTrips()).hasSize(1)
+        assertThat(dao.tripById(id)!!.distanceM).isEqualTo(1_400.0)
+    }
+
+    /** A lone stub is not a shredded drive; it takes a run to make one. */
+    @Test
+    fun `an isolated stub is left where it is`() {
+        val dao = db.dao()
+        val id = dao.startTrip(1_000_000L)
+        dao.finishTrip(id, 1_000_002L, 12.0, 2, 2, 1f, 1.0, 0.0, 0.0, 0.0)
+
+        val stitched = TripRepair.stitchShreddedDrives(dao)
+
+        assertThat(stitched.drivesRecovered).isZero()
+        assertThat(dao.tripById(id)).isNotNull
+    }
+
+    /** The drive in progress has no distance written yet and must never be absorbed. */
+    @Test
+    fun `the open drive is never stitched into anything`() {
+        val dao = db.dao()
+        shredADrive(fragments = 5)
+        val open = dao.startTrip(2_000_000L)
+
+        TripRepair.stitchShreddedDrives(dao)
 
         assertThat(dao.tripById(open)).`as`("still driving it").isNotNull
-    }
-
-    /** A swept row takes its points and frames with it; an orphan row is worse than either. */
-    @Test
-    fun `a swept row leaves nothing pointing at it`() {
-        val dao = db.dao()
-        val id = dao.startTrip(1_000_000L)
-        dao.appendPoint(PointEntity(0, id, 1_000_000L, 12.97, 77.59, 0f, null, 900.0, 5f, false))
-        dao.insertBattery(BatteryEntity(tripId = id, t = 1_000_000L, socPercent = 80.0))
-        dao.finishTrip(id, 1_000_002L, 18.0, 2, 2, 1f, 1.0, 0.0, 0.0, 0.0)
-
-        TripRepair.removeNonDrives(dao)
-
-        assertThat(dao.allTrips()).isEmpty()
-        assertThat(dao.pointsFor(id)).isEmpty()
-        assertThat(dao.batteryRangeFor(id)).isEmpty()
     }
 }
