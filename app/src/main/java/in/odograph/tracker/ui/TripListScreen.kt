@@ -521,34 +521,35 @@ private fun TripDetailPane(
             DetailRow("Effective rate", "₹ %.2f /kWh".format(it), palette, m)
         }
 
-        // What the car's own counters made of the same drive. Shown beside ours rather than
-        // instead of it because the two disagree and it is not yet settled which is right: ours
-        // is quantised to whole percent of the pack — 0.53 kWh a step — while the car's counter
-        // has no such floor, and the only captured frames of it are physically implausible. Enough
-        // drives with both figures side by side will answer that without anybody guessing.
+        // Where this drive's energy figure came from, and what the other source would have said.
+        // The two are not equals: whole-percent state of charge can only express energy in steps
+        // of 0.53 kWh on this pack, so a short errand is mostly quantisation, while the car's own
+        // counter resolves to a tenth. The counter wins when it can answer at all.
         val carEnergy = t.carEnergyKwh
         val carDistance = t.carDistanceKm
-        if (carEnergy != null || carDistance != null) {
-            SectionLabel("WHAT THE CAR COUNTED", palette, m)
-            carEnergy?.let { DetailRow("Car's energy", "%.2f kWh".format(it), palette, m) }
+        val socEnergy = BatteryMath.consumedFromSoc(t.socStart, t.socEnd, detail.capacityKwh)
+        if (carEnergy != null || carDistance != null || socEnergy != null) {
+            SectionLabel("WHERE THE ENERGY CAME FROM", palette, m)
+            val usedCar = carEnergy != null && carEnergy > 0.0 &&
+                t.energyKwh != null && kotlin.math.abs(t.energyKwh!! - carEnergy) < 0.011
+            DetailRow(
+                "Source",
+                if (usedCar) "the car's own counter" else "charge level (0.53 kWh steps)",
+                palette, m,
+                valueColor = if (usedCar) palette.good else palette.dim
+            )
+            carEnergy?.let { DetailRow("Car's counter", "%.2f kWh".format(it), palette, m) }
+            socEnergy?.let { DetailRow("From charge level", "%.2f kWh".format(it), palette, m) }
             carDistance?.let { DetailRow("Car's distance", "%.1f km".format(it), palette, m) }
-            if (carEnergy != null && carEnergy > 0 && carDistance != null && carDistance > 0.5) {
+            if (carEnergy != null && carEnergy > 0 && socEnergy != null && socEnergy > 0) {
+                val gap = (socEnergy / carEnergy - 1.0) * 100.0
                 DetailRow(
-                    "Car's consumption",
-                    "%.2f kWh/100km".format(carEnergy / carDistance * 100.0),
-                    palette, m
+                    "Charge level was",
+                    if (kotlin.math.abs(gap) < 1) "the same"
+                    else "%+.0f%% against the counter".format(gap),
+                    palette, m,
+                    valueColor = if (kotlin.math.abs(gap) < 15) palette.good else palette.warn
                 )
-                detail.kwhPer100?.let { ours ->
-                    val theirs = carEnergy / carDistance * 100.0
-                    val gap = if (ours > 0) (theirs / ours - 1.0) * 100.0 else 0.0
-                    DetailRow(
-                        "Against ours",
-                        if (kotlin.math.abs(gap) < 1) "the same"
-                        else "%+.0f%% (%s)".format(gap, if (gap > 0) "car says worse" else "car says better"),
-                        palette, m,
-                        valueColor = if (kotlin.math.abs(gap) < 10) palette.good else palette.warn
-                    )
-                }
             }
         }
 

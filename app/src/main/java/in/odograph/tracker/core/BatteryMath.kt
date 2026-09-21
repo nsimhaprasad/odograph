@@ -129,6 +129,52 @@ object BatteryMath {
     }
 
     /**
+     * What the state of charge says a drive used, from its two endpoints.
+     *
+     * The fallback figure, and the one every drive recorded before the car's counter was read was
+     * built on. Kept as its own function so a drive can show what each source made of it side by
+     * side: a comparison where one number is derived from the other tells nobody anything.
+     */
+    fun consumedFromSoc(startSoc: Double?, endSoc: Double?, capacityKwh: Double): Double? {
+        if (startSoc == null || endSoc == null) return null
+        val used = (startSoc - endSoc) / 100.0 * capacityKwh
+        return round2(used).takeIf { it.isFinite() && it > 0.0 }
+    }
+
+    /**
+     * What a drive cost, from the best evidence it left behind.
+     *
+     * Two sources, and they are not equals. The state of charge is reported in whole percent, so
+     * on a 52.9 kW·h pack it can only express energy in steps of 0.53 kW·h — a drive that really
+     * used 0.9 records as 0.53, and the history then believes the car went seventy percent
+     * further on that charge than it did. Every short errand is mostly quantisation, and the bias
+     * runs one way often enough to show up as the app reading better mileage than the car does.
+     *
+     * The car's own counter has a tenth of a kilowatt-hour of resolution — five times finer — and
+     * a live reading from this vehicle put it at 0.6 kW·h across 3.0 km, which is 20 kW·h/100km
+     * and entirely ordinary city driving. (The figure that made this look untrustworthy, 8.8
+     * kW·h across 138.5 km, came from a different car in the captured frames — a 38 kW·h Windsor,
+     * not this one.)
+     *
+     * So the counter is preferred and the state of charge is the fallback, for the several
+     * situations where the counter cannot answer: a drive that straddles a charge, where the
+     * counter resets and reads backwards; a drive with too few frames to difference; and any
+     * drive made while the telematics link was down, which on this box is most of them.
+     *
+     * A zero delta falls back too. Over a drive that went anywhere it means the frames were too
+     * sparse to catch the movement rather than that the car used nothing, and the state of charge
+     * is no worse a guess than a confident nought.
+     */
+    fun driveEnergyKwh(frames: List<`in`.odograph.tracker.data.BatteryEntity>, capacityKwh: Double): Double? {
+        val fromCar = counterDelta(
+            frames.first().powerUsageSinceLastChargeKwh,
+            frames.last().powerUsageSinceLastChargeKwh
+        )?.takeIf { it > 0.0 }
+        val energy = fromCar ?: consumedKwh(frames, capacityKwh)
+        return energy?.let { round2(it) }
+    }
+
+    /**
      * What the car's own running counter says a drive used, from the frames either side of it.
      *
      * The counters reset to zero at every charge, so a drive that straddles one reads backwards.

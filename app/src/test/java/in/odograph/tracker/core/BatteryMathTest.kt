@@ -304,4 +304,78 @@ class BatteryMathTest {
     fun `a drive the counter did not move on counted nothing`() {
         assertThat(BatteryMath.counterDelta(8.8, 8.8)!!).isZero()
     }
+
+    // ------------------------------------------- which source a drive's energy comes from
+
+    private fun frame(t: Long, soc: Double?, counter: Double?) =
+        `in`.odograph.tracker.data.BatteryEntity(
+            tripId = 1, t = t, socPercent = soc, powerUsageSinceLastChargeKwh = counter
+        )
+
+    /**
+     * The car's counter wins when it can answer. Whole-percent state of charge can only express
+     * energy in steps of 0.53 kW·h on this pack, so a drive that really used 0.9 records as 0.53
+     * and the history believes the car went seventy percent further than it did.
+     */
+    @Test
+    fun `the car's own counter is preferred over the charge level`() {
+        val frames = listOf(frame(0, 80.0, 10.0), frame(1000, 79.0, 10.9))
+
+        // Charge level would say 1% of 52.9 = 0.53; the counter says 0.9.
+        assertThat(BatteryMath.driveEnergyKwh(frames, 52.9)!!).isCloseTo(0.9, within(0.001))
+    }
+
+    /**
+     * A drive that straddles a charge sees the counter reset and read backwards, so it cannot
+     * answer and the charge level has to.
+     */
+    @Test
+    fun `a counter that reset falls back to the charge level`() {
+        val frames = listOf(frame(0, 40.0, 18.4), frame(1000, 38.0, 0.6))
+
+        assertThat(BatteryMath.driveEnergyKwh(frames, 52.9)!!)
+            .`as`("2% of 52.9")
+            .isCloseTo(1.06, within(0.01))
+    }
+
+    /**
+     * Over a drive that went somewhere, a zero delta means the frames were too sparse to catch
+     * the movement rather than that the car used nothing — and a confident nought is worse than
+     * the coarse figure.
+     */
+    @Test
+    fun `a counter that did not move falls back rather than claiming nothing was used`() {
+        val frames = listOf(frame(0, 80.0, 10.0), frame(1000, 77.0, 10.0))
+
+        assertThat(BatteryMath.driveEnergyKwh(frames, 52.9)!!)
+            .`as`("3% of 52.9")
+            .isCloseTo(1.59, within(0.01))
+    }
+
+    /** Most drives on this box happen with the link down and have no counter at all. */
+    @Test
+    fun `a drive the car never reported a counter for still gets a figure`() {
+        val frames = listOf(frame(0, 80.0, null), frame(1000, 76.0, null))
+
+        assertThat(BatteryMath.driveEnergyKwh(frames, 52.9)!!).isCloseTo(2.12, within(0.01))
+    }
+
+    /** And a drive with neither source gets nothing rather than a zero. */
+    @Test
+    fun `a drive with no evidence at all reports no energy`() {
+        val frames = listOf(frame(0, null, null), frame(1000, null, null))
+
+        assertThat(BatteryMath.driveEnergyKwh(frames, 52.9)).isNull()
+    }
+
+    /**
+     * The charge-level figure is kept separately so a drive can show what each source made of it.
+     * A comparison where one number is derived from the other tells nobody anything.
+     */
+    @Test
+    fun `the charge-level figure stands on its own for comparison`() {
+        assertThat(BatteryMath.consumedFromSoc(80.0, 76.0, 52.9)!!).isCloseTo(2.12, within(0.01))
+        assertThat(BatteryMath.consumedFromSoc(80.0, 80.0, 52.9)).isNull()
+        assertThat(BatteryMath.consumedFromSoc(null, 76.0, 52.9)).isNull()
+    }
 }
