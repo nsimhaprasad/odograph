@@ -44,7 +44,25 @@ data class TripEntity(
      * cost, and in what conditions", and rejoining thousands of samples to answer it is the shape
      * of query that stops being free once there are years of them.
      */
-    val avgTempC: Double? = null
+    val avgTempC: Double? = null,
+    /**
+     * Energy the car's own counter says this drive used, kW·h.
+     *
+     * Recorded beside our own figure rather than instead of it, because the two disagree and it
+     * is not yet established which is right. Ours comes from the state of charge, which the car
+     * reports in whole percent — one percent of this pack is 0.53 kW·h, so every drive energy in
+     * the history is a multiple of it and a short errand is mostly quantisation. The car's counter
+     * has no such floor, which would make it strictly better evidence if its meaning were certain.
+     * It is not: the only captured frames available put it at 8.8 kW·h across 138.5 km, roughly
+     * twice as efficient as this car can be, and those frames are from the 38 kW·h Windsor rather
+     * than this one. Either the scale is wrong or the counter is not consumption at all — regen
+     * would fit that number equally well.
+     *
+     * So both are kept, the comparison is shown, and the car decides the argument rather than me.
+     */
+    val carEnergyKwh: Double? = null,
+    /** Distance the car's own counter says this drive covered, km. The other half of the check. */
+    val carDistanceKm: Double? = null
 )
 
 @Entity(tableName = "points", indices = [Index(value = ["tripId", "t"])])

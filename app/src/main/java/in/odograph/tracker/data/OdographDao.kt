@@ -588,6 +588,10 @@ interface OdographDao {
     @Query("UPDATE trips SET avgTempC = :avgTempC WHERE id = :id")
     fun setAvgTemp(id: Long, avgTempC: Double?)
 
+    /** Stamps what the car's own counters made of the drive, for comparison with our own figure. */
+    @Query("UPDATE trips SET carEnergyKwh = :energyKwh, carDistanceKm = :distanceKm WHERE id = :id")
+    fun setCarCounters(id: Long, energyKwh: Double?, distanceKm: Double?)
+
     // ---- route efficiency ----
 
     /**

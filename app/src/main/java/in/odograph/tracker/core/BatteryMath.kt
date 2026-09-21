@@ -128,6 +128,22 @@ object BatteryMath {
         return energyKwh / (distanceM / 100_000.0)
     }
 
+    /**
+     * What the car's own running counter says a drive used, from the frames either side of it.
+     *
+     * The counters reset to zero at every charge, so a drive that straddles one reads backwards.
+     * That is not a small error to be clamped away — it means the window contains a reset and the
+     * counter simply cannot answer for it — so the answer is nothing rather than a number.
+     *
+     * Null is also the answer when either end is missing. A counter read once is a reading, not a
+     * difference, and there is no honest way to turn one into the other.
+     */
+    fun counterDelta(first: Double?, last: Double?): Double? {
+        if (first == null || last == null) return null
+        val delta = last - first
+        return delta.takeIf { it.isFinite() && it >= 0.0 }
+    }
+
     /** km per kW·h for one trip — the number drivers call "mileage". */
     fun kmPerKwh(energyKwh: Double?, distanceM: Double): Double? {
         val eff = kwhPer100Km(energyKwh, distanceM) ?: return null

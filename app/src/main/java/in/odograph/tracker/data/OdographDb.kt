@@ -10,7 +10,7 @@ import java.io.File
 
 @Database(
     entities = [TripEntity::class, PointEntity::class, PlaceEntity::class, BatteryEntity::class, ChargeEventEntity::class, DailyTelemetryEntity::class, PriceReminderEntity::class],
-    version = 10,
+    version = 11,
     exportSchema = true
 )
 abstract class OdographDb : RoomDatabase() {
@@ -149,6 +149,20 @@ abstract class OdographDb : RoomDatabase() {
          * figures are learned from.
          */
         /**
+         * Keeps what the car's own trip counters said, beside what we measured.
+         *
+         * Nullable and backfilled with nothing: drives recorded before this have no reading, and
+         * inventing one would put a fabricated comparison into the very evidence the comparison
+         * exists to gather.
+         */
+        val MIGRATION_10_11 = object : Migration(10, 11) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE `trips` ADD COLUMN `carEnergyKwh` REAL")
+                db.execSQL("ALTER TABLE `trips` ADD COLUMN `carDistanceKm` REAL")
+            }
+        }
+
+        /**
          * Marks which charge sessions were watched and which were worked out afterwards.
          *
          * Everything already in the table was built from live frames, so false is the correct
@@ -211,7 +225,7 @@ abstract class OdographDb : RoomDatabase() {
                 // The car cuts power without warning. Write-ahead logging means a torn write
                 // costs one in-flight row, never the database.
                 .setJournalMode(JournalMode.WRITE_AHEAD_LOGGING)
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11)
                 .build()
                 .also { instance = it }
         }

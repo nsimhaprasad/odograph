@@ -3,6 +3,7 @@ package `in`.odograph.tracker.core
 import `in`.odograph.tracker.core.BatteryMath.ChargeKind
 import `in`.odograph.tracker.data.BatteryEntity
 import org.assertj.core.api.Assertions.assertThat
+import org.assertj.core.api.Assertions.within
 import org.junit.Test
 
 class BatteryMathTest {
@@ -267,4 +268,40 @@ class BatteryMathTest {
     }
 
     private fun within(tolerance: Double) = org.assertj.core.data.Offset.offset(tolerance)
+
+    // ------------------------------------------- the car's own running counters
+
+    /**
+     * The car keeps its own tally of energy and distance since the last charge, and the difference
+     * across a drive is what it thinks that drive cost. Worth having because our own figure is
+     * built from whole-percent state of charge and is quantised to 0.53 kW·h a step on this pack,
+     * which on a short errand is the entire measurement.
+     */
+    @Test
+    fun `the counter delta is what the car counted across the drive`() {
+        assertThat(BatteryMath.counterDelta(8.8, 11.3)!!).isCloseTo(2.5, within(0.001))
+    }
+
+    /**
+     * The counters reset to zero at every charge, so a drive straddling one reads backwards. That
+     * is not a small error to clamp away — it means the window contains a reset and the counter
+     * cannot answer for it — so the answer is nothing rather than a number.
+     */
+    @Test
+    fun `a drive that straddles a charge gets no answer rather than a wrong one`() {
+        assertThat(BatteryMath.counterDelta(18.4, 0.6)).isNull()
+    }
+
+    /** A counter read once is a reading, not a difference. */
+    @Test
+    fun `one end missing means no difference`() {
+        assertThat(BatteryMath.counterDelta(null, 11.3)).isNull()
+        assertThat(BatteryMath.counterDelta(8.8, null)).isNull()
+        assertThat(BatteryMath.counterDelta(null, null)).isNull()
+    }
+
+    @Test
+    fun `a drive the counter did not move on counted nothing`() {
+        assertThat(BatteryMath.counterDelta(8.8, 8.8)!!).isZero()
+    }
 }

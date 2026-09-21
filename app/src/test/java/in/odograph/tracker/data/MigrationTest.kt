@@ -496,4 +496,37 @@ class MigrationTest {
             assertThat(c.getInt(0)).isEqualTo(1)
         }
     }
+
+    /**
+     * The car's own trip counters, kept beside our own figure rather than instead of it. Nullable
+     * and backfilled with nothing: drives recorded before this have no reading, and inventing one
+     * would fabricate the very evidence the comparison exists to gather.
+     */
+    @Test
+    fun `migrating from v10 makes room for what the car counted`() {
+        val db = openV7()
+        OdographDb.MIGRATION_7_8.migrate(db)
+        OdographDb.MIGRATION_8_9.migrate(db)
+        OdographDb.MIGRATION_9_10.migrate(db)
+        db.execSQL(
+            """INSERT INTO trips
+               (startedAt, endedAt, distanceM, durationS, movingS, maxSpeedMps, avgSpeedMps,
+                slowestKmMps, elevGainM, elevLossM)
+               VALUES (1000, 2000, 5000.0, 600, 540, 18.0, 9.0, 3.0, 0.0, 0.0)"""
+        )
+
+        OdographDb.MIGRATION_10_11.migrate(db)
+
+        db.query("SELECT carEnergyKwh, carDistanceKm FROM trips WHERE startedAt = 1000").use { c ->
+            assertThat(c.moveToFirst()).isTrue()
+            assertThat(c.isNull(0)).`as`("no reading, not a reading of zero").isTrue()
+            assertThat(c.isNull(1)).isTrue()
+        }
+        db.execSQL("UPDATE trips SET carEnergyKwh = 2.5, carDistanceKm = 18.4 WHERE startedAt = 1000")
+        db.query("SELECT carEnergyKwh, carDistanceKm FROM trips WHERE startedAt = 1000").use { c ->
+            assertThat(c.moveToFirst()).isTrue()
+            assertThat(c.getDouble(0)).isEqualTo(2.5)
+            assertThat(c.getDouble(1)).isEqualTo(18.4)
+        }
+    }
 }

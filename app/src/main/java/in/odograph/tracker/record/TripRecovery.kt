@@ -225,6 +225,25 @@ object TripRecovery {
         // stops being free once there are years of them.
         dao.setAvgTemp(tripId, dao.avgTempFor(tripId))
 
+        // What the car's own counters made of the same drive, recorded beside our figure rather
+        // than instead of it. Ours is built from whole-percent state of charge and is therefore
+        // quantised to 0.53 kW·h a step on this pack; the car's counter has no such floor and
+        // would be strictly better evidence if its meaning were settled. It is not, so both are
+        // kept and the comparison accumulates until the car has answered the question itself.
+        if (battery.isNotEmpty()) {
+            dao.setCarCounters(
+                tripId,
+                BatteryMath.counterDelta(
+                    battery.first().powerUsageSinceLastChargeKwh,
+                    battery.last().powerUsageSinceLastChargeKwh
+                ),
+                BatteryMath.counterDelta(
+                    battery.first().distanceSinceLastChargeKm,
+                    battery.last().distanceSinceLastChargeKm
+                )
+            )
+        }
+
         // Now that the trip has real endpoints, attach it to the places it ran between. This is
         // what makes "most visited route" answerable with a GROUP BY.
         val places = PlaceResolver(dao)
