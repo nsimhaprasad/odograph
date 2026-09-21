@@ -67,10 +67,20 @@ object RangeCalibration {
      * Out of sample by construction: the model for drive *i* is built from drives before *i* only.
      * That is the whole point — it reproduces what the app would genuinely have told the driver
      * that morning, which is the only thing worth measuring the error of.
+     *
+     * And it has to be the *same* estimate. This scored the conditioned model — the median of
+     * prior drives in the same character bucket — while the driving screen has always shown the
+     * rolling mean of the last ten. Two different estimators, and a bias measured on one is not a
+     * bias the other has. On a real history the conditioned model came out 15% pessimistic while
+     * the rolling mean it was correcting was only 4% out, so the correction pushed a nearly
+     * honest number 17% optimistic: the car said 328 km and the app said 374.
+     *
+     * The conditioned model is not wrong and still answers the Insights questions it was built
+     * for. It simply is not the number being corrected here.
      */
     fun backtest(
         samples: List<EfficiencyStats.Sample>,
-        zone: TimeZone,
+        @Suppress("UNUSED_PARAMETER") zone: TimeZone,
         window: Int = WINDOW
     ): List<Score> {
         val ordered = samples.sortedBy { it.startedAt }
@@ -81,17 +91,24 @@ object RangeCalibration {
             val actual = BatteryMath.kwhPer100Km(drive.energyKwh, drive.distanceM) ?: continue
             if (drive.distanceM < BatteryMath.MIN_EFFICIENCY_DISTANCE_M) continue
 
-            val before = ordered.subList(0, i)
-            val predicted = EfficiencyStats.expectedKwhPer100Km(
-                samples = before,
-                character = DriveContext.character(drive.distanceM, drive.movingS),
-                timeOfDay = DriveContext.timeOfDay(drive.startedAt, zone),
-                zone = zone
-            ) ?: continue
-
+            val predicted = predictAsTheScreenWould(ordered.subList(0, i)) ?: continue
             scores += Score(drive.startedAt, predicted, actual)
         }
         return scores.takeLast(window)
+    }
+
+    /**
+     * The estimate exactly as the driving screen forms it: the mean of the most recent drives.
+     *
+     * Newest first, because that is the order [BatteryMath.rollingKwhPer100Km] expects — it takes
+     * the head of the list as "recent", so handing it oldest-first would average the wrong decade
+     * of driving and quietly invert the whole measurement.
+     */
+    private fun predictAsTheScreenWould(before: List<EfficiencyStats.Sample>): Double? {
+        val effs = before.asReversed().mapNotNull {
+            BatteryMath.kwhPer100Km(it.energyKwh, it.distanceM)
+        }
+        return BatteryMath.rollingKwhPer100Km(effs)
     }
 
     /** The correction implied by a set of scores, or null when there are too few to mean anything. */

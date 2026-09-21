@@ -93,11 +93,17 @@ class RangeCalibrationTest {
      * A model out by more than a third is not biased, it is broken — a capacity set wrong, a pack
      * misbehaving — and multiplying that away would hide the fault while making the number look
      * healthy.
+     *
+     * A car that gets steadily worse, rather than one that steps once. The step version of this
+     * scenario stopped disagreeing wildly the day the estimate became the rolling mean of the last
+     * ten drives, because that mean catches a step up within ten drives and the error it leaves is
+     * a transient. Only a sustained trend keeps the estimate permanently behind, which is the
+     * shape a real fault takes anyway: a pack losing capacity does not do it in one afternoon.
      */
     @Test
     fun `a wild disagreement is clamped rather than swallowed`() {
-        val early = (0..9).map { drive(it, 20.0, 8.0) }
-        val later = (10..29).map { drive(it, 20.0, 40.0) }
+        val early = (0..29).map { drive(it, 20.0, 8.0 * Math.pow(1.15, it.toDouble())) }
+        val later = emptyList<EfficiencyStats.Sample>()
 
         val accuracy = RangeCalibration.accuracy(RangeCalibration.backtest(early + later, ist))!!
 
@@ -231,6 +237,62 @@ class RangeCalibrationTest {
 
         assertThat(kotlin.math.abs(v.errorPercent))
             .isLessThan(RangeCalibration.CLOSE_ENOUGH_PERCENT)
+    }
+
+    // ------------------------------------ the correction must fit the estimate it corrects
+
+    /**
+     * A bias measured on one estimator is not a bias another one has.
+     *
+     * This scored the conditioned model — the median of prior drives in the same character bucket
+     * — while the driving screen has always shown the rolling mean of the last ten. On a real
+     * history the conditioned model came out 15% pessimistic while the rolling mean it was
+     * correcting was only 4% out, so the correction pushed a nearly honest number 17% optimistic:
+     * the car said 328 km and the app said 374.
+     */
+    @Test
+    fun `a drive is scored against the rolling mean the screen actually shows`() {
+        val history = drives(count = 12, kwhPer100 = 15.0, from = 1_000_000L)
+        val scores = RangeCalibration.backtest(history, utc)
+
+        val expected = BatteryMath.rollingKwhPer100Km(List(10) { 15.0 })!!
+        assertThat(scores.last().predicted)
+            .`as`("the prediction is the screen's own rolling mean, not a bucketed median")
+            .isCloseTo(expected, within(0.01))
+    }
+
+    /**
+     * The estimator is unbiased against a steady history, so the correction must leave it alone.
+     * Anything else is the calibration inventing an error to fix.
+     */
+    @Test
+    fun `a steady history needs no correction`() {
+        val history = drives(count = 20, kwhPer100 = 15.0, from = 1_000_000L)
+
+        val accuracy = RangeCalibration.accuracy(RangeCalibration.backtest(history, utc))!!
+
+        assertThat(accuracy.correction).isCloseTo(1.0, within(0.02))
+        assertThat(accuracy.medianErrorPercent).isCloseTo(0.0, within(2.0))
+    }
+
+    /**
+     * And when the estimate genuinely is optimistic, the correction still says so. Fixing the
+     * estimator mismatch must not cost the calibration its actual job.
+     */
+    @Test
+    fun `a history that keeps costing more than predicted still raises a correction`() {
+        // Ten cheap drives, then a run of expensive ones the rolling mean lags behind.
+        val cheap = (0 until 10).map { driveCosting(12.0, 1_000_000L + it * 3_600_000L) }
+        val dear = (0 until 12).map { driveCosting(18.0, 1_000_000L + (10 + it) * 3_600_000L) }
+
+        val accuracy = RangeCalibration.accuracy(
+            RangeCalibration.backtest(cheap + dear, utc)
+        )!!
+
+        assertThat(accuracy.medianErrorPercent)
+            .`as`("drives cost more than was predicted, so the estimate was optimistic")
+            .isGreaterThan(0.0)
+        assertThat(accuracy.correction).isGreaterThan(1.0)
     }
 
     private val utc: java.util.TimeZone get() = java.util.TimeZone.getTimeZone("UTC")

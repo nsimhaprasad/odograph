@@ -9,6 +9,9 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -224,10 +227,29 @@ fun ChargeEditDialog(
 
     val loss = BatteryMath.lossPct(e.energyKwh, e.deliveredKwh)
 
+    // Bounded and scrolling, with the buttons held outside the scroll. The dialog grows with the
+    // session it is editing — a charge at a known place adds a location field, one with a
+    // wall-meter reading adds a loss line — and it had neither a scroll nor a height limit, so on
+    // a real session those two extra rows pushed SAVE off the bottom of the screen: every field
+    // visible, none of them committable. The session I tested with had no place and no wall
+    // reading, which is exactly why it looked fine here and failed in the car.
     Column(
-        Modifier.fillMaxWidth().background(palette.trackSoft).padding(m.pad),
+        Modifier
+            .fillMaxWidth()
+            .fillMaxHeight(0.92f)
+            .background(palette.trackSoft)
+            // Above the keyboard, not behind it. Pinning SAVE to the bottom of the dialog only
+            // helps if the bottom of the dialog is somewhere the driver can reach: with the
+            // keyboard up it sat underneath, drawn and reported by the layout but catching none
+            // of the taps aimed at it. Typing a charge level is exactly when it is needed.
+            .imePadding()
+            .padding(m.pad),
         verticalArrangement = Arrangement.spacedBy(m.gap / 2)
     ) {
+      Column(
+          Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState()),
+          verticalArrangement = Arrangement.spacedBy(m.gap / 2)
+      ) {
         Text(
             text = title,
             color = palette.numeral,
@@ -351,6 +373,8 @@ fun ChargeEditDialog(
             colors = textFieldColors(palette),
             modifier = Modifier.fillMaxWidth()
         )
+      }
+        // Outside the scroll: whatever the session adds above, the way to commit it stays put.
         Row(horizontalArrangement = Arrangement.spacedBy(m.gap / 2)) {
             Chip("SAVE", true, palette, m) {
                 val energy = energyText.toDoubleOrNull() ?: e.energyKwh
