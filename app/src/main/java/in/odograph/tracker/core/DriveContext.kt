@@ -74,6 +74,32 @@ object DriveContext {
 
     enum class TempBand { COOL, MILD, WARM, HOT }
 
+    /**
+     * Above this share of a drive, the climate control was meaningfully on.
+     *
+     * A quarter, not a half. The question is not "was the cabin being cooled the whole way" but
+     * "did this drive pay for cooling at all", and a compressor running for a quarter of a journey
+     * has already cost most of what one running throughout would — the heavy pull is bringing a
+     * parked car down from forty degrees, which happens at the start and then tapers.
+     */
+    const val CLIMATE_ON_SHARE = 0.25
+
+    enum class Climate { OFF, ON }
+
+    /**
+     * Whether a drive paid for climate control, from the share of its frames that reported it.
+     *
+     * Null when nothing was recorded either way, which is not the same as off and must never be
+     * folded into it: on this box most drives happen with the telematics link down, and treating
+     * every unobserved drive as air-conditioning-free would fill the OFF bucket with drives that
+     * were nothing of the sort.
+     */
+    fun climate(share: Double?): Climate? = when {
+        share == null -> null
+        share >= CLIMATE_ON_SHARE -> Climate.ON
+        else -> Climate.OFF
+    }
+
     /** Everything about a drive that is not the route itself. */
     data class Context(
         val timeOfDay: TimeOfDay,

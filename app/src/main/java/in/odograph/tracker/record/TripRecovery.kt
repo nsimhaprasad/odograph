@@ -224,6 +224,7 @@ object TripRecovery {
         // and how hot was it", and rejoining the samples to answer it is the shape of query that
         // stops being free once there are years of them.
         dao.setAvgTemp(tripId, dao.avgTempFor(tripId))
+        dao.setClimateShare(tripId, dao.climateShareFor(tripId))
 
         // What the car's own counters made of the same drive, recorded beside our figure rather
         // than instead of it. Ours is built from whole-percent state of charge and is therefore

@@ -26,7 +26,9 @@ object EfficiencyStats {
         val distanceM: Double,
         val movingS: Long,
         val energyKwh: Double,
-        val tempC: Double?
+        val tempC: Double?,
+        /** Share of the drive the climate control ran for, 0 to 1, or null if never observed. */
+        val climateShare: Double? = null
     )
 
     /** What a group of drives cost, and how much of it there is to believe. */
@@ -84,6 +86,18 @@ object EfficiencyStats {
     /** Stop-start against sustained running. */
     fun byCharacter(samples: List<Sample>): Map<DriveContext.Character, Bucket> =
         samples.groupBy { DriveContext.character(it.distanceM, it.movingS) }
+            .mapNotNull { (k, v) -> if (k == null) null else bucket(v)?.let { k to it } }
+            .toMap()
+
+    /**
+     * With the air conditioning against without it.
+     *
+     * The largest non-motive load the car has, and until now it was landing in the history as
+     * unexplained scatter: two identical routes on the same road at the same speed, one of them
+     * fifteen percent dearer, and nothing recorded to say why.
+     */
+    fun byClimate(samples: List<Sample>): Map<DriveContext.Climate, Bucket> =
+        samples.groupBy { DriveContext.climate(it.climateShare) }
             .mapNotNull { (k, v) -> if (k == null) null else bucket(v)?.let { k to it } }
             .toMap()
 

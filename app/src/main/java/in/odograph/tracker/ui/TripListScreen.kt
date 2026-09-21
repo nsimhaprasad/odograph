@@ -173,7 +173,8 @@ fun TripListScreen(showTiles: Boolean, palette: Palette) {
                         ),
                         before = dao.efficiencySamplesBefore(t.startedAt).map { row ->
                             EfficiencyStats.Sample(
-                                row.startedAt, row.distanceM, row.movingS, row.energyKwh, row.avgTempC
+                                row.startedAt, row.distanceM, row.movingS, row.energyKwh,
+                                row.avgTempC, row.climateShare
                             )
                         },
                         zone = Settings(ctx).zone

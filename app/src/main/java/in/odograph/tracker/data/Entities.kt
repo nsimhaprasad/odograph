@@ -62,7 +62,15 @@ data class TripEntity(
      */
     val carEnergyKwh: Double? = null,
     /** Distance the car's own counter says this drive covered, km. The other half of the check. */
-    val carDistanceKm: Double? = null
+    val carDistanceKm: Double? = null,
+    /**
+     * How much of this drive the climate control was running for, 0 to 1.
+     *
+     * A share rather than a flag, because the air conditioning is not a thing that is simply on or
+     * off across half an hour: it cycles, it gets switched off once the cabin settles, it comes on
+     * again at a traffic light. Null when no frame said either way.
+     */
+    val climateShare: Double? = null
 )
 
 @Entity(tableName = "points", indices = [Index(value = ["tripId", "t"])])
@@ -114,7 +122,46 @@ data class BatteryEntity(
      * energy on different days — a cabin cooled from 38 °C spends a good deal of the pack doing
      * it. The car has been sending this on every frame all along; nothing was keeping it.
      */
-    val exteriorTempC: Int? = null
+    val exteriorTempC: Int? = null,
+    /**
+     * Whether the climate control was running when this frame was taken.
+     *
+     * The single largest thing the car does with energy that is not moving. In this climate the
+     * air conditioning is on for most of the year, and a drive made with it fighting 38 °C costs
+     * noticeably more than the same drive at night with it off — a difference that has been
+     * landing in the efficiency history all along, unlabelled, as unexplained scatter.
+     */
+    val climateRunning: Boolean? = null,
+    /** Cabin temperature, °C. With the exterior reading it says how hard the climate is working. */
+    val interiorTempC: Int? = null,
+    /**
+     * What the car calls the charge it is taking: the AC/DC distinction, first hand.
+     *
+     * Worth more than it looks. Sessions are currently labelled fast or slow by a majority vote
+     * over power samples, which is a careful inference from evidence the car did not need us to
+     * infer from — it says so directly, and it is never confused by a charger that dips or spikes.
+     */
+    val chargingType: Int? = null,
+    /** Plugged in, whether or not current is flowing: a finished charge is not an unplugged car. */
+    val pluggedIn: Boolean? = null,
+    /**
+     * The pack size the car itself reports, kW·h.
+     *
+     * Everything energy-related is scaled by a capacity that is currently a constant typed into
+     * the app. If the car ever sends its own, that is the authoritative figure — and watching it
+     * fall over years is the most direct measure of battery health there is. Captured
+     * opportunistically because the presence bit is clear in every frame captured so far, which
+     * may mean this car does not send it, or may mean nobody has yet looked while it did.
+     */
+    val carCapacityKwh: Double? = null,
+    /**
+     * The 12 V battery's voltage.
+     *
+     * Nothing to do with range and one of the commonest ways an electric car strands somebody: the
+     * traction pack can be full while a flat accessory battery leaves the car unable to wake up.
+     * It is free to record and cannot be recovered after the fact.
+     */
+    val auxVoltage: Double? = null
 )
 
 /**

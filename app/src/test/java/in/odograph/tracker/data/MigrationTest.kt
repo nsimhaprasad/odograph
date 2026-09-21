@@ -529,4 +529,51 @@ class MigrationTest {
             assertThat(c.getDouble(1)).isEqualTo(18.4)
         }
     }
+
+    /**
+     * Only five of the thirty fields the telematics library exposes were being stored. This makes
+     * room for the ones that matter — whether the climate control was running, what the car calls
+     * the charge it is taking, the pack size it reports — all nullable, because a frame that was
+     * never recorded cannot be reconstructed and a zero would be a reading that never happened.
+     */
+    @Test
+    fun `migrating from v11 makes room for the readings that were being discarded`() {
+        val db = openV7()
+        OdographDb.MIGRATION_7_8.migrate(db)
+        OdographDb.MIGRATION_8_9.migrate(db)
+        OdographDb.MIGRATION_9_10.migrate(db)
+        OdographDb.MIGRATION_10_11.migrate(db)
+        db.execSQL("INSERT INTO battery (tripId, t, socPercent) VALUES (1, 1000, 80.0)")
+
+        OdographDb.MIGRATION_11_12.migrate(db)
+
+        db.query(
+            "SELECT climateRunning, interiorTempC, chargingType, pluggedIn, carCapacityKwh, auxVoltage " +
+                "FROM battery WHERE t = 1000"
+        ).use { c ->
+            assertThat(c.moveToFirst()).isTrue()
+            (0..5).forEach { assertThat(c.isNull(it)).`as`("column $it").isTrue() }
+        }
+        db.execSQL(
+            "UPDATE battery SET climateRunning = 1, interiorTempC = 26, chargingType = 2, " +
+                "pluggedIn = 1, carCapacityKwh = 52.9, auxVoltage = 12.6 WHERE t = 1000"
+        )
+        db.query("SELECT climateRunning, carCapacityKwh FROM battery WHERE t = 1000").use { c ->
+            assertThat(c.moveToFirst()).isTrue()
+            assertThat(c.getInt(0)).isEqualTo(1)
+            assertThat(c.getDouble(1)).isEqualTo(52.9)
+        }
+        // And the drive-level share the efficiency split reads.
+        db.execSQL(
+            """INSERT INTO trips
+               (startedAt, endedAt, distanceM, durationS, movingS, maxSpeedMps, avgSpeedMps,
+                slowestKmMps, elevGainM, elevLossM)
+               VALUES (1000, 2000, 5000.0, 600, 540, 18.0, 9.0, 3.0, 0.0, 0.0)"""
+        )
+        db.execSQL("UPDATE trips SET climateShare = 0.75 WHERE startedAt = 1000")
+        db.query("SELECT climateShare FROM trips WHERE startedAt = 1000").use { c ->
+            assertThat(c.moveToFirst()).isTrue()
+            assertThat(c.getDouble(0)).isEqualTo(0.75)
+        }
+    }
 }

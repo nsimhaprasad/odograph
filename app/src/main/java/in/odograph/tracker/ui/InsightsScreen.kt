@@ -57,6 +57,7 @@ private data class InsightsUi(
     val byTimeOfDay: Map<DriveContext.TimeOfDay, EfficiencyStats.Bucket> = emptyMap(),
     val byCharacter: Map<DriveContext.Character, EfficiencyStats.Bucket> = emptyMap(),
     val byTemperature: Map<DriveContext.TempBand, EfficiencyStats.Bucket> = emptyMap(),
+    val byClimate: Map<DriveContext.Climate, EfficiencyStats.Bucket> = emptyMap(),
     /** What the pack measures, and how far the estimate has been missing. */
     val health: BatteryHealth.Health? = null,
     val accuracy: RangeCalibration.Accuracy? = null,
@@ -98,7 +99,8 @@ fun InsightsScreen(palette: Palette) {
                 val capacity = Settings(ctx).batteryCapacityKwh
                 val samples = dao.efficiencySamples().map {
                     EfficiencyStats.Sample(
-                        it.startedAt, it.distanceM, it.movingS, it.energyKwh, it.avgTempC
+                        it.startedAt, it.distanceM, it.movingS, it.energyKwh, it.avgTempC,
+                        it.climateShare
                     )
                 }
                 InsightsUi(
@@ -111,6 +113,7 @@ fun InsightsScreen(palette: Palette) {
                     byTimeOfDay = EfficiencyStats.byTimeOfDay(samples, zone),
                     byCharacter = EfficiencyStats.byCharacter(samples),
                     byTemperature = EfficiencyStats.byTemperature(samples),
+                    byClimate = EfficiencyStats.byClimate(samples),
                     health = BatteryHealth.measure(
                         dao.highSocBattery(BatteryHealth.MIN_SOC_PERCENT), capacity
                     ),
@@ -251,7 +254,9 @@ private fun conditionRow(
  */
 @Composable
 private fun conditionsSection(ui: InsightsUi, palette: Palette, m: Metrics) {
-    if (ui.byTimeOfDay.isEmpty() && ui.byCharacter.isEmpty() && ui.byTemperature.isEmpty()) return
+    if (ui.byTimeOfDay.isEmpty() && ui.byCharacter.isEmpty() &&
+        ui.byTemperature.isEmpty() && ui.byClimate.isEmpty()
+    ) return
 
     Text(
         text = "WHAT IT COSTS  ·  BY CONDITIONS",
@@ -282,6 +287,14 @@ private fun conditionsSection(ui: InsightsUi, palette: Palette, m: Metrics) {
         DriveContext.TempBand.HOT to "OVER 35°"
     ).forEach { (band, label) ->
         ui.byTemperature[band]?.let { conditionRow(label, it, ui.capacityKwh, palette, m) }
+    }
+    // The largest thing the car does with energy that is not moving, and until now it was in the
+    // history only as scatter nobody could explain.
+    ui.byClimate[DriveContext.Climate.ON]?.let {
+        conditionRow("CLIMATE ON", it, ui.capacityKwh, palette, m)
+    }
+    ui.byClimate[DriveContext.Climate.OFF]?.let {
+        conditionRow("CLIMATE OFF", it, ui.capacityKwh, palette, m)
     }
 }
 

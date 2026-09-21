@@ -638,7 +638,16 @@ class TripRecorderService : Service() {
                             chargeTimeRemainingMin = ch.chargeTimeRemainingMin,
                             distanceSinceLastChargeKm = ch.distanceSinceLastChargeKm,
                             powerUsageSinceLastChargeKwh = ch.powerUsageSinceLastChargeKwh,
-                            exteriorTempC = status.exteriorTemperature
+                            exteriorTempC = status.exteriorTemperature,
+                            // Readings the car has been sending all along that nobody wrote down.
+                            // A frame not recorded cannot be recovered afterwards, so they are
+                            // stored now and reasoned about later.
+                            climateRunning = status.climateRunning,
+                            interiorTempC = status.interiorTemperature,
+                            chargingType = ch.chargingType,
+                            pluggedIn = ch.isPluggedIn,
+                            carCapacityKwh = ch.totalBatteryCapacityKwh,
+                            auxVoltage = status.auxBatteryVoltage
                         )
                     )
                 }
@@ -975,7 +984,9 @@ class TripRecorderService : Service() {
     private fun refreshRangeAccuracy(dao: OdographDao) {
         runCatching {
             val samples = dao.efficiencySamples().map {
-                EfficiencyStats.Sample(it.startedAt, it.distanceM, it.movingS, it.energyKwh, it.avgTempC)
+                EfficiencyStats.Sample(
+                    it.startedAt, it.distanceM, it.movingS, it.energyKwh, it.avgTempC, it.climateShare
+                )
             }
             rangeAccuracy = RangeCalibration.accuracy(
                 RangeCalibration.backtest(samples, settings.zone)

@@ -158,4 +158,46 @@ class EfficiencyStatsTest {
         val tiny = (1..8).map { drive(it, 9, 0.5, 16.0) }
         assertThat(EfficiencyStats.bucket(tiny)).isNull()
     }
+
+    // ------------------------------------------- with the air conditioning against without
+
+    /**
+     * The largest non-motive load the car has. Two identical routes at the same speed, one of them
+     * appreciably dearer, and until the climate state was recorded there was nothing in the
+     * history to say why.
+     */
+    @Test
+    fun `drives split by whether the climate was running`() {
+        val cooled = (0 until 5).map { sample(it, kwhPer100 = 18.0, climateShare = 0.8) }
+        val plain = (5 until 10).map { sample(it, kwhPer100 = 14.0, climateShare = 0.0) }
+
+        val split = EfficiencyStats.byClimate(cooled + plain)
+
+        assertThat(split[DriveContext.Climate.ON]!!.kwhPer100Km).isCloseTo(18.0, within(0.01))
+        assertThat(split[DriveContext.Climate.OFF]!!.kwhPer100Km).isCloseTo(14.0, within(0.01))
+    }
+
+    /** Drives nobody observed the climate on do not quietly become evidence that it was off. */
+    @Test
+    fun `unobserved drives are left out of the climate split entirely`() {
+        val unobserved = (0 until 10).map { sample(it, kwhPer100 = 25.0, climateShare = null) }
+        val plain = (10 until 15).map { sample(it, kwhPer100 = 14.0, climateShare = 0.0) }
+
+        val split = EfficiencyStats.byClimate(unobserved + plain)
+
+        assertThat(split[DriveContext.Climate.OFF]!!.kwhPer100Km)
+            .`as`("the 25s must not be in here")
+            .isCloseTo(14.0, within(0.01))
+        assertThat(split).hasSize(1)
+    }
+
+    private fun sample(i: Int, kwhPer100: Double, climateShare: Double?) =
+        EfficiencyStats.Sample(
+            startedAt = 1_000_000L + i * 3_600_000L,
+            distanceM = 20_000.0,
+            movingS = 1_800L,
+            energyKwh = kwhPer100 * 20.0 / 100.0,
+            tempC = 30.0,
+            climateShare = climateShare
+        )
 }

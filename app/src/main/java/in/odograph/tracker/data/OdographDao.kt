@@ -542,7 +542,7 @@ interface OdographDao {
      * of them. Bounded, newest first.
      */
     @Query(
-        """SELECT startedAt, distanceM, movingS, energyKwh, avgTempC FROM trips
+        """SELECT startedAt, distanceM, movingS, energyKwh, avgTempC, climateShare FROM trips
            WHERE endedAt IS NOT NULL AND energyKwh IS NOT NULL AND distanceM > 0
            ORDER BY startedAt DESC LIMIT :limit"""
     )
@@ -557,7 +557,7 @@ interface OdographDao {
      * circularity the backtest exists to avoid, applied to one row instead of the history.
      */
     @Query(
-        """SELECT startedAt, distanceM, movingS, energyKwh, avgTempC FROM trips
+        """SELECT startedAt, distanceM, movingS, energyKwh, avgTempC, climateShare FROM trips
            WHERE endedAt IS NOT NULL AND energyKwh IS NOT NULL AND distanceM > 0
              AND startedAt < :before
            ORDER BY startedAt DESC LIMIT :limit"""
@@ -587,6 +587,21 @@ interface OdographDao {
 
     @Query("UPDATE trips SET avgTempC = :avgTempC WHERE id = :id")
     fun setAvgTemp(id: Long, avgTempC: Double?)
+
+    /**
+     * The share of this drive's frames that reported the climate control running, 0 to 1.
+     *
+     * AVG over a boolean column does exactly this in SQLite, and frames that said nothing either
+     * way are excluded rather than counted as "off" — an unrecorded reading is not a reading.
+     */
+    @Query(
+        """SELECT AVG(climateRunning) FROM battery
+           WHERE tripId = :tripId AND climateRunning IS NOT NULL"""
+    )
+    fun climateShareFor(tripId: Long): Double?
+
+    @Query("UPDATE trips SET climateShare = :share WHERE id = :id")
+    fun setClimateShare(id: Long, share: Double?)
 
     /** Stamps what the car's own counters made of the drive, for comparison with our own figure. */
     @Query("UPDATE trips SET carEnergyKwh = :energyKwh, carDistanceKm = :distanceKm WHERE id = :id")
@@ -690,7 +705,8 @@ data class EfficiencySampleRow(
     val distanceM: Double,
     val movingS: Long,
     val energyKwh: Double,
-    val avgTempC: Double?
+    val avgTempC: Double?,
+    val climateShare: Double? = null
 )
 
 data class RouteTripEff(

@@ -10,7 +10,7 @@ import java.io.File
 
 @Database(
     entities = [TripEntity::class, PointEntity::class, PlaceEntity::class, BatteryEntity::class, ChargeEventEntity::class, DailyTelemetryEntity::class, PriceReminderEntity::class],
-    version = 11,
+    version = 12,
     exportSchema = true
 )
 abstract class OdographDb : RoomDatabase() {
@@ -149,6 +149,34 @@ abstract class OdographDb : RoomDatabase() {
          * figures are learned from.
          */
         /**
+         * Keeps the readings the car was already sending and nobody was writing down.
+         *
+         * Only five of the thirty fields the telematics library exposes were being stored. Most of
+         * the rest are genuinely uninteresting — which door is open — but these are not: whether
+         * the climate control was running is the largest non-motive load there is, the charge type
+         * is the AC/DC answer the app was inferring from power samples instead of reading, and the
+         * pack capacity would replace a constant typed into the source with the car's own number.
+         *
+         * All nullable and backfilled with nothing. A frame that was never recorded cannot be
+         * reconstructed, and a zero here would be a reading that never happened.
+         */
+        val MIGRATION_11_12 = object : Migration(11, 12) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE `battery` ADD COLUMN `climateRunning` INTEGER")
+                db.execSQL("ALTER TABLE `battery` ADD COLUMN `interiorTempC` INTEGER")
+                db.execSQL("ALTER TABLE `battery` ADD COLUMN `chargingType` INTEGER")
+                db.execSQL("ALTER TABLE `battery` ADD COLUMN `pluggedIn` INTEGER")
+                db.execSQL("ALTER TABLE `battery` ADD COLUMN `carCapacityKwh` REAL")
+                db.execSQL("ALTER TABLE `battery` ADD COLUMN `auxVoltage` REAL")
+                // Denormalised onto the drive for the same reason the temperature is: every
+                // efficiency question asked later is "what did this cost and under what
+                // conditions", and rejoining thousands of frames to answer it is the shape of
+                // query that stops being free once there are years of them.
+                db.execSQL("ALTER TABLE `trips` ADD COLUMN `climateShare` REAL")
+            }
+        }
+
+        /**
          * Keeps what the car's own trip counters said, beside what we measured.
          *
          * Nullable and backfilled with nothing: drives recorded before this have no reading, and
@@ -225,7 +253,7 @@ abstract class OdographDb : RoomDatabase() {
                 // The car cuts power without warning. Write-ahead logging means a torn write
                 // costs one in-flight row, never the database.
                 .setJournalMode(JournalMode.WRITE_AHEAD_LOGGING)
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12)
                 .build()
                 .also { instance = it }
         }

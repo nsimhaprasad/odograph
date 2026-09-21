@@ -134,4 +134,38 @@ class DriveContextTest {
         assertThat(DriveContext.tempBand(DriveContext.WARM_MAX_C))
             .isEqualTo(DriveContext.TempBand.HOT)
     }
+
+    // ------------------------------------------- the air conditioning
+
+    /**
+     * A share rather than a flag, because the compressor is not on or off across half an hour: it
+     * cycles, it is switched off once the cabin settles, it comes back at a traffic light.
+     */
+    @Test
+    fun `a drive that ran the climate for a quarter of itself counts as cooled`() {
+        assertThat(DriveContext.climate(0.25)).isEqualTo(DriveContext.Climate.ON)
+        assertThat(DriveContext.climate(0.9)).isEqualTo(DriveContext.Climate.ON)
+    }
+
+    /**
+     * A quarter, not a half: the question is whether the drive paid for cooling at all, and the
+     * heavy pull is bringing a parked car down from forty degrees, which happens at the start and
+     * then tapers.
+     */
+    @Test
+    fun `a brief burst of cooling is not a cooled drive`() {
+        assertThat(DriveContext.climate(0.05)).isEqualTo(DriveContext.Climate.OFF)
+        assertThat(DriveContext.climate(0.0)).isEqualTo(DriveContext.Climate.OFF)
+    }
+
+    /**
+     * Never observed is not the same as off, and folding the two together would be quietly
+     * ruinous: on this box most drives happen with the telematics link down, so the OFF bucket
+     * would fill with drives that were nothing of the sort and the comparison would be with
+     * itself.
+     */
+    @Test
+    fun `a drive nobody observed has no climate answer`() {
+        assertThat(DriveContext.climate(null)).isNull()
+    }
 }
