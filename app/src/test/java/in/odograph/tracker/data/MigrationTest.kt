@@ -576,4 +576,51 @@ class MigrationTest {
             assertThat(c.getDouble(0)).isEqualTo(0.75)
         }
     }
+
+    /**
+     * The rest of what the car sends. A sweep rather than another field at a time: a column is
+     * cheap, and a frame that goes by unrecorded is evidence destroyed. All nullable, because a
+     * frame that never carried a reading must not gain a zero.
+     */
+    @Test
+    fun `migrating from v12 makes room for the rest of the frame`() {
+        val db = openV7()
+        OdographDb.MIGRATION_7_8.migrate(db)
+        OdographDb.MIGRATION_8_9.migrate(db)
+        OdographDb.MIGRATION_9_10.migrate(db)
+        OdographDb.MIGRATION_10_11.migrate(db)
+        OdographDb.MIGRATION_11_12.migrate(db)
+        db.execSQL("INSERT INTO battery (tripId, t, socPercent) VALUES (1, 1000, 80.0)")
+
+        OdographDb.MIGRATION_12_13.migrate(db)
+
+        db.query(
+            "SELECT carJourneyId, tyreFlPsi, carGpsStatus, chargerSupplier, staticDrainRaw " +
+                "FROM battery WHERE t = 1000"
+        ).use { c ->
+            assertThat(c.moveToFirst()).isTrue()
+            (0..4).forEach {
+                assertThat(c.isNull(it)).`as`("an unrecorded reading, column $it").isTrue()
+            }
+        }
+        // And every new column accepts what the poller writes.
+        db.execSQL(
+            "UPDATE battery SET carJourneyId = 4471, carJourneyDistanceRaw = 138, " +
+                "engineStatusRaw = 1, powerModeRaw = 2, handbrake = 0, " +
+                "tyreFlPsi = 32.5, tyreFrPsi = 32.0, tyreRlPsi = 31.5, tyreRrPsi = 31.0, " +
+                "carGpsSatellites = 9, carGpsStatus = 'FIX_3D', carSpeedKmh = 47.0, " +
+                "chargerId = 'PILE-1', chargerSupplier = 'ChargeZone', lastChargeEndKwh = 29.8, " +
+                "staticDrainRaw = 3, chargeElapsedS = 1800, dayDistanceRaw = 421, " +
+                "dayPowerRaw = 64 WHERE t = 1000"
+        )
+        db.query(
+            "SELECT carJourneyId, tyreFlPsi, carGpsStatus, chargerSupplier FROM battery WHERE t = 1000"
+        ).use { c ->
+            assertThat(c.moveToFirst()).isTrue()
+            assertThat(c.getInt(0)).isEqualTo(4471)
+            assertThat(c.getDouble(1)).isEqualTo(32.5)
+            assertThat(c.getString(2)).isEqualTo("FIX_3D")
+            assertThat(c.getString(3)).isEqualTo("ChargeZone")
+        }
+    }
 }

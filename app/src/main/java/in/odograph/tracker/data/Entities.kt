@@ -161,7 +161,60 @@ data class BatteryEntity(
      * traction pack can be full while a flat accessory battery leaves the car unable to wake up.
      * It is free to record and cannot be recovered after the fact.
      */
-    val auxVoltage: Double? = null
+    val auxVoltage: Double? = null,
+    /**
+     * The car's own identifier for the journey this frame was taken on.
+     *
+     * The most valuable thing in the frame that nobody was reading. Every trip boundary in this
+     * app is inferred from how long the car has been stationary, and every threshold in that
+     * inference is a guess about traffic, parking and drop-offs — guesses that have cost real
+     * bugs: drives ended at red lights, journeys split by a selector moved to P, an evening
+     * shredded into three hundred fragments. The car numbers its journeys. A change here is a
+     * boundary stated rather than deduced, and it is recorded now so the day that inference is
+     * replaced there is already a history to check it against.
+     */
+    val carJourneyId: Int? = null,
+    /** Distance on the car's current journey, in the units it sends. Scale unconfirmed. */
+    val carJourneyDistanceRaw: Int? = null,
+    /** The car's engine/ready byte. Raw: the enumeration behind it is not established. */
+    val engineStatusRaw: Int? = null,
+    /** The car's power-mode byte. Raw for the same reason. */
+    val powerModeRaw: Int? = null,
+    /** Handbrake, as the car reports it. Another parking signal, recorded rather than trusted. */
+    val handbrake: Boolean? = null,
+    /**
+     * Tyre pressures, PSI, front-left to rear-right.
+     *
+     * Range and safety at once: a soft tyre costs measurable efficiency long before it is visible
+     * to a driver walking past, and this is the only place the car ever says so.
+     */
+    val tyreFlPsi: Double? = null,
+    val tyreFrPsi: Double? = null,
+    val tyreRlPsi: Double? = null,
+    val tyreRrPsi: Double? = null,
+    /**
+     * How good the car's own position fix was when this frame was taken.
+     *
+     * Directly relevant to a basement: the app has just learned to stop believing its own
+     * speedometer when the receiver goes quiet, and this is the same question asked of the car's
+     * receiver rather than the box's. A reading taken on two satellites is not a reading.
+     */
+    val carGpsSatellites: Int? = null,
+    val carGpsStatus: String? = null,
+    /** The speed the car itself reports, km/h — a second opinion that owes nothing to our GNSS. */
+    val carSpeedKmh: Double? = null,
+    /** Which charger this was, when the car names it. Would let public charging spots name themselves. */
+    val chargerId: String? = null,
+    val chargerSupplier: String? = null,
+    /** Energy the pack held when the last charge ended, kW·h. A cross-check on consumption since. */
+    val lastChargeEndKwh: Double? = null,
+    /** The car's own standing-consumption counter. Vampire drain, first hand. Scale unconfirmed. */
+    val staticDrainRaw: Int? = null,
+    /** Seconds the current charge has been running, as the car counts it. */
+    val chargeElapsedS: Int? = null,
+    /** The car's own day counters. Raw: the scales are not established. */
+    val dayDistanceRaw: Int? = null,
+    val dayPowerRaw: Int? = null
 )
 
 /**

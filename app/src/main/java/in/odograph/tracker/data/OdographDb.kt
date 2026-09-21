@@ -10,7 +10,7 @@ import java.io.File
 
 @Database(
     entities = [TripEntity::class, PointEntity::class, PlaceEntity::class, BatteryEntity::class, ChargeEventEntity::class, DailyTelemetryEntity::class, PriceReminderEntity::class],
-    version = 12,
+    version = 13,
     exportSchema = true
 )
 abstract class OdographDb : RoomDatabase() {
@@ -149,6 +149,37 @@ abstract class OdographDb : RoomDatabase() {
          * figures are learned from.
          */
         /**
+         * The rest of what the car sends.
+         *
+         * A deliberate sweep rather than another field at a time: recording costs a column and
+         * cannot be done retroactively, and every frame that goes by unrecorded is evidence
+         * destroyed. What these are *used* for is a separate question with a separate bar — the
+         * journey id in particular is recorded here to be checked against the app's own inferred
+         * boundaries before anything is allowed to depend on it.
+         *
+         * All nullable. A frame that never carried a reading must not gain a zero.
+         */
+        val MIGRATION_12_13 = object : Migration(12, 13) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                listOf(
+                    "carJourneyId" to "INTEGER", "carJourneyDistanceRaw" to "INTEGER",
+                    "engineStatusRaw" to "INTEGER", "powerModeRaw" to "INTEGER",
+                    "handbrake" to "INTEGER",
+                    "tyreFlPsi" to "REAL", "tyreFrPsi" to "REAL",
+                    "tyreRlPsi" to "REAL", "tyreRrPsi" to "REAL",
+                    "carGpsSatellites" to "INTEGER", "carGpsStatus" to "TEXT",
+                    "carSpeedKmh" to "REAL",
+                    "chargerId" to "TEXT", "chargerSupplier" to "TEXT",
+                    "lastChargeEndKwh" to "REAL", "staticDrainRaw" to "INTEGER",
+                    "chargeElapsedS" to "INTEGER",
+                    "dayDistanceRaw" to "INTEGER", "dayPowerRaw" to "INTEGER"
+                ).forEach { (name, type) ->
+                    db.execSQL("ALTER TABLE `battery` ADD COLUMN `$name` $type")
+                }
+            }
+        }
+
+        /**
          * Keeps the readings the car was already sending and nobody was writing down.
          *
          * Only five of the thirty fields the telematics library exposes were being stored. Most of
@@ -253,7 +284,7 @@ abstract class OdographDb : RoomDatabase() {
                 // The car cuts power without warning. Write-ahead logging means a torn write
                 // costs one in-flight row, never the database.
                 .setJournalMode(JournalMode.WRITE_AHEAD_LOGGING)
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13)
                 .build()
                 .also { instance = it }
         }

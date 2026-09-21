@@ -647,7 +647,30 @@ class TripRecorderService : Service() {
                             chargingType = ch.chargingType,
                             pluggedIn = ch.isPluggedIn,
                             carCapacityKwh = ch.totalBatteryCapacityKwh,
-                            auxVoltage = status.auxBatteryVoltage
+                            auxVoltage = status.auxBatteryVoltage,
+                            // The rest of the frame. Recorded rather than reasoned about: a column
+                            // is cheap and a frame that goes by unrecorded is evidence destroyed,
+                            // while deciding what any of it means is a separate question with a
+                            // separate bar of proof.
+                            carJourneyId = status.currentJourneyId,
+                            carJourneyDistanceRaw = status.currentJourneyDistanceRaw,
+                            engineStatusRaw = status.engineStatusRaw,
+                            powerModeRaw = status.powerModeRaw,
+                            handbrake = status.handbrake,
+                            tyreFlPsi = status.frontLeftTyrePsi,
+                            tyreFrPsi = status.frontRightTyrePsi,
+                            tyreRlPsi = status.rearLeftTyrePsi,
+                            tyreRrPsi = status.rearRightTyrePsi,
+                            carGpsSatellites = status.gps?.satellites,
+                            carGpsStatus = status.gps?.gpsStatus?.name,
+                            carSpeedKmh = status.gps?.speedKmh,
+                            chargerId = ch.chargingPileId,
+                            chargerSupplier = ch.chargingPileSupplier,
+                            lastChargeEndKwh = ch.lastChargeEndingPowerKwh,
+                            staticDrainRaw = ch.staticEnergyConsumptionRaw,
+                            chargeElapsedS = ch.chargeTimeElapsedS,
+                            dayDistanceRaw = ch.mileageOfDayRaw,
+                            dayPowerRaw = ch.powerUsageOfDayRaw
                         )
                     )
                 }
