@@ -36,84 +36,31 @@ object Arrival {
     const val STILL_SPEED_MPS = Departure.SPEED_MPS
 
     /**
-     * How long a stationary car with a sleeping CAN bus waits before the drive is called over.
-     *
-     * Ten minutes, raised from two, because two was calibrated against the wrong car.
-     *
-     * A quiet bus was taken to mean "shut down and left", which is what it means on a vehicle that
-     * only sleeps its bus when the driver walks away. The Windsor sleeps it whenever the selector
-     * goes to P — at a drop-off, at a gate, waiting outside a shop, pulling over to take a call —
-     * and two minutes of that was enough to declare the journey finished. The drive was closed
-     * mid-outing, the next movement opened another, and the driver watched the trip reset itself
-     * for the crime of putting the car in park for three minutes.
-     *
-     * The asymmetry that governs every threshold in this file applies here too, and more sharply:
-     * ending a drive early splits one journey into two and invents a route that was never driven,
-     * while ending it late merely delays a row nobody is waiting for. Ten minutes is past every
-     * stop a driver would describe as a pause and short of every one they would call parking.
-     *
-     * It stays below [STILL_MS] rather than being deleted because the signal is still real for a
-     * box that outlives the ignition. On this box, which dies with it, the shortcut earns almost
-     * nothing — the next boot closes the orphan correctly either way — so it is not worth one
-     * split drive.
-     */
-    const val BUS_ASLEEP_STILL_MS = 10 * 60_000L
-
-    /**
-     * What the car itself says about being shut down, when telematics is reachable.
-     *
-     * Only [canBusActive] is here, and `locked` deliberately is not. A locked car sounds like the
-     * most certain parking signal there is, and it is not one: the Windsor locks its own doors
-     * above walking pace, so a car in motion reports locked=true and would "arrive" on the very
-     * next poll. That shipped once — every telematics frame closed the open drive, the next fix
-     * opened another, and the screen sat at zero distance and zero moving time for an entire
-     * journey while the speedometer read perfectly normally.
-     *
-     * Nullable because the link is optional: telematics may be switched off, the credentials
-     * unset, or the servers unreachable, and the recorder has to work regardless.
-     */
-    data class CarState(
-        val canBusActive: Boolean? = null,
-        /**
-         * When this reading was taken, on the same clock as the fixes.
-         *
-         * Zero means "no reading", which is not the same as a reading of false and must never be
-         * treated as one. A reading with no time attached cannot be checked for staleness, and an
-         * unstaleable reading is how a frame from the car park goes on ending drives all day.
-         */
-        val observedAt: Long = 0L
-    ) {
-        /**
-         * Whether this reading is evidence that the car in front of us, right now, is parked.
-         *
-         * The reading must have been taken *after* the car last moved. A bus-asleep frame from
-         * before the wheels stopped is a statement about a moving car, and a moving car has not
-         * parked whatever its bus was doing; carrying it forward turns one stale frame into a
-         * verdict on every traffic stop that follows it.
-         */
-        fun saysParked(lastMovedAt: Long): Boolean =
-            canBusActive == false && observedAt > 0L && observedAt >= lastMovedAt
-    }
-
-    /**
      * Whether the drive that is currently open has ended.
      *
-     * [stillForMs] is how long the car has been below [STILL_SPEED_MPS]. A moving car has not
-     * arrived, whatever else is true — no telematics reading may override what the wheels are
-     * doing, which is the lesson the `locked` signal taught.
+     * Time, and nothing else. The car's own word was tried here twice and withdrawn twice, which
+     * is worth recording because the temptation to reach for it again is strong.
      *
-     * That lesson was learned too narrowly the first time. `locked` was removed and
-     * [CarState.canBusActive] was left with the same shape of power over a live drive and none of
-     * the same suspicion. A poll only happens every few minutes, the last reading was kept
-     * indefinitely — including after the link failed or was switched off — and nothing checked
-     * whether it described the car as it is now. So a single frame taken while the car sat in the
-     * drive, hours before setting off, was enough to end the drive at the first two-minute traffic
-     * stop, and at every one after it. The car was driven, the app was untouched, and the trip
-     * reset itself halfway. [CarState.saysParked] is what makes the reading answerable.
+     * First `locked`, which sounds like the most certain parking signal there is and is not: the
+     * Windsor locks its own doors above walking pace, so a car in motion reported locked and
+     * "arrived" on the very next poll. Then `canBusActive`, on the sounder-looking reasoning that
+     * a sleeping bus means a car that has been shut down and left. On a vehicle that sleeps its
+     * bus only when the driver walks away, that holds. This one sleeps it whenever the selector
+     * reaches P — and in the traffic this car is actually driven in, P is where the selector goes
+     * at every long halt. A signal, a jam, a level crossing: to the bus all three are
+     * indistinguishable from a car park, and each one ended the journey and opened a new one
+     * behind it.
+     *
+     * The failure is the same both times. A reading that correlates with parking on some cars is
+     * not a reading that means parking on this one, and each turned out to be a worse proxy for
+     * "how long has the car been still" than the answer measured directly — which needs no
+     * telematics link, no poll, and cannot be wrong about a car it was never calibrated against.
+     *
+     * So the rule is the one the driver would state: carry on within a few minutes and it is the
+     * same drive; leave it longer than that and the next movement begins a new one.
      */
-    fun arrived(stillForMs: Long, car: CarState = CarState(), lastMovedAt: Long = 0L): Boolean {
+    fun arrived(stillForMs: Long): Boolean {
         if (stillForMs <= 0L) return false
-        if (car.saysParked(lastMovedAt) && stillForMs >= BUS_ASLEEP_STILL_MS) return true
         return stillForMs >= STILL_MS
     }
 

@@ -51,165 +51,77 @@ class ArrivalTest {
     }
 
     /**
-     * The regression this whole signal nearly caused, pinned so it cannot return.
+     * The car's own word was tried here twice and withdrawn twice; this pins why, so nobody
+     * reaches for it a third time.
      *
-     * `locked` was treated as certain proof of parking. It is the opposite of certain: the Windsor
-     * locks its own doors above walking pace, so a car at speed reports locked=true and "arrived"
-     * on the very next telematics poll. The open drive was closed, the next fix opened another,
-     * and the screen sat at zero distance and zero moving time for a whole journey while the
-     * speedometer read perfectly normally. A moving car has not arrived, whatever else is true.
+     * `locked` first, which sounds like certain proof of parking and is not: the Windsor locks its
+     * doors above walking pace, so a car at speed reported locked and "arrived" on the very next
+     * poll. Then `canBusActive`, on the sounder-looking reasoning that a sleeping bus means a car
+     * shut down and left. This car sleeps its bus whenever the selector reaches P, and in the
+     * traffic it is actually driven in, P is where the selector goes at every long halt.
+     *
+     * Both were a worse proxy for "how long has the car been still" than measuring that directly.
      */
     @Test
-    fun `no car reading can end a drive while the wheels are turning`() {
-        val everySignal = Arrival.CarState(canBusActive = false)
-        assertThat(Arrival.arrived(stillForMs = 0L, car = everySignal))
-            .`as`("a moving car has not arrived")
-            .isFalse()
+    fun `the decision is time alone and takes no reading from the car`() {
+        val signature = Arrival::class.java.methods.first { it.name == "arrived" }
+
+        assertThat(signature.parameterTypes.toList())
+            .`as`("a car reading has no business ending a drive on this vehicle")
+            .containsExactly(Long::class.java)
     }
 
-    @Test
-    fun `a sleeping CAN bus ends the drive once the car has also stopped`() {
-        val stopped = 1_000_000L
-        // Read after the wheels stopped, which is what makes it evidence about a parked car.
-        val asleep = Arrival.CarState(canBusActive = false, observedAt = stopped + 10_000L)
-
-        assertThat(
-            Arrival.arrived(Arrival.BUS_ASLEEP_STILL_MS, asleep, lastMovedAt = stopped)
-        ).isTrue()
-    }
-
-    /** One odd frame at a signal must not end a live drive either. */
-    @Test
-    fun `a sleeping bus at a brief halt is not yet an arrival`() {
-        val stopped = 1_000_000L
-        val asleep = Arrival.CarState(canBusActive = false, observedAt = stopped + 5_000L)
-
-        assertThat(Arrival.arrived(30_000L, asleep, lastMovedAt = stopped)).isFalse()
-    }
-
-    @Test
-    fun `a live bus is still driving`() {
-        assertThat(
-            Arrival.arrived(minute, Arrival.CarState(canBusActive = true, observedAt = 1L))
-        ).isFalse()
-    }
-
-    // ------------------------------------------------- a reading has to be about the car right now
+    // ----------------------------------------------- park is a resting gear, not an arrival
 
     /**
-     * The drive that reset itself halfway, with the box untouched and the app never killed.
+     * The driver's own rule: carry on within a few minutes and it is the same drive.
      *
-     * The car sits in the drive with its bus asleep and the poller reads that once. Hours later it
-     * is driven into town, where the traffic holds it for two minutes. Nothing has polled since —
-     * the heartbeat is five minutes and the hotspot is unreliable — so the reading from the drive
-     * is still the latest one there is, and it ended the journey at the first red light. The next
-     * fix opened a fresh trip, so the drive came back as two with a route between them that was
-     * never driven.
-     *
-     * A reading taken before the wheels stopped describes a moving car, and a moving car has not
-     * parked whatever its bus was doing.
+     * In this city the selector goes to P at every long halt — a jam, a signal, a level crossing,
+     * dropping someone at a gate. None of it is arriving, and none of it may end the journey.
      */
     @Test
-    fun `a bus reading taken before the car stopped cannot end the drive`() {
-        val readInTheDriveway = 1_000_000L
-        val stoppedInTrafficLater = readInTheDriveway + 3 * 60 * 60_000L
-        val stale = Arrival.CarState(canBusActive = false, observedAt = readInTheDriveway)
-
-        assertThat(
-            Arrival.arrived(
-                stillForMs = Arrival.BUS_ASLEEP_STILL_MS,
-                car = stale,
-                lastMovedAt = stoppedInTrafficLater
-            )
-        ).`as`("two minutes at a signal is not an arrival on hours-old evidence").isFalse()
-    }
-
-    /** With the stale reading refused, the plain timer still ends the drive when it should. */
-    @Test
-    fun `a stale reading falls back to the full stillness timer rather than to nothing`() {
-        val stopped = 5_000_000L
-        val stale = Arrival.CarState(canBusActive = false, observedAt = stopped - 60_000L)
-
-        assertThat(Arrival.arrived(Arrival.STILL_MS, stale, lastMovedAt = stopped)).isTrue()
-    }
-
-    /**
-     * A reading with no timestamp cannot be checked for staleness, and an unstaleable reading is
-     * exactly the one that goes on ending drives forever. Absent means absent.
-     */
-    @Test
-    fun `a bus reading with no time attached is not evidence`() {
-        val undated = Arrival.CarState(canBusActive = false, observedAt = 0L)
-
-        assertThat(Arrival.arrived(Arrival.BUS_ASLEEP_STILL_MS, undated, lastMovedAt = 1_000L))
-            .isFalse()
-    }
-
-    /**
-     * Telematics is optional — switched off, unconfigured, or simply unreachable — so an absent
-     * answer must never be read as "parked". The timer has to carry it alone.
-     */
-    @Test
-    fun `an unknown car state falls back to the timer`() {
-        val unknown = Arrival.CarState(canBusActive = null)
-        assertThat(Arrival.arrived(minute, unknown)).isFalse()
-        assertThat(Arrival.arrived(Arrival.STILL_MS, unknown)).isTrue()
-    }
-
-    // ------------------------------------------------- putting the car in park is not arriving
-
-    /**
-     * The drive that reset itself when the selector went to P.
-     *
-     * The bus-asleep shortcut was calibrated against a car that only sleeps its bus when the
-     * driver walks away. The Windsor sleeps it the moment the selector reaches P — at a drop-off,
-     * at a gate, waiting outside a shop, pulling over to take a call — so two minutes of that
-     * declared the journey over. The drive closed mid-outing, the next movement opened another,
-     * and the trip appeared to reset itself for the crime of being parked for three minutes.
-     */
-    @Test
-    fun `a short stop in park does not end the drive`() {
-        val stopped = 1_000_000L
-        val busAsleepInPark = Arrival.CarState(canBusActive = false, observedAt = stopped + 5_000L)
-
+    fun `stopping in park during a drive does not end it`() {
         listOf(
-            "dropping someone at the gate" to 2 * minute,
-            "waiting with the engine off" to 5 * minute,
-            "a call pulled over in park" to 8 * minute
+            "a signal long enough to select P" to 2 * minute,
+            "a jam with the engine idling" to 5 * minute,
+            "a level crossing" to 8 * minute,
+            "the far side of a bad junction" to 11 * minute
         ).forEach { (what, still) ->
-            assertThat(Arrival.arrived(still, busAsleepInPark, lastMovedAt = stopped))
-                .`as`(what)
-                .isFalse()
+            assertThat(Arrival.arrived(still)).`as`(what).isFalse()
         }
     }
 
-    /** Long enough in park with the bus down, and it really is the end of the outing. */
-    @Test
-    fun `a long stop in park does end the drive`() {
-        val stopped = 1_000_000L
-        val asleep = Arrival.CarState(canBusActive = false, observedAt = stopped + 5_000L)
-
-        assertThat(Arrival.arrived(Arrival.BUS_ASLEEP_STILL_MS, asleep, lastMovedAt = stopped))
-            .isTrue()
-    }
-
     /**
-     * The two thresholds agreed once and were written as one constant because of it. When this one
-     * was raised for reasons of its own, the resume window silently followed, and a box that
-     * power-cycled would have resumed a drive that had genuinely finished minutes earlier. Two
-     * numbers that happen to match are not one number.
+     * The other half of the rule: leave it longer than that and the next movement is a new drive.
+     *
+     * Repeated stops cannot add up to one, because the stillness is measured from the last time
+     * the car moved — every crawl forward starts the clock again, which is exactly what a car
+     * inching through traffic does.
      */
     @Test
-    fun `resuming an interrupted drive is far stricter than calling one finished`() {
-        assertThat(`in`.odograph.tracker.record.TripRecovery.RESUME_WINDOW_MS)
-            .`as`("a restart must never reach back far enough to swallow a finished outing")
-            .isLessThan(Arrival.BUS_ASLEEP_STILL_MS)
+    fun `a stop long enough to be parking does end the drive`() {
+        assertThat(Arrival.arrived(Arrival.STILL_MS)).isTrue()
+        assertThat(Arrival.arrived(30 * minute)).isTrue()
     }
 
     @Test
-    fun `the bus shortcut is much shorter than the plain timer but not instant`() {
-        assertThat(Arrival.BUS_ASLEEP_STILL_MS).isLessThan(Arrival.STILL_MS)
-        assertThat(Arrival.BUS_ASLEEP_STILL_MS).isGreaterThan(0L)
+    fun `stillness is measured from the last movement, so repeated halts never accumulate`() {
+        val setOff = 1_000_000L
+        // Three eight-minute halts in a jam, each ended by the car creeping forward a car length.
+        val crawledAt = listOf(setOff + 8 * minute, setOff + 17 * minute, setOff + 26 * minute)
+        crawledAt.forEach { moved ->
+            assertThat(Arrival.arrived(Arrival.stillForMs(moved, moved + 8 * minute)))
+                .`as`("an eight-minute halt after creeping forward at $moved")
+                .isFalse()
+        }
+
+        val halfAnHourOut = setOff + 34 * minute
+        assertThat(Arrival.stillForMs(crawledAt.last(), halfAnHourOut))
+            .`as`("the clock runs from the last crawl, not from setting off")
+            .isEqualTo(8 * minute)
+        assertThat(Arrival.arrived(Arrival.stillForMs(crawledAt.last(), halfAnHourOut)))
+            .`as`("half an hour of stop-start traffic is still one drive")
+            .isFalse()
     }
 
     // ---------------------------------------------------------------- how long it has been still

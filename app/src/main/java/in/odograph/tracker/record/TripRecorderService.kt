@@ -386,7 +386,6 @@ class TripRecorderService : Service() {
      * Lets a drive end the moment the car is locked instead of waiting out the stationary timer.
      * Stays empty when telematics is off or unreachable, and the timer carries it alone.
      */
-    private var carState = Arrival.CarState()
     /** Lifetime odometer at boot: seeded baseline + every closed trip's distance. */
     private var odoBaseKm: Double = 0.0
     private lateinit var settings: Settings
@@ -514,10 +513,6 @@ class TripRecorderService : Service() {
                 client = null
                 creds = null
                 _state.value = _state.value.copy(batterySocPercent = null, batteryCharging = null, telematicsConnected = null, odoDriftKm = null)
-                // A car reading only speaks for as long as the link that produced it. Keeping the
-                // last one after the link went down is how a frame taken in the car park goes on
-                // ending drives hours later, with nothing on screen to suggest where it came from.
-                carState = Arrival.CarState()
                 // Deliberately off is not an outage; drop any reminder so it cannot nag on.
                 clearMgLostNotification()
                 continue
@@ -529,7 +524,6 @@ class TripRecorderService : Service() {
             if (!hasValidatedNetwork()) {
                 Diagnostics.crumb("mg: no validated network, poll skipped")
                 _state.update { it.copy(telematicsConnected = false) }
-                carState = Arrival.CarState()
                 notifyMgLost()
                 continue
             }
@@ -571,14 +565,6 @@ class TripRecorderService : Service() {
                 val now = System.currentTimeMillis()
                 // What the car says about being shut down. Only the CAN bus: a locked car is not a
                 // parked one, because the doors lock themselves above walking pace.
-                // Stamped on the fix clock, because that is the clock the stillness is measured
-                // on. The box has no SIM and so no NITZ; pairing a System.currentTimeMillis()
-                // stamp with a GNSS-timed lastMovedAt would compare two unrelated clocks and
-                // decide freshness at random.
-                carState = Arrival.CarState(
-                    canBusActive = status.canBusActive,
-                    observedAt = lastFix?.t ?: 0L
-                )
                 val powerKw = Telematics.chargePowerKw(ch)
                 // A snapshot without a SOC reading is not charge data — it is noise that would
                 // make a battery-less trip look instrumented. The car can cut power any moment,
@@ -759,7 +745,6 @@ class TripRecorderService : Service() {
             }.onFailure {
                 Diagnostics.crumb("telematics poll failed: $it")
                 _state.update { it.copy(telematicsConnected = false) }
-                carState = Arrival.CarState()
                 // A stale session is the usual culprit; the next round logs in again.
                 runCatching { c.login() }
             }
@@ -1064,15 +1049,13 @@ class TripRecorderService : Service() {
         // A drive that has arrived is written now rather than at the next boot, so an outing with
         // a stop in the middle is two trips rather than one that begins and ends at home.
         val stillForMs = Arrival.stillForMs(lastMovedAt, fix.t, blindMs)
-        if (tripId != NO_TRIP && Arrival.arrived(stillForMs, carState, lastMovedAt)) {
+        if (tripId != NO_TRIP && Arrival.arrived(stillForMs)) {
             // Why, not just that. "I don't know how the trip got ended" is not a question the
             // driver should have to ask twice, and a closed drive leaves no other trace of what
             // convinced the recorder the car had parked.
             Diagnostics.crumb(
-                "closing trip=%d: still for %ds%s".format(
-                    tripId, stillForMs / 1000,
-                    if (carState.saysParked(lastMovedAt)) " with the car's bus reported asleep"
-                    else " (the ${Arrival.STILL_MS / 60_000}-minute stillness limit)"
+                "closing trip=%d: still for %ds (the %d-minute limit)".format(
+                    tripId, stillForMs / 1000, Arrival.STILL_MS / 60_000
                 )
             )
             closeTripOnArrival(dao)
