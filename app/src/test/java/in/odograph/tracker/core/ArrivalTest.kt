@@ -156,6 +156,56 @@ class ArrivalTest {
         assertThat(Arrival.arrived(Arrival.STILL_MS, unknown)).isTrue()
     }
 
+    // ------------------------------------------------- putting the car in park is not arriving
+
+    /**
+     * The drive that reset itself when the selector went to P.
+     *
+     * The bus-asleep shortcut was calibrated against a car that only sleeps its bus when the
+     * driver walks away. The Windsor sleeps it the moment the selector reaches P — at a drop-off,
+     * at a gate, waiting outside a shop, pulling over to take a call — so two minutes of that
+     * declared the journey over. The drive closed mid-outing, the next movement opened another,
+     * and the trip appeared to reset itself for the crime of being parked for three minutes.
+     */
+    @Test
+    fun `a short stop in park does not end the drive`() {
+        val stopped = 1_000_000L
+        val busAsleepInPark = Arrival.CarState(canBusActive = false, observedAt = stopped + 5_000L)
+
+        listOf(
+            "dropping someone at the gate" to 2 * minute,
+            "waiting with the engine off" to 5 * minute,
+            "a call pulled over in park" to 8 * minute
+        ).forEach { (what, still) ->
+            assertThat(Arrival.arrived(still, busAsleepInPark, lastMovedAt = stopped))
+                .`as`(what)
+                .isFalse()
+        }
+    }
+
+    /** Long enough in park with the bus down, and it really is the end of the outing. */
+    @Test
+    fun `a long stop in park does end the drive`() {
+        val stopped = 1_000_000L
+        val asleep = Arrival.CarState(canBusActive = false, observedAt = stopped + 5_000L)
+
+        assertThat(Arrival.arrived(Arrival.BUS_ASLEEP_STILL_MS, asleep, lastMovedAt = stopped))
+            .isTrue()
+    }
+
+    /**
+     * The two thresholds agreed once and were written as one constant because of it. When this one
+     * was raised for reasons of its own, the resume window silently followed, and a box that
+     * power-cycled would have resumed a drive that had genuinely finished minutes earlier. Two
+     * numbers that happen to match are not one number.
+     */
+    @Test
+    fun `resuming an interrupted drive is far stricter than calling one finished`() {
+        assertThat(`in`.odograph.tracker.record.TripRecovery.RESUME_WINDOW_MS)
+            .`as`("a restart must never reach back far enough to swallow a finished outing")
+            .isLessThan(Arrival.BUS_ASLEEP_STILL_MS)
+    }
+
     @Test
     fun `the bus shortcut is much shorter than the plain timer but not instant`() {
         assertThat(Arrival.BUS_ASLEEP_STILL_MS).isLessThan(Arrival.STILL_MS)

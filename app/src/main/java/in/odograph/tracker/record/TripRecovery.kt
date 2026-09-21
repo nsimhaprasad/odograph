@@ -30,13 +30,19 @@ object TripRecovery {
     /**
      * How long a drive may go unrecorded and still be the same drive.
      *
-     * Matched to [Arrival.BUS_ASLEEP_STILL_MS], the shortest stillness that ends a drive: inside
-     * that window the existing rules would not have closed the trip anyway, so resuming cannot
-     * merge two outings the recorder would otherwise have kept apart. A process restart plus a
-     * warm GNSS re-acquisition fits inside it comfortably. A device that power-cycled does not,
-     * and should not — the box is powered by the car, so losing power means the ignition went off.
+     * Two minutes, and deliberately its own number rather than a reference to one of Arrival's.
+     * It was written as `= Arrival.BUS_ASLEEP_STILL_MS` on the reasoning that the resume window
+     * should match the shortest stillness that ends a drive — true at the time, and a trap: when
+     * that threshold was later raised to ten minutes for reasons of its own, this silently became
+     * ten minutes too, and a box that power-cycled would happily resume a drive that had genuinely
+     * finished eight minutes earlier. Two constants that agree today are not one constant.
+     *
+     * The window has to be short because it is the one thing standing between an interruption and
+     * a merge. A process restart plus a warm GNSS re-acquisition fits inside two minutes
+     * comfortably. A device that power-cycled does not, and should not — the box is powered by the
+     * car, so losing power for that long means the ignition went off.
      */
-    const val RESUME_WINDOW_MS = Arrival.BUS_ASLEEP_STILL_MS
+    const val RESUME_WINDOW_MS = 2 * 60_000L
 
     /**
      * How far the car may have got during that gap and still be resumable.

@@ -38,10 +38,26 @@ object Arrival {
     /**
      * How long a stationary car with a sleeping CAN bus waits before the drive is called over.
      *
-     * Far shorter than [STILL_MS] because a quiet bus is real evidence, but not zero: a single
-     * frame reporting the bus asleep while the car is at a signal must not end a live drive.
+     * Ten minutes, raised from two, because two was calibrated against the wrong car.
+     *
+     * A quiet bus was taken to mean "shut down and left", which is what it means on a vehicle that
+     * only sleeps its bus when the driver walks away. The Windsor sleeps it whenever the selector
+     * goes to P — at a drop-off, at a gate, waiting outside a shop, pulling over to take a call —
+     * and two minutes of that was enough to declare the journey finished. The drive was closed
+     * mid-outing, the next movement opened another, and the driver watched the trip reset itself
+     * for the crime of putting the car in park for three minutes.
+     *
+     * The asymmetry that governs every threshold in this file applies here too, and more sharply:
+     * ending a drive early splits one journey into two and invents a route that was never driven,
+     * while ending it late merely delays a row nobody is waiting for. Ten minutes is past every
+     * stop a driver would describe as a pause and short of every one they would call parking.
+     *
+     * It stays below [STILL_MS] rather than being deleted because the signal is still real for a
+     * box that outlives the ignition. On this box, which dies with it, the shortcut earns almost
+     * nothing — the next boot closes the orphan correctly either way — so it is not worth one
+     * split drive.
      */
-    const val BUS_ASLEEP_STILL_MS = 2 * 60_000L
+    const val BUS_ASLEEP_STILL_MS = 10 * 60_000L
 
     /**
      * What the car itself says about being shut down, when telematics is reachable.
