@@ -378,4 +378,24 @@ class BatteryMathTest {
         assertThat(BatteryMath.consumedFromSoc(80.0, 80.0, 52.9)).isNull()
         assertThat(BatteryMath.consumedFromSoc(null, 76.0, 52.9)).isNull()
     }
+
+    /**
+     * The live case that made this visible, reproduced.
+     *
+     * Six point eight kilometres into a drive the state of charge had moved by exactly one
+     * percent, so the charge-level figure was 0.53 kW·h and the mileage readout said 12.8 km/kW·h
+     * — for a car that does about eight. The car's own counter had it at 0.85.
+     */
+    @Test
+    fun `a drive six kilometres in is not doing thirteen kilometres to the kilowatt-hour`() {
+        val frames = listOf(frame(0, 73.0, 4.10), frame(1000, 72.0, 4.95))
+
+        val energy = BatteryMath.driveEnergyKwh(frames, 52.9)!!
+        val mileage = BatteryMath.kmPerKwh(energy, 6_785.8)!!
+
+        assertThat(energy).isCloseTo(0.85, within(0.01))
+        assertThat(mileage)
+            .`as`("the charge level alone would say 12.8")
+            .isBetween(7.0, 9.0)
+    }
 }

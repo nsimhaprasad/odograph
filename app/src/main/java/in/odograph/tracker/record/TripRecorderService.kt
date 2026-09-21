@@ -732,8 +732,16 @@ class TripRecorderService : Service() {
                     val state = _state.value
                     if (tripId >= 0) {
                         val samples = dao.batteryRangeFor(tripId)
-                        val energy = BatteryMath.consumedKwh(samples, capacity)
-                            ?.let { BatteryMath.round2(it) }
+                        // The same rule the finished drive uses: the car's own counter first, the
+                        // charge level only when it cannot answer. This was left on the charge
+                        // level while the stored figure moved to the counter, and the live screen
+                        // is where that hurts most — a drive six kilometres in has usually moved
+                        // the state of charge by exactly one percent, so the mileage readout was
+                        // dividing six kilometres by 0.53 kW·h and reporting 12.8 km/kW·h for a
+                        // car that does eight. Worse, that figure is fed back into the rolling
+                        // window, so the range at full climbed through the drive: 431 km at the
+                        // start, 447 twenty minutes later, while the car's own estimate fell.
+                        val energy = BatteryMath.driveEnergyKwh(samples, capacity)
                         if (samples.isNotEmpty()) {
                             dao.setChargeSummary(tripId, samples.first().socPercent, soc, energy)
                         }
