@@ -80,6 +80,11 @@ fun secondaryStats(live: TripRecorderService.LiveState): List<DriverStat> = buil
     live.tripEnergyKwh?.let { add(DriverStat("%.1f".format(it), "KWH USED")) }
     live.tripCostInr?.let { add(DriverStat("₹%.0f".format(it), "RIDE COST")) }
     live.batteryMileageKmPerKwh?.let { add(DriverStat("%.1f".format(it), "KM/KWH")) }
+    // The same charge read two other ways. They sit next to each other on purpose: where they
+    // disagree is the information — a live figure well above the lifetime one is a gentle hour,
+    // well below it is a hint to ease off — and neither means much without the other for scale.
+    live.liveRangeKm?.let { add(DriverStat("%.0f".format(it), "KM THIS DRIVE")) }
+    live.lifetimeRangeKm?.let { add(DriverStat("%.0f".format(it), "KM LIFETIME")) }
     live.batteryRangeAtFullKm?.let { add(DriverStat("%.0f".format(it), "KM AT FULL")) }
     if (live.elevGainM > 0 || live.elevLossM > 0) {
         add(DriverStat("↑%.0f ↓%.0f".format(live.elevGainM, live.elevLossM), "CLIMB M"))

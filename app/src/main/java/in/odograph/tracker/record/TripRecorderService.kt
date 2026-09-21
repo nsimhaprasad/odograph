@@ -35,6 +35,7 @@ import `in`.odograph.tracker.core.ChargeReconciler
 import `in`.odograph.tracker.core.Departure
 import `in`.odograph.tracker.core.EfficiencyStats
 import `in`.odograph.tracker.core.RangeCalibration
+import `in`.odograph.tracker.core.RangeModel
 import `in`.odograph.tracker.core.SpeedSanity
 import `in`.odograph.tracker.core.TripStats
 import `in`.odograph.tracker.core.TripRepair
@@ -81,6 +82,23 @@ class TripRecorderService : Service() {
         val batteryRangeKm: Double? = null,
         /** Range remaining that the car itself quotes, km. The MG telematics cross-check. */
         val mgBatteryRangeKm: Double? = null,
+        /**
+         * Range remaining at this charge from what the car has cost across *every* drive, km.
+         *
+         * The rolling figure above answers "what will the next hour cost", which is the right
+         * default and is swayed by a fortnight of unusual weather. This answers "what does this
+         * car really do", which is the question people ask out loud, and it takes the whole
+         * history to answer honestly.
+         */
+        val lifetimeRangeKm: Double? = null,
+        /**
+         * Range remaining at this charge from what the drive in progress is costing, km.
+         *
+         * Deliberately volatile. A driver looking at this has just changed something — joined a
+         * motorway, put the air conditioning on, started up a hill — and wants the consequence,
+         * not an average that hides it.
+         */
+        val liveRangeKm: Double? = null,
         /** Lifetime energy the car has consumed over instrumented drives, kW·h. */
         val batteryTotalKwh: Double = 0.0,
         /** Energy this drive has consumed so far, kW·h. Null until a usable SOC swing is known. */
@@ -725,6 +743,13 @@ class TripRecorderService : Service() {
                         val tripCost = TripRecovery.driveCost(
                             dao, energy, dao.tripById(tripId)?.startedAt ?: 0L
                         )
+                        // The same charge read two other ways: across every drive ever recorded,
+                        // and across the one happening right now. See RangeModel for why those
+                        // want opposite things from the history.
+                        val lifetimeEff = RangeModel.lifetimeKwhPer100Km(
+                            dao.allTripEnergies().map { it.distanceM to it.energyKwh }
+                        )
+                        val liveEffNow = RangeModel.liveKwhPer100Km(energy, state.distanceM)
                         _state.value = state.copy(
                             batterySocPercent = soc,
                             batteryCharging = ch.isCharging,
@@ -732,6 +757,8 @@ class TripRecorderService : Service() {
                             batteryRangeAtFullKm = rangeAtFull,
                             batteryRangeKm = smartRange,
                             mgBatteryRangeKm = ch.rangeKm,
+                            lifetimeRangeKm = RangeModel.remainingKm(capacity, soc, lifetimeEff),
+                            liveRangeKm = RangeModel.remainingKm(capacity, soc, liveEffNow),
                             batteryTotalKwh = dao.totalEnergyKwh(),
                             tripEnergyKwh = energy,
                             tripCostInr = tripCost
