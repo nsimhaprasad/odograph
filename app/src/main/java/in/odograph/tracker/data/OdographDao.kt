@@ -278,6 +278,21 @@ interface OdographDao {
     @Query("SELECT * FROM charge_events WHERE id = :id")
     fun chargeEventById(id: Long): ChargeEventEntity?
 
+    /**
+     * Near-full frames that carry both the charge level and the energy held, newest first.
+     *
+     * Dividing one by the other gives the pack size the car is implicitly claiming, which is the
+     * only capacity figure this vehicle ever offers — it does not send totalBatteryCapacityKwh at
+     * all, as a live poll confirmed. Near full because the division's error grows as the
+     * denominator falls: at 20% a single rounded percent moves the answer by five.
+     */
+    @Query(
+        """SELECT socPercent, batteryEnergyKwh FROM battery
+           WHERE socPercent >= :minSoc AND batteryEnergyKwh IS NOT NULL AND socPercent IS NOT NULL
+           ORDER BY t DESC LIMIT :limit"""
+    )
+    fun capacityClues(minSoc: Double, limit: Int = 40): List<CapacityClue>
+
     /** The most recent session in the ledger, open or closed. */
     @Query("SELECT * FROM charge_events ORDER BY startTime DESC LIMIT 1")
     fun latestChargeEvent(): ChargeEventEntity?
@@ -714,6 +729,9 @@ data class DailyEffRow(
 
 /** One closeable, placed drive with the raw ingredients of route efficiency. */
 /** One drive, and the conditions it was made in. */
+/** One frame's charge level against the energy it says the pack holds. */
+data class CapacityClue(val socPercent: Double, val batteryEnergyKwh: Double)
+
 data class EfficiencySampleRow(
     val startedAt: Long,
     val distanceM: Double,

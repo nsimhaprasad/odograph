@@ -53,6 +53,25 @@ class Settings(ctx: Context) {
         set(value) = prefs.edit().putLong(KEY_DOCS_LAST, value).apply()
 
     /**
+     * Why the last backup attempt failed, or null when it worked.
+     *
+     * Kept because on this box nobody is watching. The recorder is powered by the car, so it is
+     * alive for the length of a journey and dead the rest of the day — a backup that has been
+     * refused on every attempt for weeks looks exactly like one that is working, and the
+     * difference only becomes apparent on the day the box is replaced and the history is gone.
+     */
+    var lastDocsError: String?
+        get() = prefs.getString(KEY_DOCS_ERROR, null)
+        set(value) = prefs.edit()
+            .apply { if (value == null) remove(KEY_DOCS_ERROR) else putString(KEY_DOCS_ERROR, value) }
+            .apply()
+
+    /** Rows sent by the last successful backup, so the screen can say what actually went. */
+    var lastDocsRows: Int
+        get() = prefs.getInt(KEY_DOCS_ROWS, 0)
+        set(value) = prefs.edit().putInt(KEY_DOCS_ROWS, value).apply()
+
+    /**
      * Docs-export watermarks: the last trip/charge ids and coverage day already uploaded. Only
      * rows past these are new, so each sync stays tiny no matter how old the archive grows.
      */
@@ -246,6 +265,8 @@ class Settings(ctx: Context) {
         const val KEY_WEBHOOK = "webhook_url"
         const val KEY_DOCS_HOURS = "docs_sync_hours"
         const val KEY_DOCS_LAST = "docs_last_sync_at"
+        const val KEY_DOCS_ERROR = "docs_last_error"
+        const val KEY_DOCS_ROWS = "docs_last_rows"
         const val KEY_DOCS_TRIP = "docs_trip_watermark"
         const val KEY_DOCS_CHARGE = "docs_charge_watermark"
         const val KEY_DOCS_DAY = "docs_day_watermark"

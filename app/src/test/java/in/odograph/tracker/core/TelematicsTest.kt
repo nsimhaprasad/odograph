@@ -212,4 +212,53 @@ class TelematicsTest {
                 .isNull()
         }
     }
+
+    // ------------------------------------------- what pack the car implies
+
+    /**
+     * The only route to this car's capacity. A live poll confirmed it sends no
+     * totalBatteryCapacityKwh at all, so the pack has to be inferred from the energy it says it
+     * holds against the charge level it reports — and that constant scales every range, cost and
+     * efficiency figure in the app.
+     */
+    @Test
+    fun `the pack size is the middle of what many frames imply`() {
+        // 73% holding 37.7 kWh is a real reading from this car: about 51.6 kWh of usable pack.
+        val clues = List(8) { 73.0 to 37.7 }
+
+        assertThat(Telematics.impliedPackKwh(clues)!!).isCloseTo(51.64, within(0.05))
+    }
+
+    /**
+     * The median, not the mean. Charge arrives as a whole percent, so each reading carries up to
+     * half a percent of rounding — a third of a kilowatt-hour on this pack — and a mean would
+     * average the rounding along with the measurement.
+     */
+    @Test
+    fun `one rounded frame does not move the answer`() {
+        val steady = List(7) { 80.0 to 41.3 }
+        val rounded = listOf(80.0 to 44.0)
+
+        val median = Telematics.impliedPackKwh(steady + rounded)!!
+        assertThat(median).isCloseTo(51.6, within(0.4))
+    }
+
+    /** One reading is a reading, not a capacity. */
+    @Test
+    fun `too few frames imply nothing`() {
+        assertThat(Telematics.impliedPackKwh(listOf(73.0 to 37.7))).isNull()
+        assertThat(Telematics.impliedPackKwh(emptyList())).isNull()
+    }
+
+    /**
+     * A frame at zero charge divides by nothing, and a decode that lands outside any pack this car
+     * could carry is a decode fault rather than a small pack.
+     */
+    @Test
+    fun `impossible frames are left out rather than averaged in`() {
+        val good = List(6) { 73.0 to 37.7 }
+        val junk = listOf(0.0 to 37.7, 73.0 to 0.0, 73.0 to 900.0)
+
+        assertThat(Telematics.impliedPackKwh(good + junk)!!).isCloseTo(51.64, within(0.05))
+    }
 }

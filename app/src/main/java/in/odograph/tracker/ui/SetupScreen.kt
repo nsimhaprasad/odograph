@@ -25,6 +25,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -483,6 +484,51 @@ fun SetupScreen(
             }
 
             Section("CLOUD SYNC", palette, m) {
+                // The state of the backup, first, before the controls that configure it.
+                //
+                // This was reported nowhere. On a box that is only alive while the car is moving
+                // there is nobody watching a log, so a link that has been refused on every attempt
+                // since it was set looks precisely like one that is working — and it was: the
+                // configured address was the spreadsheet rather than the script that serves it, so
+                // every upload had been turned away and the history existed only on the one device
+                // most likely to be lost.
+                val backupError = settings.lastDocsError
+                val backupAt = settings.lastDocsSyncAt
+                val backupAgo = if (backupAt <= 0L) null else System.currentTimeMillis() - backupAt
+                Text(
+                    text = when {
+                        settings.webhookUrl.isBlank() -> "NOT BACKED UP — no link configured"
+                        backupError != null -> "BACKUP FAILING"
+                        backupAgo == null -> "NEVER BACKED UP"
+                        backupAgo > 3 * 24 * 3_600_000L ->
+                            "LAST BACKUP %d DAYS AGO".format(backupAgo / (24 * 3_600_000L))
+                        else -> "BACKED UP"
+                    },
+                    color = when {
+                        settings.webhookUrl.isBlank() || backupError != null -> palette.warn
+                        backupAgo == null || backupAgo > 3 * 24 * 3_600_000L -> palette.warn
+                        else -> palette.good
+                    },
+                    fontSize = m.stat,
+                    fontWeight = FontWeight.Medium
+                )
+                Text(
+                    text = when {
+                        backupError != null -> backupError
+                        backupAgo != null ->
+                            "%,d rows, %s ago".format(
+                                settings.lastDocsRows,
+                                if (backupAgo < 3_600_000L) "${backupAgo / 60_000} min"
+                                else "${backupAgo / 3_600_000} h"
+                            )
+                        else ->
+                            "Deploy the bundled Apps Script to your sheet and paste its /exec link " +
+                                "below. The spreadsheet's own link cannot receive uploads."
+                    },
+                    color = palette.dim,
+                    fontSize = m.body,
+                    modifier = Modifier.padding(top = m.gap / 4, bottom = m.gap / 2)
+                )
                 SetupField(
                     "Google Docs link / webhook", webhook,
                     { webhook = it }, palette, m,

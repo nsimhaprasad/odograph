@@ -33,6 +33,7 @@ import `in`.odograph.tracker.core.BatteryHealth
 import `in`.odograph.tracker.core.DriveContext
 import `in`.odograph.tracker.core.EfficiencyStats
 import `in`.odograph.tracker.core.RangeCalibration
+import `in`.odograph.tracker.core.Telematics
 import `in`.odograph.tracker.core.BatteryMath
 import `in`.odograph.tracker.data.OdographDb
 import `in`.odograph.tracker.data.PeriodCharges
@@ -60,6 +61,16 @@ private data class InsightsUi(
     val byClimate: Map<DriveContext.Climate, EfficiencyStats.Bucket> = emptyMap(),
     /** What the pack measures, and how far the estimate has been missing. */
     val health: BatteryHealth.Health? = null,
+    /**
+     * How the measured pack compares with the same measurement taken earlier.
+     *
+     * A single capacity reading says what the pack holds today, which is only half the question a
+     * driver is actually asking. Degradation is a direction, not a value, and the readings to
+     * compare have been on disk all along.
+     */
+    val healthTrendPercent: Double? = null,
+    /** The pack size the car's own frames imply, against the one configured on the box. */
+    val impliedPackKwh: Double? = null,
     val accuracy: RangeCalibration.Accuracy? = null,
     val capacityKwh: Double = BatteryMath.DEFAULT_CAPACITY_KWH,
     val loaded: Boolean = false
@@ -116,6 +127,24 @@ fun InsightsScreen(palette: Palette) {
                     byClimate = EfficiencyStats.byClimate(samples),
                     health = BatteryHealth.measure(
                         dao.highSocBattery(BatteryHealth.MIN_SOC_PERCENT), capacity
+                    ),
+                    healthTrendPercent = run {
+                        // The same measurement over the older and newer halves of the near-full
+                        // readings. Split rather than windowed by date because what matters is
+                        // having enough readings either side to mean anything, and near-full
+                        // readings arrive whenever the car happens to be charged, not evenly.
+                        val near = dao.highSocBattery(BatteryHealth.MIN_SOC_PERCENT)
+                            .sortedBy { it.t }
+                        val half = near.size / 2
+                        if (half < BatteryHealth.MIN_READINGS) null
+                        else BatteryHealth.trendPercent(
+                            BatteryHealth.measure(near.take(half), capacity),
+                            BatteryHealth.measure(near.drop(half), capacity)
+                        )
+                    },
+                    impliedPackKwh = Telematics.impliedPackKwh(
+                        dao.capacityClues(BatteryHealth.MIN_SOC_PERCENT)
+                            .map { it.socPercent to it.batteryEnergyKwh }
                     ),
                     accuracy = RangeCalibration.accuracy(RangeCalibration.backtest(samples, zone)),
                     capacityKwh = capacity,
@@ -307,6 +336,7 @@ private fun conditionsSection(ui: InsightsUi, palette: Palette, m: Metrics) {
 @Composable
 private fun healthSection(ui: InsightsUi, palette: Palette, m: Metrics) {
     val health = ui.health ?: return
+    val trend = ui.healthTrendPercent
     Text(
         text = "BATTERY HEALTH",
         color = palette.label,
@@ -314,6 +344,51 @@ private fun healthSection(ui: InsightsUi, palette: Palette, m: Metrics) {
         letterSpacing = 2.2.sp,
         modifier = Modifier.padding(top = m.gap, bottom = m.gap / 2)
     )
+    // Which way it is going, above what it is. A pack that holds 51 kWh is unremarkable; a pack
+    // that held 52 a month ago and holds 51 now is the whole question, and both readings were
+    // already on disk waiting to be subtracted.
+    // What the car's own frames imply the pack is, against the number configured here. Everything
+    // energy-related is scaled by that constant, so a disagreement is not a curiosity: it moves
+    // every range, cost and efficiency figure in the app by the same proportion.
+    ui.impliedPackKwh?.let { implied ->
+        val off = (ui.capacityKwh - implied) / implied * 100.0
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(vertical = m.gap / 4),
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Text("THE CAR IMPLIES", color = palette.dim, fontSize = m.body)
+            Text(
+                text = "%.1f kWh".format(implied) +
+                    if (kotlin.math.abs(off) < 1.0) "  ·  matches yours"
+                    else "  ·  yours is %.1f%% %s".format(
+                        kotlin.math.abs(off), if (off > 0) "high" else "low"
+                    ),
+                color = if (kotlin.math.abs(off) < 3.0) palette.numeral else palette.warn,
+                fontSize = m.body
+            )
+        }
+    }
+    trend?.let {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(vertical = m.gap / 4),
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Text("SINCE THE EARLIER HALF", color = palette.dim, fontSize = m.body)
+            Text(
+                text = when {
+                    kotlin.math.abs(it) < 1.0 -> "holding steady"
+                    it < 0 -> "%.1f%% down".format(-it)
+                    else -> "%.1f%% up — more readings needed".format(it)
+                },
+                color = when {
+                    kotlin.math.abs(it) < 1.0 -> palette.good
+                    it < -5.0 -> palette.warn
+                    else -> palette.numeral
+                },
+                fontSize = m.body
+            )
+        }
+    }
     Row(
         modifier = Modifier.fillMaxWidth().padding(vertical = m.gap / 4),
         horizontalArrangement = Arrangement.SpaceBetween

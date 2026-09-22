@@ -89,4 +89,26 @@ object Telematics {
         val soc = ch?.soc ?: return null
         return if (soc > 0.0) ch.batteryEnergyKwh / soc * 100.0 else null
     }
+
+    /**
+     * The pack size the car implies, taken across many frames rather than one.
+     *
+     * The single-frame version above answers whether a decode is sane. This answers what the pack
+     * actually is — the only route to that figure on this vehicle, which a live poll confirmed
+     * sends no capacity field at all. One frame cannot settle it: the charge level arrives as a
+     * whole percent, so a lone reading at 73% carries half a percent of rounding, which on this
+     * pack is a third of a kilowatt-hour.
+     *
+     * The median, because the error is a rounding artefact rather than noise around a true value —
+     * a mean would faithfully average the rounding along with the measurement.
+     */
+    fun impliedPackKwh(clues: List<Pair<Double, Double>>, minReadings: Int = 5): Double? {
+        val packs = clues.mapNotNull { (soc, held) ->
+            if (soc > 0.0 && held > 0.0) held / soc * 100.0 else null
+        }.filter { it.isFinite() && it in 20.0..120.0 }
+        if (packs.size < minReadings) return null
+        val sorted = packs.sorted()
+        val mid = sorted.size / 2
+        return if (sorted.size % 2 == 1) sorted[mid] else (sorted[mid - 1] + sorted[mid]) / 2.0
+    }
 }

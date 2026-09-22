@@ -867,18 +867,49 @@ class TripRecorderService : Service() {
      * the same delta on the next loop.
      */
     private suspend fun sheetsSyncLoop() {
+        // Once, shortly after waking, whatever the clock says.
+        //
+        // The schedule below was written for a recorder that runs all day. This one does not: it
+        // is powered by the car, so it is alive for the length of a journey and dead until the
+        // next. A period measured in hours can pass entirely while the box is off, and then the
+        // hour it is awake is the one hour that does not qualify — the backup never runs, and the
+        // only place the history exists is the device most likely to be lost.
+        //
+        // Waking is also the moment there is most to say: recovery has just closed the drive the
+        // ignition cut short, so the previous journey becomes exportable at exactly the point the
+        // box comes back for the next one.
+        delay(45_000L)
+        backupNow("woke up")
+
         while (true) {
             delay(2 * 60_000L)
             val s = Settings(this)
             val periodMs = s.docsSyncHours * 3_600_000L
             if (s.webhookUrl.isBlank()) continue
             if (System.currentTimeMillis() - s.lastDocsSyncAt < periodMs) continue
-            val r = SheetsSync.exportDocs(this, s.webhookUrl, s.deviceId)
-            Diagnostics.crumb(
-                "docs export: " + (r.error ?: "${r.delivered}/${r.attempted} rows")
-            )
-            if (r.error == null) s.lastDocsSyncAt = System.currentTimeMillis()
+            backupNow("on schedule")
         }
+    }
+
+    /**
+     * One backup attempt, with the outcome kept where somebody can see it.
+     *
+     * The result used to go to a breadcrumb and nowhere else, which on a box nobody watches is the
+     * same as nowhere. A link that has been refused on every attempt for weeks looks exactly like
+     * one that is working, and the difference only shows up on the day the box is replaced.
+     */
+    private fun backupNow(why: String): Boolean {
+        val s = Settings(this)
+        if (s.webhookUrl.isBlank()) return false
+        val r = runCatching { SheetsSync.exportDocs(this, s.webhookUrl, s.deviceId) }
+            .getOrElse { Outbound.Result(0, 0, it.message ?: it::class.java.simpleName) }
+        Diagnostics.crumb("backup ($why): " + (r.error ?: "${r.delivered}/${r.attempted} rows"))
+        s.lastDocsError = r.error
+        if (r.error == null) {
+            s.lastDocsSyncAt = System.currentTimeMillis()
+            if (r.delivered > 0) s.lastDocsRows = r.delivered
+        }
+        return r.error == null
     }
 
     /**
@@ -1022,6 +1053,10 @@ class TripRecorderService : Service() {
         track = LiveTrack()
         refreshRangeAccuracy(dao)
         Diagnostics.crumb("trip closed on arrival trip=$closed")
+        // Back it up now rather than at the next scheduled hour. The drive has just become
+        // exportable and the ignition may be seconds from cutting: on this box "later" is a
+        // promise the hardware cannot keep.
+        io.launch { backupNow("drive finished") }
     }
 
     /**
