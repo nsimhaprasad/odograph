@@ -59,7 +59,7 @@ object SheetsJson {
     }
 
     /** The database shape this export was produced from. Bumped with every Room migration. */
-    const val SCHEMA_VERSION = 9
+    const val SCHEMA_VERSION = 13
 
     private fun place(p: PlaceEntity): String = "{" +
         "\"id\":${p.id}," +
@@ -81,7 +81,40 @@ object SheetsJson {
         "\"chargingPowerKw\":${numOrNull(b.chargingPowerKw)}," +
         "\"odometerKm\":${numOrNull(b.odometerKm)}," +
         "\"batteryEnergyKwh\":${numOrNull(b.batteryEnergyKwh)}," +
-        "\"exteriorTempC\":${b.exteriorTempC ?: "null"}" +
+        "\"exteriorTempC\":${b.exteriorTempC ?: "null"}," +
+        // Everything else the frame carries. A backup that silently drops three quarters of a
+        // table is the worst kind: it looks complete, and the loss only shows up on the day it is
+        // restored from — by which time the frames it dropped cannot be collected again.
+        "\"workingVoltage\":${numOrNull(b.workingVoltage)}," +
+        "\"workingCurrent\":${numOrNull(b.workingCurrent)}," +
+        "\"chargeTimeRemainingMin\":${b.chargeTimeRemainingMin ?: "null"}," +
+        "\"distanceSinceLastChargeKm\":${numOrNull(b.distanceSinceLastChargeKm)}," +
+        "\"powerUsageSinceLastChargeKwh\":${numOrNull(b.powerUsageSinceLastChargeKwh)}," +
+        "\"climateRunning\":${b.climateRunning?.toString() ?: "null"}," +
+        "\"interiorTempC\":${b.interiorTempC ?: "null"}," +
+        "\"chargingType\":${b.chargingType ?: "null"}," +
+        "\"pluggedIn\":${b.pluggedIn?.toString() ?: "null"}," +
+        "\"carCapacityKwh\":${numOrNull(b.carCapacityKwh)}," +
+        "\"auxVoltage\":${numOrNull(b.auxVoltage)}," +
+        "\"carJourneyId\":${b.carJourneyId ?: "null"}," +
+        "\"carJourneyDistanceRaw\":${b.carJourneyDistanceRaw ?: "null"}," +
+        "\"engineStatusRaw\":${b.engineStatusRaw ?: "null"}," +
+        "\"powerModeRaw\":${b.powerModeRaw ?: "null"}," +
+        "\"handbrake\":${b.handbrake?.toString() ?: "null"}," +
+        "\"tyreFlPsi\":${numOrNull(b.tyreFlPsi)}," +
+        "\"tyreFrPsi\":${numOrNull(b.tyreFrPsi)}," +
+        "\"tyreRlPsi\":${numOrNull(b.tyreRlPsi)}," +
+        "\"tyreRrPsi\":${numOrNull(b.tyreRrPsi)}," +
+        "\"carGpsSatellites\":${b.carGpsSatellites ?: "null"}," +
+        "\"carGpsStatus\":${b.carGpsStatus?.let { "\"" + esc(it) + "\"" } ?: "null"}," +
+        "\"carSpeedKmh\":${numOrNull(b.carSpeedKmh)}," +
+        "\"chargerId\":${b.chargerId?.let { "\"" + esc(it) + "\"" } ?: "null"}," +
+        "\"chargerSupplier\":${b.chargerSupplier?.let { "\"" + esc(it) + "\"" } ?: "null"}," +
+        "\"lastChargeEndKwh\":${numOrNull(b.lastChargeEndKwh)}," +
+        "\"staticDrainRaw\":${b.staticDrainRaw ?: "null"}," +
+        "\"chargeElapsedS\":${b.chargeElapsedS ?: "null"}," +
+        "\"dayDistanceRaw\":${b.dayDistanceRaw ?: "null"}," +
+        "\"dayPowerRaw\":${b.dayPowerRaw ?: "null"}" +
         "}"
 
     private fun trip(t: TripEntity): String = "{" +
@@ -104,6 +137,14 @@ object SheetsJson {
         "\"endPlaceId\":${t.endPlaceId ?: "null"}," +
         "\"socStart\":${t.socStart ?: "null"}," +
         "\"socEnd\":${t.socEnd ?: "null"}," +
+        // The conditions a drive was made in and what the car made of it. Without these a restored
+        // history can still say what every drive cost but no longer why, and the efficiency splits
+        // that depend on them come back empty.
+        "\"avgTempC\":${t.avgTempC ?: "null"}," +
+        "\"climateShare\":${t.climateShare ?: "null"}," +
+        "\"carEnergyKwh\":${t.carEnergyKwh ?: "null"}," +
+        "\"carDistanceKm\":${t.carDistanceKm ?: "null"}," +
+        "\"clusterId\":${t.clusterId ?: "null"}," +
         "\"energyKwh\":${t.energyKwh ?: "null"}," +
         "\"costInr\":${t.costInr ?: "null"}" +
         "}"
@@ -131,7 +172,15 @@ object SheetsJson {
         "\"enteredRateInr\":${c.enteredRateInr ?: "null"}," +
         "\"enteredBillInr\":${c.enteredBillInr ?: "null"}," +
         "\"gstRatePct\":${c.gstRatePct ?: "null"}," +
-        "\"costInr\":${c.costInr ?: "null"}" +
+        "\"costInr\":${c.costInr ?: "null"}," +
+        // deliveredKwh is the wall-meter figure the driver typed in by hand. It is the one value
+        // in this table that no amount of re-polling could ever recover, so leaving it out of the
+        // backup made the backup a guarantee it could not honour.
+        "\"deliveredKwh\":${c.deliveredKwh ?: "null"}," +
+        "\"placeId\":${c.placeId ?: "null"}," +
+        "\"samplesTotal\":${c.samplesTotal}," +
+        "\"samplesAbove\":${c.samplesAbove}," +
+        "\"reconstructed\":${c.reconstructed}" +
         "}"
 
     private fun day(d: DailyTelemetryEntity): String = "{" +

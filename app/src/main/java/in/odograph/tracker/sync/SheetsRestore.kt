@@ -32,7 +32,7 @@ object SheetsRestore {
      * and guessing is how a restore puts the wrong values in the right names. A sheet from a newer
      * build is refused for the same reason from the other direction.
      */
-    val SUPPORTED_SCHEMAS = setOf(8, 9)
+    val SUPPORTED_SCHEMAS = setOf(8, 9, 13)
 
     data class Snapshot(
         val schema: Int?,
@@ -186,7 +186,15 @@ object SheetsRestore {
         socStart = num("soc_start"), socEnd = num("soc_end"),
         energyKwh = num("energy_kwh"), costInr = num("cost_inr"),
         elevGainM = num("climb_m") ?: 0.0, elevLossM = num("descent_m") ?: 0.0,
-        avgTempC = num("avg_temp_c")
+        avgTempC = num("avg_temp_c"),
+        // Written by schema 13 onwards; an older sheet simply has no column and reads null, which
+        // is the right answer — the conditions were never recorded, not recorded as nothing.
+        climateShare = num("climate_share"),
+        carEnergyKwh = num("car_energy_kwh"),
+        carDistanceKm = num("car_distance_km"),
+        clusterId = long("cluster_id"),
+        startPlaceId = long("start_place_id"),
+        endPlaceId = long("end_place_id")
     )
 
     private fun JSONObject.point() = PointEntity(
@@ -212,7 +220,37 @@ object SheetsRestore {
         chargingPowerKw = num("charge_kw"),
         odometerKm = num("odometer_km"),
         batteryEnergyKwh = num("battery_kwh"),
-        exteriorTempC = int("exterior_temp_c")
+        exteriorTempC = int("exterior_temp_c"),
+        workingVoltage = num("working_v"),
+        workingCurrent = num("working_a"),
+        chargeTimeRemainingMin = int("charge_remaining_min"),
+        distanceSinceLastChargeKm = num("dist_since_charge_km"),
+        powerUsageSinceLastChargeKwh = num("power_since_charge_kwh"),
+        climateRunning = bool("climate_on"),
+        interiorTempC = int("interior_temp_c"),
+        chargingType = int("charging_type"),
+        pluggedIn = bool("plugged_in"),
+        carCapacityKwh = num("car_capacity_kwh"),
+        auxVoltage = num("aux_v"),
+        carJourneyId = int("car_journey_id"),
+        carJourneyDistanceRaw = int("car_journey_dist_raw"),
+        engineStatusRaw = int("engine_status_raw"),
+        powerModeRaw = int("power_mode_raw"),
+        handbrake = bool("handbrake"),
+        tyreFlPsi = num("tyre_fl_psi"),
+        tyreFrPsi = num("tyre_fr_psi"),
+        tyreRlPsi = num("tyre_rl_psi"),
+        tyreRrPsi = num("tyre_rr_psi"),
+        carGpsSatellites = int("car_gps_sats"),
+        carGpsStatus = str("car_gps_status"),
+        carSpeedKmh = num("car_speed_kmh"),
+        chargerId = str("charger_id"),
+        chargerSupplier = str("charger_supplier"),
+        lastChargeEndKwh = num("last_charge_end_kwh"),
+        staticDrainRaw = int("static_drain_raw"),
+        chargeElapsedS = int("charge_elapsed_s"),
+        dayDistanceRaw = int("day_dist_raw"),
+        dayPowerRaw = int("day_power_raw")
     )
 
     private fun JSONObject.charge() = ChargeEventEntity(
@@ -225,7 +263,13 @@ object SheetsRestore {
         kind = int("kind"),
         costInr = num("cost_inr"),
         deliveredKwh = num("delivered_kwh"),
-        placeId = long("place_id")
+        placeId = long("place_id"),
+        samplesTotal = int("samples_total") ?: 0,
+        samplesAbove = int("samples_above") ?: 0,
+        reconstructed = bool("reconstructed") ?: false,
+        enteredRateInr = num("entered_rate_inr"),
+        enteredBillInr = num("entered_bill_inr"),
+        gstRatePct = num("gst_rate_pct")
     )
 
     private fun JSONObject.day() = DailyTelemetryEntity(

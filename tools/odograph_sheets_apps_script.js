@@ -34,7 +34,9 @@ function doPost(e) {
     var tripSheet = tab(ss, 'Trips');
     var tripCols = ['id','start','end','km','duration_s','moving_s','max_kmh','avg_kmh',
       'slowest_kmh','start_lat','start_lon','end_lat','end_lon','soc_start','soc_end',
-      'energy_kwh','cost_inr','climb_m','descent_m'];
+      'energy_kwh','cost_inr','climb_m','descent_m',
+      'avg_temp_c','climate_share','car_energy_kwh','car_distance_km','cluster_id',
+      'start_place_id','end_place_id'];
     upsertRows(tripSheet, tripCols, trips.map(tripRow), 0);
 
     var pointSheet = tab(ss, 'Points');
@@ -42,7 +44,9 @@ function doPost(e) {
     appendNewPoints(pointSheet, pointCols, points.map(pointRow));
 
     var chargeSheet = tab(ss, 'Charges');
-    var chargeCols = ['id','start','end','start_soc','end_soc','energy_kwh','peak_kw','kind','cost_inr'];
+    var chargeCols = ['id','start','end','start_soc','end_soc','energy_kwh','peak_kw','kind','cost_inr',
+      'delivered_kwh','place_id','samples_total','samples_above','reconstructed',
+      'entered_rate_inr','entered_bill_inr','gst_rate_pct'];
     upsertRows(chargeSheet, chargeCols, charges.map(chargeRow), 0);
 
     var teleSheet = tab(ss, 'Telemetry');
@@ -58,7 +62,13 @@ function doPost(e) {
 
     var batterySheet = tab(ss, 'Battery');
     var batteryCols = ['id','trip_id','t_ms','soc_pct','charging','range_km','charge_kw',
-      'odometer_km','battery_kwh','exterior_temp_c'];
+      'odometer_km','battery_kwh','exterior_temp_c',
+      'working_v','working_a','charge_remaining_min','dist_since_charge_km','power_since_charge_kwh',
+      'climate_on','interior_temp_c','charging_type','plugged_in','car_capacity_kwh','aux_v',
+      'car_journey_id','car_journey_dist_raw','engine_status_raw','power_mode_raw','handbrake',
+      'tyre_fl_psi','tyre_fr_psi','tyre_rl_psi','tyre_rr_psi',
+      'car_gps_sats','car_gps_status','car_speed_kmh','charger_id','charger_supplier',
+      'last_charge_end_kwh','static_drain_raw','charge_elapsed_s','day_dist_raw','day_power_raw'];
     upsertRows(batterySheet, batteryCols, battery.map(batteryRow), 0);
 
     // The schema the writing app used, kept where a later restore can ask the sheet what shape
@@ -209,7 +219,16 @@ function batteryRow(b) {
   // when it was not.
   function n(v) { return (v === null || v === undefined) ? '' : v; }
   return [b.id, b.tripId, b.t, n(b.socPercent), n(b.charging), n(b.rangeKm),
-    n(b.chargingPowerKw), n(b.odometerKm), n(b.batteryEnergyKwh), n(b.exteriorTempC)];
+    n(b.chargingPowerKw), n(b.odometerKm), n(b.batteryEnergyKwh), n(b.exteriorTempC),
+    n(b.workingVoltage), n(b.workingCurrent), n(b.chargeTimeRemainingMin),
+    n(b.distanceSinceLastChargeKm), n(b.powerUsageSinceLastChargeKwh),
+    n(b.climateRunning), n(b.interiorTempC), n(b.chargingType), n(b.pluggedIn),
+    n(b.carCapacityKwh), n(b.auxVoltage), n(b.carJourneyId), n(b.carJourneyDistanceRaw),
+    n(b.engineStatusRaw), n(b.powerModeRaw), n(b.handbrake),
+    n(b.tyreFlPsi), n(b.tyreFrPsi), n(b.tyreRlPsi), n(b.tyreRrPsi),
+    n(b.carGpsSatellites), n(b.carGpsStatus), n(b.carSpeedKmh),
+    n(b.chargerId), n(b.chargerSupplier), n(b.lastChargeEndKwh),
+    n(b.staticDrainRaw), n(b.chargeElapsedS), n(b.dayDistanceRaw), n(b.dayPowerRaw)];
 }
 
 /** Append a trip's points once, and once only. */
@@ -230,10 +249,15 @@ function ensureHeader(sheet, header) {
 }
 
 function tripRow(t) {
+  function n(v) { return (v === null || v === undefined) ? '' : v; }
   return [t.id, epoch(t.startedAt), epoch(t.endedAt), (t.distanceM / 1000).toFixed(1),
     t.durationS, t.movingS, toKmh(t.maxSpeedMps), toKmh(t.avgSpeedMps), toKmh(t.slowestKmMps),
     t.startLat, t.startLon, t.endLat, t.endLon, t.socStart, t.socEnd, t.energyKwh,
-    t.costInr, t.elevGainM, t.elevLossM];
+    t.costInr, t.elevGainM, t.elevLossM,
+    // The conditions the drive was made in. Without them a restored history can say what every
+    // drive cost but no longer why, and every efficiency split comes back empty.
+    n(t.avgTempC), n(t.climateShare), n(t.carEnergyKwh), n(t.carDistanceKm), n(t.clusterId),
+    n(t.startPlaceId), n(t.endPlaceId)];
 }
 
 function pointRow(p) {
@@ -241,8 +265,13 @@ function pointRow(p) {
 }
 
 function chargeRow(c) {
+  function n(v) { return (v === null || v === undefined) ? '' : v; }
   return [c.id, epoch(c.startTime), c.endTime ? epoch(c.endTime) : '', c.startSoc, c.endSoc,
-    c.energyKwh, c.peakPowerKw, c.kind || 'open', c.costInr];
+    c.energyKwh, c.peakPowerKw, c.kind || 'open', c.costInr,
+    // deliveredKwh is typed in by hand from a charger app or a wall meter. It is the one value
+    // here that no amount of re-polling could ever recover, and it was not being written down.
+    n(c.deliveredKwh), n(c.placeId), n(c.samplesTotal), n(c.samplesAbove), n(c.reconstructed),
+    n(c.enteredRateInr), n(c.enteredBillInr), n(c.gstRatePct)];
 }
 
 function epoch(ms) { return ms ? new Date(ms) : ''; }

@@ -19,8 +19,8 @@ android {
         applicationId = "in.odograph.tracker"
         minSdk = 26
         targetSdk = 34
-        versionCode = 43
-        versionName = "0.31.0"
+        versionCode = 44
+        versionName = "0.32.0"
     }
 
     // buildConfig so the running app can say which build it is: without it neither the box

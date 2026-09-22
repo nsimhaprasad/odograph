@@ -180,4 +180,48 @@ class SheetsJsonTest {
         assertThat(out).contains("\"exteriorTempC\":34")
         assertThat(out).contains("\"batteryEnergyKwh\":50.8")
     }
+
+    /**
+     * A backup that quietly carries a fraction of a table is the worst kind: it looks complete and
+     * the loss only appears on the day it is restored from, by which time the frames it dropped
+     * cannot be collected again. This counts columns rather than trusting that somebody remembered
+     * to widen the exporter when they widened the table.
+     */
+    @Test
+    fun `every column of every backed-up table reaches the sheet`() {
+        val out = SheetsJson.stats(
+            deviceId = "windsor",
+            trips = listOf(sampleTrip()), points = listOf(samplePoint()),
+            charges = listOf(sampleCharge()),
+            days = listOf(DailyTelemetryEntity(day = 20260101, firstPollAt = 1, lastPollAt = 2)),
+            places = listOf(samplePlace()), battery = listOf(sampleBattery()),
+            capacityKwh = 52.9, homeRateInr = 8.0, outsideRateInr = 25.0, gstRatePct = 18.0
+        )
+        // Every property of the entity, bar the row id the sheet keys on separately.
+        listOf(
+            TripEntity::class, BatteryEntity::class, ChargeEventEntity::class
+        ).forEach { cls ->
+            cls.members.filterIsInstance<kotlin.reflect.KProperty1<*, *>>()
+                .map { it.name }
+                // id is the sheet's own key, and syncedAt is this box's bookkeeping about what it
+                // has uploaded — restoring another box's upload state would be meaningless and
+                // would make the new box believe it had already sent rows it has never seen.
+                .filter { it !in setOf("id", "syncedAt") }
+                .forEach { field ->
+                    assertThat(out)
+                        .`as`("${cls.simpleName}.$field is not in the backup")
+                        .contains("\"$field\"")
+                }
+        }
+    }
+
+    /** The hand-typed wall reading exists nowhere else and must survive a restore. */
+    @Test
+    fun `the wall-meter reading a driver typed in is backed up`() {
+        val out = SheetsJson.stats(
+            "w", emptyList(), emptyList(), listOf(sampleCharge().copy(deliveredKwh = 17.44)),
+            emptyList(), emptyList(), emptyList(), 52.9, 8.0, 25.0, 18.0
+        )
+        assertThat(out).contains("\"deliveredKwh\":17.44")
+    }
 }
