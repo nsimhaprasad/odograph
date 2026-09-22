@@ -603,6 +603,20 @@ interface OdographDao {
     @Query("UPDATE trips SET climateShare = :share WHERE id = :id")
     fun setClimateShare(id: Long, share: Double?)
 
+    /**
+     * The car's own journey identifiers seen during a drive, oldest first.
+     *
+     * The evidence for whether the app's inferred trip boundaries agree with the car's. One value
+     * across a drive means both agree it was one journey; two or more means the car ended a
+     * journey where the app did not, and a boundary the app invented shows up as two drives
+     * sharing an identifier.
+     */
+    @Query(
+        """SELECT DISTINCT carJourneyId FROM battery
+           WHERE tripId = :tripId AND carJourneyId IS NOT NULL ORDER BY t ASC"""
+    )
+    fun journeyIdsFor(tripId: Long): List<Int>
+
     /** Stamps what the car's own counters made of the drive, for comparison with our own figure. */
     @Query("UPDATE trips SET carEnergyKwh = :energyKwh, carDistanceKm = :distanceKm WHERE id = :id")
     fun setCarCounters(id: Long, energyKwh: Double?, distanceKm: Double?)

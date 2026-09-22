@@ -51,7 +51,26 @@ object ApiJson {
         append(kv("batteryMileageKmPerKwh", numOrNull(state.batteryMileageKmPerKwh))).append(",")
         append(kv("telematicsConnected", state.telematicsConnected?.toString() ?: "null")).append(",")
         append(kv("odoKm", numOrNull(state.odoKm))).append(",")
-        append(kv("odoDriftKm", numOrNull(state.odoDriftKm)))
+        append(kv("odoDriftKm", numOrNull(state.odoDriftKm))).append(",")
+        // Everything else the driving screen knows.
+        //
+        // These were on the glass and nowhere else, which made the box impossible to diagnose
+        // without somebody standing in front of it reading numbers aloud — and the numbers most
+        // worth asking about were exactly the missing ones: what the car itself says the range is,
+        // against which ours is judged, and the two newer estimates that disagree with it on
+        // purpose.
+        append(kv("mgBatteryRangeKm", numOrNull(state.mgBatteryRangeKm))).append(",")
+        append(kv("lifetimeRangeKm", numOrNull(state.lifetimeRangeKm))).append(",")
+        append(kv("liveRangeKm", numOrNull(state.liveRangeKm))).append(",")
+        append(kv("tripId", state.tripId.toString())).append(",")
+        append(kv("maxSpeedKmh", num(state.maxSpeedMps * 3.6))).append(",")
+        append(kv("overLimit", state.overLimit.toString())).append(",")
+        append(kv("speedLimitKmh", state.speedLimitKmh.toString())).append(",")
+        append(kv("batteryTotalKwh", num(state.batteryTotalKwh))).append(",")
+        append(kv("tripEnergyKwh", numOrNull(state.tripEnergyKwh))).append(",")
+        append(kv("tripCostInr", numOrNull(state.tripCostInr))).append(",")
+        append(kv("elevGainM", num(state.elevGainM))).append(",")
+        append(kv("elevLossM", num(state.elevLossM)))
         append("}")
     }
 

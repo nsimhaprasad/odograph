@@ -9,6 +9,7 @@ import io.ktor.http.HttpStatusCode
 import io.ktor.server.application.call
 import io.ktor.server.cio.CIO
 import io.ktor.server.engine.ApplicationEngine
+import io.ktor.server.application.ApplicationCallPipeline
 import io.ktor.server.engine.embeddedServer
 import io.ktor.server.request.receiveChannel
 import io.ktor.server.request.receiveParameters
@@ -58,6 +59,18 @@ object DashboardServer {
 
         engine = runCatching {
             embeddedServer(CIO, port = PORT) {
+                // Let a page opened from the laptop's own disk read this API.
+                //
+                // Without it a local dashboard cannot fetch anything here: a file:// page sends
+                // Origin: null, the browser applies the same-origin rule, and the request never
+                // leaves — silently, with nothing in the page to say why. This is a read-only
+                // export bound to the LAN of a car's head unit, reachable only by whoever is
+                // already on that network, so there is nothing here that a permissive header
+                // gives away which being on the network did not give away first.
+                intercept(ApplicationCallPipeline.Plugins) {
+                    call.response.headers.append("Access-Control-Allow-Origin", "*")
+                }
+
                 routing {
                     get("/") {
                         respondWeb(call, app, "index.html", ContentType.Text.Html)

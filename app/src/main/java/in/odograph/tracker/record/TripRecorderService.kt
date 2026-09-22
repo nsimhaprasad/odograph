@@ -348,10 +348,29 @@ class TripRecorderService : Service() {
     private val recorder = CoroutineScope(
         SupervisorJob() + Dispatchers.IO.limitedParallelism(1)
     )
+    /**
+     * The drive being recorded, or [NO_TRIP].
+     *
+     * Volatile because two threads meet on it. It is only ever written by the fix pump, which is
+     * serialised, but the telematics poller reads it on its own thread to decide which drive a
+     * battery frame belongs to — and a stale read there files the frame under the previous trip
+     * or under none at all. Frames are what a drive's energy is computed from, so a misfiled one
+     * at a trip boundary quietly moves energy between two drives.
+     */
+    @Volatile
     private var tripId: Long = -1
+    /** Last fix recorded. Volatile: written by the fix pump, read by the telematics poller. */
+    @Volatile
     private var lastFix: Fix? = null
     private var startedAt: Long? = null
-    /** Wall-clock the car last moved over a fix. When stale, the car is parked and may be draining. */
+    /**
+     * Wall-clock the car last moved over a fix. When stale, the car is parked and may be draining.
+     *
+     * Volatile for the same reason as [tripId]: the poller reads it to decide whether a battery
+     * frame belongs to a parked car, and a stale read files an overnight drain reading against a
+     * drive or the reverse.
+     */
+    @Volatile
     private var lastMovedAt = Long.MIN_VALUE
 
     /**

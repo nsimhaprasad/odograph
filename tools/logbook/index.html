@@ -1,0 +1,544 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Windsor Logbook</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600&family=Saira+Condensed:wght@400;500;700&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+:root{
+  padding-top:env(safe-area-inset-top,0px);
+  padding-bottom:env(safe-area-inset-bottom,0px);
+  --ground:#F7F5F0; --panel:#FFFDF8; --edge:#E2DCD0; --edge-soft:#EDE8DE;
+  --ink:#1C1A16; --ink-2:#5C554A; --ink-3:#8C8478;
+  --accent:#B87514; --accent-soft:#F2E3C9;
+  --car:#2E7D72; --car-soft:#D9EAE7;
+  --good:#3F7A3F; --warn:#B06A22; --bad:#A63F35;
+  --grid:#E6E0D4;
+  --shadow:0 1px 2px rgba(28,26,22,.06);
+}
+:root:not([data-theme="light"]){ @media (prefers-color-scheme: dark){
+  --ground:#12161F; --panel:#181D28; --edge:#2A3040; --edge-soft:#232936;
+  --ink:#ECE8E0; --ink-2:#A3A9B8; --ink-3:#6E7687;
+  --accent:#E8A33D; --accent-soft:#3A2E1A;
+  --car:#4FB3A5; --car-soft:#17332F;
+  --good:#5FA85F; --warn:#D98544; --bad:#C4574B;
+  --grid:#242B3A;
+  --shadow:0 1px 2px rgba(0,0,0,.4);
+}}
+:root[data-theme="dark"]{
+  --ground:#12161F; --panel:#181D28; --edge:#2A3040; --edge-soft:#232936;
+  --ink:#ECE8E0; --ink-2:#A3A9B8; --ink-3:#6E7687;
+  --accent:#E8A33D; --accent-soft:#3A2E1A;
+  --car:#4FB3A5; --car-soft:#17332F;
+  --good:#5FA85F; --warn:#D98544; --bad:#C4574B;
+  --grid:#242B3A;
+  --shadow:0 1px 2px rgba(0,0,0,.4);
+}
+*{box-sizing:border-box}
+body{background:var(--ground);color:var(--ink);font-family:Archivo,ui-sans-serif,system-ui,sans-serif;
+     padding-inline:20px;padding-block:0 56px;-webkit-font-smoothing:antialiased}
+.wrap{max-width:1180px;margin:0 auto}
+h1,h2,h3{text-wrap:balance;margin:0}
+.num{font-family:"Saira Condensed",ui-sans-serif,system-ui,sans-serif;font-variant-numeric:tabular-nums;letter-spacing:.01em}
+.mono{font-family:"JetBrains Mono",ui-monospace,Menlo,monospace;font-variant-numeric:tabular-nums}
+.eyebrow{font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-3);font-weight:600}
+
+header.top{position:sticky;top:env(safe-area-inset-top,0px);z-index:20;background:var(--ground);
+  border-bottom:1px solid var(--edge);padding-block:18px 14px;margin-bottom:26px}
+.titlerow{display:flex;flex-wrap:wrap;align-items:baseline;gap:10px 16px}
+h1{font-family:"Saira Condensed",sans-serif;font-size:30px;font-weight:700;letter-spacing:.02em}
+.vin{color:var(--ink-3);font-size:12px}
+.srcbar{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-top:12px}
+.btn{font:500 12px Archivo,sans-serif;color:var(--ink);background:var(--panel);border:1px solid var(--edge);
+  border-radius:6px;padding:7px 13px;cursor:pointer}
+.btn:hover{border-color:var(--accent)}
+.btn:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.srcnote{font-size:12px;color:var(--ink-3)}
+
+section{margin-bottom:38px}
+.sechead{display:flex;align-items:baseline;justify-content:space-between;gap:12px;margin-bottom:14px;
+  padding-bottom:7px;border-bottom:1px solid var(--edge-soft)}
+.sechead h2{font-family:"Saira Condensed",sans-serif;font-size:17px;font-weight:700;letter-spacing:.06em;text-transform:uppercase}
+.sechead .hint{font-size:12px;color:var(--ink-3);text-align:right}
+
+.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:1px;background:var(--edge-soft);
+  border:1px solid var(--edge-soft);border-radius:8px;overflow:hidden}
+.tile{background:var(--panel);padding:15px 16px 13px}
+.tile .v{font-family:"Saira Condensed",sans-serif;font-variant-numeric:tabular-nums;font-size:31px;font-weight:700;line-height:1.05}
+.tile .u{font-size:12px;color:var(--ink-2);margin-left:3px;font-weight:500}
+.tile .k{font-size:10px;letter-spacing:.13em;text-transform:uppercase;color:var(--ink-3);margin-top:5px;font-weight:600}
+
+figure{margin:0}
+.chartbox{background:var(--panel);border:1px solid var(--edge);border-radius:8px;padding:16px 14px 10px;box-shadow:var(--shadow)}
+svg{display:block;width:100%;height:auto;max-width:100%}
+.legend{display:flex;flex-wrap:wrap;gap:8px 18px;margin-top:10px;font-size:11.5px;color:var(--ink-2)}
+.legend i{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:6px;vertical-align:-1px}
+figcaption{font-size:12.5px;color:var(--ink-2);line-height:1.55;margin-top:11px;max-width:68ch}
+figcaption b{color:var(--ink);font-weight:600}
+
+.tablewrap{overflow-x:auto;border:1px solid var(--edge);border-radius:8px;background:var(--panel)}
+table{border-collapse:collapse;width:100%;font-size:13px;min-width:540px}
+th{font:600 10px Archivo,sans-serif;letter-spacing:.11em;text-transform:uppercase;color:var(--ink-3);
+   text-align:right;padding:10px 12px;border-bottom:1px solid var(--edge);white-space:nowrap;background:var(--panel)}
+th:first-child,td:first-child{text-align:left}
+td{padding:8px 12px;border-bottom:1px solid var(--edge-soft);text-align:right;white-space:nowrap}
+tr:last-child td{border-bottom:0}
+.scroll{max-height:400px;overflow-y:auto}
+.chip{display:inline-block;font:600 10px Archivo,sans-serif;letter-spacing:.07em;text-transform:uppercase;
+  padding:2px 7px;border-radius:3px}
+.chip.fast{background:var(--accent-soft);color:var(--accent)}
+.chip.slow{background:var(--car-soft);color:var(--car)}
+.flag{color:var(--bad);font-weight:600}
+.ok{color:var(--good)}
+.warnc{color:var(--warn)}
+
+.split{display:grid;grid-template-columns:repeat(auto-fit,minmax(290px,1fr));gap:18px}
+.note{background:var(--panel);border:1px solid var(--edge);border-left:3px solid var(--accent);
+  border-radius:6px;padding:13px 15px;font-size:13px;line-height:1.6;color:var(--ink-2)}
+.note b{color:var(--ink)}
+.note code{font-family:"JetBrains Mono",monospace;font-size:12px;background:var(--ground);padding:1px 5px;border-radius:3px}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+</style>
+<style>
+  html,body{margin:0}
+  body{padding-block:0 56px}
+  .sources{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:10px;margin-top:12px}
+  .srccard{background:var(--panel);border:1px solid var(--edge);border-radius:7px;padding:11px 13px}
+  .srccard h4{margin:0 0 7px;font:600 10px Archivo,sans-serif;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-3)}
+  .srccard input{width:100%;font:400 12px "JetBrains Mono",monospace;padding:6px 8px;border-radius:5px;
+    border:1px solid var(--edge);background:var(--ground);color:var(--ink)}
+  .srccard input:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+  .srcrow{display:flex;gap:7px;margin-top:7px;align-items:center;flex-wrap:wrap}
+  .state{font-size:11.5px;color:var(--ink-3)}
+  .state.ok{color:var(--good)} .state.bad{color:var(--bad)} .state.busy{color:var(--accent)}
+</style>
+</head>
+<body>
+<div class="wrap">
+<header class="top">
+  <div class="titlerow">
+    <h1>Windsor Logbook</h1>
+    <span class="vin">MG Windsor EV · 52.9 kW·h · Bengaluru</span>
+  </div>
+  <div class="sources">
+    <div class="srccard">
+      <h4>The box, over the LAN</h4>
+      <input id="boxUrl" type="url" spellcheck="false" placeholder="http://10.66.102.154:8080">
+      <div class="srcrow">
+        <button class="btn" id="boxGo">Refresh from box</button>
+        <span class="state" id="boxState">not tried</span>
+      </div>
+    </div>
+    <div class="srccard">
+      <h4>The backup sheet</h4>
+      <input id="sheetUrl" type="url" spellcheck="false" placeholder="https://script.google.com/…/exec">
+      <div class="srcrow">
+        <button class="btn" id="sheetGo">Refresh from sheet</button>
+        <span class="state" id="sheetState">not tried</span>
+      </div>
+    </div>
+    <div class="srccard">
+      <h4>A saved export</h4>
+      <div class="srcrow">
+        <button class="btn" id="pick">Choose files…</button>
+        <input type="file" id="file" accept=".json,application/json" multiple hidden>
+        <span class="state" id="src">or drop them anywhere</span>
+      </div>
+      <div class="srcrow"><span class="state">Works with no network at all.</span></div>
+    </div>
+  </div>
+
+</header>
+
+<section>
+  <div class="sechead"><h2>Lifetime</h2><span class="hint" id="span"></span></div>
+  <div class="tiles" id="tiles"></div>
+</section>
+
+<section>
+  <div class="sechead">
+    <h2>Mileage, drive by drive</h2>
+    <span class="hint">what the car returned on each instrumented drive</span>
+  </div>
+  <figure>
+    <div class="chartbox"><div id="mileage"></div></div>
+    <div class="legend">
+      <span><i style="background:var(--accent)"></i>drive over 20 km</span>
+      <span><i style="background:var(--ink-3)"></i>drive under 20 km</span>
+      <span><i style="background:var(--car-soft);border:1px solid var(--car)"></i>5–8 km/kW·h, what this car can physically do</span>
+    </div>
+    <figcaption id="milecap"></figcaption>
+  </figure>
+</section>
+
+<section>
+  <div class="sechead"><h2>By day</h2><span class="hint">distance and the energy it took</span></div>
+  <figure><div class="chartbox"><div id="daily"></div></div></figure>
+</section>
+
+<section>
+  <div class="sechead"><h2>Charging</h2><span class="hint" id="chgnote"></span></div>
+  <div class="tablewrap"><table id="charges"></table></div>
+</section>
+
+<section class="split">
+  <div>
+    <div class="sechead"><h2>Where it goes</h2><span class="hint">most visited</span></div>
+    <div class="tablewrap"><div class="scroll"><table id="places"></table></div></div>
+  </div>
+  <div>
+    <div class="sechead"><h2>Standing drain</h2><span class="hint">charge lost while parked</span></div>
+    <div class="chartbox"><div id="drain"></div></div>
+  </div>
+</section>
+
+<section>
+  <div class="sechead"><h2>Every drive</h2><span class="hint" id="tripnote"></span></div>
+  <div class="tablewrap"><div class="scroll"><table id="trips"></table></div></div>
+</section>
+
+<section>
+  <div class="note" id="foot"></div>
+</section>
+</div>
+<script>
+const CAP = 52.9;
+const MIN_D_M = 2000, MIN_E = 0.5;
+let DATA = {"trips":[{"id":432,"startedAt":1790044340450,"distanceKm":0,"elapsedS":0,"movingS":0,"energyKwh":3.2,"costInr":null,"startPlaceId":null,"endPlaceId":null},{"id":431,"startedAt":1789986983000,"distanceKm":30.6586,"elapsedS":7188,"movingS":5115,"energyKwh":5.3,"costInr":99.43,"startPlaceId":61,"endPlaceId":1},{"id":430,"startedAt":1789957739468,"distanceKm":32.6076,"elapsedS":7576,"movingS":4932,"energyKwh":4.76,"costInr":99.69,"startPlaceId":1,"endPlaceId":61},{"id":429,"startedAt":1789924388000,"distanceKm":16.79,"elapsedS":1543,"movingS":1252,"energyKwh":1.59,"costInr":33.3,"startPlaceId":60,"endPlaceId":1},{"id":428,"startedAt":1789922752000,"distanceKm":8.818,"elapsedS":1635,"movingS":1085,"energyKwh":1.59,"costInr":33.3,"startPlaceId":7,"endPlaceId":60},{"id":427,"startedAt":1789920978000,"distanceKm":4.3129,"elapsedS":1514,"movingS":719,"energyKwh":null,"costInr":null,"startPlaceId":59,"endPlaceId":7},{"id":426,"startedAt":1789903950000,"distanceKm":7.3594,"elapsedS":1374,"movingS":1014,"energyKwh":0.53,"costInr":11.1,"startPlaceId":58,"endPlaceId":59},{"id":424,"startedAt":1789903716000,"distanceKm":0.3715,"elapsedS":177,"movingS":55,"energyKwh":0,"costInr":0,"startPlaceId":36,"endPlaceId":58},{"id":423,"startedAt":1789901321000,"distanceKm":17.3509,"elapsedS":2394,"movingS":2035,"energyKwh":2.12,"costInr":44.4,"startPlaceId":57,"endPlaceId":36},{"id":422,"startedAt":1789838887000,"distanceKm":2.6958,"elapsedS":488,"movingS":309,"energyKwh":0.53,"costInr":11.1,"startPlaceId":56,"endPlaceId":1},{"id":421,"startedAt":1789832776000,"distanceKm":0,"elapsedS":66,"movingS":1,"energyKwh":null,"costInr":null,"startPlaceId":56,"endPlaceId":56},{"id":419,"startedAt":1789738423000,"distanceKm":6.2641,"elapsedS":1278,"movingS":918,"energyKwh":0.53,"costInr":11.1,"startPlaceId":55,"endPlaceId":1},{"id":418,"startedAt":1789736417000,"distanceKm":9.0152,"elapsedS":2005,"movingS":1479,"energyKwh":1.06,"costInr":22.2,"startPlaceId":54,"endPlaceId":55},{"id":417,"startedAt":1789731880000,"distanceKm":22.052,"elapsedS":4494,"movingS":3840,"energyKwh":3.17,"costInr":66.39,"startPlaceId":8,"endPlaceId":54},{"id":416,"startedAt":1789703155731,"distanceKm":37.9645,"elapsedS":6659,"movingS":5601,"energyKwh":4.76,"costInr":99.69,"startPlaceId":1,"endPlaceId":8},{"id":415,"startedAt":1789649957000,"distanceKm":0.0857,"elapsedS":319,"movingS":0,"energyKwh":null,"costInr":null,"startPlaceId":1,"endPlaceId":1},{"id":414,"startedAt":1789649463000,"distanceKm":3.0479,"elapsedS":650,"movingS":445,"energyKwh":0.53,"costInr":11.1,"startPlaceId":53,"endPlaceId":1},{"id":413,"startedAt":1789647581000,"distanceKm":11.9345,"elapsedS":1881,"movingS":1504,"energyKwh":1.06,"costInr":22.2,"startPlaceId":52,"endPlaceId":53},{"id":412,"startedAt":1789646868000,"distanceKm":3.1592,"elapsedS":703,"movingS":607,"energyKwh":0.53,"costInr":11.1,"startPlaceId":51,"endPlaceId":52},{"id":411,"startedAt":1789646377000,"distanceKm":1.9736,"elapsedS":483,"movingS":392,"energyKwh":0.53,"costInr":11.1,"startPlaceId":50,"endPlaceId":51},{"id":112,"startedAt":1789645342000,"distanceKm":4.2081,"elapsedS":1026,"movingS":860,"energyKwh":null,"costInr":null,"startPlaceId":38,"endPlaceId":50},{"id":111,"startedAt":1789645312000,"distanceKm":0.1282,"elapsedS":29,"movingS":27,"energyKwh":null,"costInr":null,"startPlaceId":38,"endPlaceId":38},{"id":110,"startedAt":1789642293000,"distanceKm":12.4219,"elapsedS":2995,"movingS":1949,"energyKwh":null,"costInr":null,"startPlaceId":8,"endPlaceId":38},{"id":109,"startedAt":1789616268000,"distanceKm":12.1165,"elapsedS":2861,"movingS":1806,"energyKwh":null,"costInr":null,"startPlaceId":37,"endPlaceId":8},{"id":108,"startedAt":1789615644000,"distanceKm":2.3007,"elapsedS":612,"movingS":316,"energyKwh":null,"costInr":null,"startPlaceId":36,"endPlaceId":37},{"id":107,"startedAt":1789615606000,"distanceKm":0.0921,"elapsedS":36,"movingS":16,"energyKwh":null,"costInr":null,"startPlaceId":35,"endPlaceId":36},{"id":106,"startedAt":1789614785000,"distanceKm":4.0341,"elapsedS":798,"movingS":737,"energyKwh":null,"costInr":null,"startPlaceId":34,"endPlaceId":35},{"id":105,"startedAt":1789614270000,"distanceKm":3.0542,"elapsedS":510,"movingS":497,"energyKwh":0,"costInr":0,"startPlaceId":33,"endPlaceId":34},{"id":104,"startedAt":1789612472376,"distanceKm":8.8829,"elapsedS":1772,"movingS":1153,"energyKwh":1.59,"costInr":33.3,"startPlaceId":1,"endPlaceId":33},{"id":103,"startedAt":1789579702000,"distanceKm":88.111,"elapsedS":32684,"movingS":5183,"energyKwh":13.27,"costInr":302.1,"startPlaceId":32,"endPlaceId":1},{"id":102,"startedAt":1789575267000,"distanceKm":82.1714,"elapsedS":3998,"movingS":3652,"energyKwh":11.11,"costInr":252.92,"startPlaceId":31,"endPlaceId":32},{"id":100,"startedAt":1789572885000,"distanceKm":12.2028,"elapsedS":1706,"movingS":981,"energyKwh":1.46,"costInr":31.75,"startPlaceId":5,"endPlaceId":30},{"id":99,"startedAt":1789571910000,"distanceKm":2.4559,"elapsedS":695,"movingS":519,"energyKwh":null,"costInr":null,"startPlaceId":12,"endPlaceId":5},{"id":98,"startedAt":1789569598000,"distanceKm":2.8878,"elapsedS":764,"movingS":556,"energyKwh":null,"costInr":null,"startPlaceId":5,"endPlaceId":12},{"id":97,"startedAt":1789555754000,"distanceKm":161.3611,"elapsedS":8676,"movingS":8422,"energyKwh":26.98,"costInr":586.76,"startPlaceId":29,"endPlaceId":5},{"id":95,"startedAt":1789527395000,"distanceKm":177.3403,"elapsedS":13340,"movingS":9223,"energyKwh":31.47,"costInr":625.68,"startPlaceId":28,"endPlaceId":16},{"id":94,"startedAt":1789518158432,"distanceKm":137.8422,"elapsedS":9176,"movingS":6335,"energyKwh":24.91,"costInr":346.11,"startPlaceId":1,"endPlaceId":28},{"id":92,"startedAt":1789488748000,"distanceKm":182.6142,"elapsedS":10484,"movingS":9583,"energyKwh":29.1,"costInr":546.34,"startPlaceId":5,"endPlaceId":1},{"id":86,"startedAt":1789462094000,"distanceKm":1.5117,"elapsedS":710,"movingS":295,"energyKwh":0,"costInr":0,"startPlaceId":4,"endPlaceId":5},{"id":85,"startedAt":1789455746000,"distanceKm":1.3216,"elapsedS":2182,"movingS":238,"energyKwh":0,"costInr":0,"startPlaceId":5,"endPlaceId":4},{"id":84,"startedAt":1789444000000,"distanceKm":26.4348,"elapsedS":2494,"movingS":2244,"energyKwh":4.23,"costInr":null,"startPlaceId":27,"endPlaceId":5},{"id":83,"startedAt":1789443485000,"distanceKm":0.5479,"elapsedS":332,"movingS":158,"energyKwh":0,"costInr":0,"startPlaceId":26,"endPlaceId":27},{"id":82,"startedAt":1789437082000,"distanceKm":25.3374,"elapsedS":3399,"movingS":2650,"energyKwh":2.12,"costInr":null,"startPlaceId":5,"endPlaceId":26},{"id":80,"startedAt":1789405021000,"distanceKm":0.3315,"elapsedS":254,"movingS":72,"energyKwh":null,"costInr":null,"startPlaceId":5,"endPlaceId":5},{"id":79,"startedAt":1789403303374,"distanceKm":1.6178,"elapsedS":457,"movingS":319,"energyKwh":null,"costInr":null,"startPlaceId":12,"endPlaceId":5},{"id":78,"startedAt":1789398924000,"distanceKm":0.2483,"elapsedS":256,"movingS":64,"energyKwh":null,"costInr":null,"startPlaceId":25,"endPlaceId":12},{"id":72,"startedAt":1789321077000,"distanceKm":2.0204,"elapsedS":1159,"movingS":391,"energyKwh":0,"costInr":0,"startPlaceId":12,"endPlaceId":5},{"id":71,"startedAt":1789319432000,"distanceKm":2.6043,"elapsedS":604,"movingS":425,"energyKwh":0.53,"costInr":null,"startPlaceId":23,"endPlaceId":12},{"id":70,"startedAt":1789317450000,"distanceKm":2.5466,"elapsedS":656,"movingS":370,"energyKwh":0.53,"costInr":null,"startPlaceId":12,"endPlaceId":23},{"id":68,"startedAt":1789316446000,"distanceKm":2.0653,"elapsedS":554,"movingS":440,"energyKwh":null,"costInr":null,"startPlaceId":5,"endPlaceId":12},{"id":67,"startedAt":1789303236574,"distanceKm":0.7416,"elapsedS":443,"movingS":180,"energyKwh":null,"costInr":null,"startPlaceId":22,"endPlaceId":5},{"id":66,"startedAt":1789301299000,"distanceKm":2.308,"elapsedS":1298,"movingS":459,"energyKwh":null,"costInr":null,"startPlaceId":12,"endPlaceId":22},{"id":65,"startedAt":1789297493000,"distanceKm":1.2711,"elapsedS":389,"movingS":266,"energyKwh":null,"costInr":null,"startPlaceId":21,"endPlaceId":12},{"id":63,"startedAt":1789284503000,"distanceKm":1.774,"elapsedS":1233,"movingS":369,"energyKwh":null,"costInr":null,"startPlaceId":20,"endPlaceId":5},{"id":61,"startedAt":1789280232000,"distanceKm":3.3202,"elapsedS":883,"movingS":627,"energyKwh":null,"costInr":null,"startPlaceId":18,"endPlaceId":19},{"id":60,"startedAt":1789275715973,"distanceKm":4.9296,"elapsedS":1108,"movingS":775,"energyKwh":null,"costInr":null,"startPlaceId":5,"endPlaceId":18},{"id":55,"startedAt":1789268384000,"distanceKm":0.8823,"elapsedS":186,"movingS":123,"energyKwh":null,"costInr":null,"startPlaceId":5,"endPlaceId":4},{"id":54,"startedAt":1789231905000,"distanceKm":3.2624,"elapsedS":703,"movingS":546,"energyKwh":null,"costInr":null,"startPlaceId":12,"endPlaceId":5},{"id":53,"startedAt":1789230776000,"distanceKm":1.8834,"elapsedS":638,"movingS":386,"energyKwh":null,"costInr":null,"startPlaceId":5,"endPlaceId":12},{"id":52,"startedAt":1789207053000,"distanceKm":155.9996,"elapsedS":11456,"movingS":10320,"energyKwh":null,"costInr":null,"startPlaceId":14,"endPlaceId":5},{"id":51,"startedAt":1789205831000,"distanceKm":0.529,"elapsedS":278,"movingS":148,"energyKwh":null,"costInr":null,"startPlaceId":15,"endPlaceId":14},{"id":50,"startedAt":1789190093000,"distanceKm":2.1613,"elapsedS":740,"movingS":409,"energyKwh":null,"costInr":null,"startPlaceId":16,"endPlaceId":15},{"id":49,"startedAt":1789186084000,"distanceKm":0.7285,"elapsedS":1209,"movingS":202,"energyKwh":null,"costInr":null,"startPlaceId":16,"endPlaceId":16},{"id":48,"startedAt":1789183862000,"distanceKm":0,"elapsedS":1363,"movingS":2,"energyKwh":null,"costInr":null,"startPlaceId":16,"endPlaceId":16},{"id":47,"startedAt":1789182854000,"distanceKm":1.8997,"elapsedS":555,"movingS":295,"energyKwh":null,"costInr":null,"startPlaceId":15,"endPlaceId":16},{"id":46,"startedAt":1789179697000,"distanceKm":0.0443,"elapsedS":123,"movingS":18,"energyKwh":null,"costInr":null,"startPlaceId":14,"endPlaceId":15},{"id":45,"startedAt":1789175403000,"distanceKm":0.556,"elapsedS":284,"movingS":145,"energyKwh":null,"costInr":null,"startPlaceId":17,"endPlaceId":14},{"id":44,"startedAt":1789174373000,"distanceKm":1.9456,"elapsedS":328,"movingS":218,"energyKwh":null,"costInr":null,"startPlaceId":16,"endPlaceId":17},{"id":43,"startedAt":1789173696000,"distanceKm":0,"elapsedS":518,"movingS":0,"energyKwh":null,"costInr":null,"startPlaceId":16,"endPlaceId":16},{"id":42,"startedAt":1789172493000,"distanceKm":1.6166,"elapsedS":257,"movingS":149,"energyKwh":null,"costInr":null,"startPlaceId":17,"endPlaceId":16},{"id":41,"startedAt":1789169434000,"distanceKm":2.1031,"elapsedS":459,"movingS":311,"energyKwh":null,"costInr":null,"startPlaceId":16,"endPlaceId":17},{"id":40,"startedAt":1789142126000,"distanceKm":1.5283,"elapsedS":598,"movingS":276,"energyKwh":null,"costInr":null,"startPlaceId":14,"endPlaceId":16},{"id":39,"startedAt":1789137375000,"distanceKm":0.5226,"elapsedS":473,"movingS":110,"energyKwh":null,"costInr":null,"startPlaceId":15,"endPlaceId":14},{"id":38,"startedAt":1789134676000,"distanceKm":1.0096,"elapsedS":429,"movingS":265,"energyKwh":null,"costInr":null,"startPlaceId":14,"endPlaceId":15},{"id":37,"startedAt":1789103280000,"distanceKm":145.1617,"elapsedS":11288,"movingS":10831,"energyKwh":null,"costInr":null,"startPlaceId":5,"endPlaceId":14},{"id":36,"startedAt":1789059619000,"distanceKm":0.1114,"elapsedS":193,"movingS":29,"energyKwh":null,"costInr":null,"startPlaceId":12,"endPlaceId":5},{"id":35,"startedAt":1789056743000,"distanceKm":1.656,"elapsedS":442,"movingS":320,"energyKwh":null,"costInr":null,"startPlaceId":5,"endPlaceId":12},{"id":34,"startedAt":1789053096000,"distanceKm":0.3176,"elapsedS":234,"movingS":85,"energyKwh":null,"costInr":null,"startPlaceId":13,"endPlaceId":5},{"id":33,"startedAt":1789052723000,"distanceKm":0.3187,"elapsedS":175,"movingS":69,"energyKwh":null,"costInr":null,"startPlaceId":5,"endPlaceId":13},{"id":32,"startedAt":1789050124000,"distanceKm":5.1448,"elapsedS":1960,"movingS":1092,"energyKwh":null,"costInr":null,"startPlaceId":12,"endPlaceId":5},{"id":31,"startedAt":1789037455000,"distanceKm":0.1925,"elapsedS":242,"movingS":59,"energyKwh":null,"costInr":null,"startPlaceId":4,"endPlaceId":12},{"id":30,"startedAt":1789031452000,"distanceKm":1.4721,"elapsedS":3567,"movingS":213,"energyKwh":null,"costInr":null,"startPlaceId":12,"endPlaceId":4},{"id":29,"startedAt":1789015569854,"distanceKm":185.9792,"elapsedS":12086,"movingS":9950,"energyKwh":null,"costInr":null,"startPlaceId":1,"endPlaceId":12},{"id":27,"startedAt":1788972721483,"distanceKm":0,"elapsedS":15148,"movingS":0,"energyKwh":null,"costInr":null,"startPlaceId":1,"endPlaceId":1},{"id":26,"startedAt":1788972439713,"distanceKm":0,"elapsedS":202,"movingS":0,"energyKwh":null,"costInr":null,"startPlaceId":1,"endPlaceId":1},{"id":25,"startedAt":1788968776928,"distanceKm":0,"elapsedS":2798,"movingS":0,"energyKwh":null,"costInr":null,"startPlaceId":1,"endPlaceId":1},{"id":24,"startedAt":1788950651000,"distanceKm":34.2123,"elapsedS":6988,"movingS":5249,"energyKwh":null,"costInr":null,"startPlaceId":8,"endPlaceId":1},{"id":23,"startedAt":1788941417308,"distanceKm":0.602,"elapsedS":341,"movingS":157,"energyKwh":null,"costInr":null,"startPlaceId":11,"endPlaceId":8},{"id":21,"startedAt":1788921100558,"distanceKm":32.3371,"elapsedS":5769,"movingS":4392,"energyKwh":null,"costInr":null,"startPlaceId":1,"endPlaceId":8},{"id":19,"startedAt":1788871101055,"distanceKm":0,"elapsedS":26936,"movingS":0,"energyKwh":null,"costInr":null,"startPlaceId":1,"endPlaceId":1},{"id":18,"startedAt":1788863523000,"distanceKm":30.9396,"elapsedS":7105,"movingS":4526,"energyKwh":null,"costInr":null,"startPlaceId":8,"endPlaceId":1},{"id":17,"startedAt":1788856987000,"distanceKm":0.6602,"elapsedS":285,"movingS":141,"energyKwh":null,"costInr":null,"startPlaceId":10,"endPlaceId":8},{"id":16,"startedAt":1788850960000,"distanceKm":1.5681,"elapsedS":649,"movingS":343,"energyKwh":null,"costInr":null,"startPlaceId":9,"endPlaceId":10},{"id":15,"startedAt":1788834819000,"distanceKm":29.4807,"elapsedS":6043,"movingS":4277,"energyKwh":null,"costInr":null,"startPlaceId":1,"endPlaceId":9},{"id":14,"startedAt":1788778901000,"distanceKm":29.2057,"elapsedS":7167,"movingS":4463,"energyKwh":null,"costInr":null,"startPlaceId":8,"endPlaceId":1},{"id":13,"startedAt":1788757630000,"distanceKm":9.0833,"elapsedS":1616,"movingS":1225,"energyKwh":null,"costInr":null,"startPlaceId":7,"endPlaceId":8},{"id":12,"startedAt":1788754431945,"distanceKm":0.3915,"elapsedS":170,"movingS":62,"energyKwh":null,"costInr":null,"startPlaceId":6,"endPlaceId":7},{"id":11,"startedAt":1788748675000,"distanceKm":24.246,"elapsedS":5521,"movingS":4059,"energyKwh":null,"costInr":null,"startPlaceId":1,"endPlaceId":6},{"id":9,"startedAt":1788531358000,"distanceKm":182.4733,"elapsedS":43792,"movingS":10155,"energyKwh":null,"costInr":null,"startPlaceId":5,"endPlaceId":1},{"id":8,"startedAt":1788452494000,"distanceKm":1.0634,"elapsedS":355,"movingS":189,"energyKwh":null,"costInr":null,"startPlaceId":4,"endPlaceId":5},{"id":7,"startedAt":1788443008000,"distanceKm":152.0988,"elapsedS":9325,"movingS":7592,"energyKwh":null,"costInr":null,"startPlaceId":3,"endPlaceId":4},{"id":6,"startedAt":1788436684902,"distanceKm":32.518,"elapsedS":4038,"movingS":3516,"energyKwh":null,"costInr":null,"startPlaceId":1,"endPlaceId":3},{"id":5,"startedAt":1788368962000,"distanceKm":0.4644,"elapsedS":34028,"movingS":54,"energyKwh":null,"costInr":null,"startPlaceId":2,"endPlaceId":1},{"id":4,"startedAt":1788367804000,"distanceKm":4.3027,"elapsedS":723,"movingS":393,"energyKwh":null,"costInr":null,"startPlaceId":1,"endPlaceId":2},{"id":3,"startedAt":1788329910850,"distanceKm":0,"elapsedS":136,"movingS":0,"energyKwh":null,"costInr":null,"startPlaceId":1,"endPlaceId":1},{"id":2,"startedAt":1788328285212,"distanceKm":0.2391,"elapsedS":1625,"movingS":0,"energyKwh":null,"costInr":null,"startPlaceId":1,"endPlaceId":1},{"id":20,"startedAt":1763175666348,"distanceKm":0,"elapsedS":32,"movingS":0,"energyKwh":null,"costInr":null,"startPlaceId":1,"endPlaceId":1},{"id":10,"startedAt":1763175665825,"distanceKm":0,"elapsedS":2204,"movingS":0,"energyKwh":null,"costInr":null,"startPlaceId":1,"endPlaceId":1},{"id":22,"startedAt":1763175436894,"distanceKm":0.6907,"elapsedS":25762613,"movingS":25762372,"energyKwh":null,"costInr":null,"startPlaceId":8,"endPlaceId":11},{"id":420,"startedAt":1763175400429,"distanceKm":4.4929,"elapsedS":26657374,"movingS":672,"energyKwh":0,"costInr":0,"startPlaceId":1,"endPlaceId":56},{"id":28,"startedAt":1763175399792,"distanceKm":0,"elapsedS":25839503,"movingS":0,"energyKwh":null,"costInr":null,"startPlaceId":1,"endPlaceId":1},{"id":73,"startedAt":1763175392995,"distanceKm":1.1174,"elapsedS":26218907,"movingS":26218714,"energyKwh":null,"costInr":null,"startPlaceId":5,"endPlaceId":12},{"id":74,"startedAt":1763175391244,"distanceKm":1.2818,"elapsedS":26219990,"movingS":127,"energyKwh":null,"costInr":null,"startPlaceId":12,"endPlaceId":24},{"id":77,"startedAt":1763175391008,"distanceKm":1.7205,"elapsedS":26223224,"movingS":355,"energyKwh":null,"costInr":null,"startPlaceId":24,"endPlaceId":25},{"id":81,"startedAt":1763175387843,"distanceKm":3.396,"elapsedS":26230811,"movingS":26230625,"energyKwh":null,"costInr":null,"startPlaceId":5,"endPlaceId":5}],"charges":[{"id":1,"startTime":1789456108138,"endTime":1789462112098,"energyKwh":15.34,"deliveredKwh":17.44,"lossPct":12.0413,"kind":"fast","costInr":288,"enteredRateInr":null,"placeId":null},{"id":2,"startTime":1789499301175,"endTime":1789518461724,"energyKwh":12.7,"deliveredKwh":null,"lossPct":null,"kind":"slow","costInr":101.6,"enteredRateInr":null,"placeId":1},{"id":3,"startTime":1789525062816,"endTime":1789527408813,"energyKwh":32.8,"deliveredKwh":null,"lossPct":null,"kind":"fast","costInr":820,"enteredRateInr":null,"placeId":28},{"id":4,"startTime":1789537290414,"endTime":1789555819289,"energyKwh":34.91,"deliveredKwh":null,"lossPct":null,"kind":"fast","costInr":872.75,"enteredRateInr":null,"placeId":16},{"id":5,"startTime":1789574209521,"endTime":1789575184111,"energyKwh":13.75,"deliveredKwh":null,"lossPct":null,"kind":"fast","costInr":410.46,"enteredRateInr":null,"placeId":30},{"id":6,"startTime":1789585850012,"endTime":1789612667528,"energyKwh":40.73,"deliveredKwh":null,"lossPct":null,"kind":"slow","costInr":325.84,"enteredRateInr":null,"placeId":1}],"cost":{"period":"30d","tripDrives":105,"tripKm":2274.5315,"tripEnergyKwh":175.89,"tripCostInr":3312.16,"chargeSessions":6,"chargeEnergyKwh":150.23,"chargeCostInr":2818.65},"range":[{"day":20251115,"drives":1,"distanceKm":4.4929,"energyKwh":0},{"day":20260913,"drives":3,"distanceKm":7.1712,"energyKwh":1.06},{"day":20260915,"drives":6,"distanceKm":237.7676,"energyKwh":35.45},{"day":20260916,"drives":6,"distanceKm":659.0289,"energyKwh":109.2},{"day":20260917,"drives":6,"distanceKm":32.0523,"energyKwh":4.24},{"day":20260918,"drives":4,"distanceKm":75.2959,"energyKwh":9.52},{"day":20260919,"drives":1,"distanceKm":2.6958,"energyKwh":0.53},{"day":20260920,"drives":5,"distanceKm":50.69,"energyKwh":5.83},{"day":20260921,"drives":2,"distanceKm":63.2662,"energyKwh":10.06}],"drain":[{"t":1789645384000,"socPercent":45},{"t":1789645422000,"socPercent":45},{"t":1789645460000,"socPercent":45},{"t":1789645498000,"socPercent":45},{"t":1789645537000,"socPercent":45},{"t":1789645575000,"socPercent":45},{"t":1789645614000,"socPercent":45},{"t":1789645652000,"socPercent":45},{"t":1789645690000,"socPercent":45},{"t":1789645729000,"socPercent":44},{"t":1789645772000,"socPercent":44},{"t":1789645810000,"socPercent":44},{"t":1789645848000,"socPercent":44},{"t":1789645886000,"socPercent":44},{"t":1789645925000,"socPercent":44},{"t":1789645963000,"socPercent":44},{"t":1789646001000,"socPercent":44},{"t":1789646038772,"socPercent":44},{"t":1789646115000,"socPercent":44},{"t":1789646154000,"socPercent":44},{"t":1789646192000,"socPercent":44},{"t":1789646230000,"socPercent":44},{"t":1789646268000,"socPercent":44},{"t":1789646306000,"socPercent":44},{"t":1789646344000,"socPercent":44},{"t":1789649477000,"socPercent":40},{"t":1789650113581,"socPercent":39},{"t":1789650164184,"socPercent":39},{"t":1789736387000,"socPercent":23},{"t":1789736426000,"socPercent":23},{"t":1789736465000,"socPercent":23},{"t":1789839375388,"socPercent":99},{"t":1789839418570,"socPercent":99},{"t":1789839440558,"socPercent":99},{"t":1789903929000,"socPercent":94},{"t":1789903967000,"socPercent":94},{"t":1789922491000,"socPercent":91},{"t":1789922530000,"socPercent":91},{"t":1789922569000,"socPercent":91},{"t":1789922607000,"socPercent":91},{"t":1789922645000,"socPercent":91},{"t":1789922683000,"socPercent":90},{"t":1789922722000,"socPercent":90},{"t":1789922760000,"socPercent":90},{"t":1789922799000,"socPercent":90},{"t":1789924420000,"socPercent":87},{"t":1789925931404,"socPercent":84},{"t":1789925949609,"socPercent":84},{"t":1789957754539,"socPercent":83},{"t":1790044399423,"socPercent":63}],"places":[{"id":1,"name":"Doddabettahalli, Bengaluru","visits":45},{"id":2,"name":"Singanayakanahalli, Bengaluru Urban","visits":2},{"id":3,"name":"Kempalinganahalli, Bengaluru North","visits":2},{"id":4,"name":"Saraswathipuram, Hassan","visits":7},{"id":5,"name":"Vidya Nagar 2nd Stage, Hassan","visits":32},{"id":6,"name":"Byrasandra, Bengaluru","visits":2},{"id":7,"name":"Pattabhirama Nagara, Bengaluru","visits":4},{"id":8,"name":"Agara, Bengaluru","visits":12},{"id":9,"name":"HSR Layout, Bengaluru","visits":2},{"id":10,"name":"Parangipalya, Bengaluru","visits":2},{"id":11,"name":"Agara, Bengaluru","visits":2},{"id":12,"name":"Saraswathipuram, Hassan","visits":20},{"id":13,"name":"Gowri Koppalu, Hassan","visits":2},{"id":14,"name":"Lashkar Mohalla, Shivamogga","visits":8},{"id":15,"name":"Sheshadripuram, Shivamogga","visits":6},{"id":16,"name":"Durgigudi, Shivamogga","visits":14},{"id":17,"name":"Lashkar Mohalla, Shivamogga","visits":4},{"id":18,"name":"Bommanayakanahalli, Hassan","visits":2},{"id":19,"name":"Saraswathipuram, Hassan","visits":1},{"id":20,"name":"Ravindra Nagar, Hassan","visits":1},{"id":21,"name":"Vidya Nagar 2nd Stage, Hassan","visits":1},{"id":22,"name":"Ravindra Nagar, Hassan","visits":2},{"id":23,"name":"Vidya Nagar 2nd Stage, Hassan","visits":2},{"id":24,"name":"Ravindra Nagar, Hassan","visits":2},{"id":25,"name":"Hemavathi Nagar, Hassan","visits":2},{"id":26,"name":"Mavinakere, Hassan","visits":2},{"id":27,"name":"Mavinakere, Hassan","visits":2},{"id":28,"name":"\u0cae\u0cbe\u0ca8\u0c82\u0c97\u0cbf, Tumakuru","visits":3},{"id":29,"name":"Lashkar Mohalla, Shivamogga","visits":1},{"id":30,"name":"Shantigrama, Hassan","visits":2},{"id":31,"name":"Shantigrama, Hassan","visits":1},{"id":32,"name":"Siddapura, Tumakuru","visits":2},{"id":33,"name":"Amruthnagar, Bengaluru","visits":2},{"id":34,"name":"Vasanthappa Block, Bengaluru","visits":2},{"id":35,"name":"Fair Field Layout, Bengaluru","visits":2},{"id":36,"name":"Fair Field Layout, Bengaluru","visits":4},{"id":37,"name":"Ashokanagar, Bengaluru","visits":2},{"id":38,"name":"Kankanpalya, Bengaluru","visits":34},{"id":39,"name":"V.V Puram, Bengaluru","visits":48},{"id":40,"name":"Basavanagudi, Bengaluru","visits":50},{"id":41,"name":"Gandhi Bazaar, Bengaluru","visits":44},{"id":42,"name":"Gandhi Bazaar, Bengaluru","visits":60},{"id":43,"name":"Gandhi Bazaar, Bengaluru","visits":36},{"id":44,"name":"Gandhi Bazaar, Bengaluru","visits":46},{"id":45,"name":"Shankarapuram, Bengaluru","visits":26},{"id":46,"name":"Shankarapuram, Bengaluru","visits":50},{"id":47,"name":"Devaraj Urs Ward, Bengaluru","visits":55},{"id":48,"name":"Chamarajapete, Bengaluru","visits":49},{"id":49,"name":"Chamarajpet, Bengaluru","visits":46},{"id":50,"name":"IPD Salappa Ward, Bengaluru","visits":64},{"id":51,"name":"Cottonpete, Bengaluru","visits":2},{"id":52,"name":"Lower Palace Orchard, Bengaluru","visits":2},{"id":53,"name":"Gandhinagar, Bengaluru","visits":2},{"id":54,"name":"Kacharakanahalli, Bengaluru","visits":2},{"id":55,"name":"Yashoda Nagar, Bengaluru","visits":2},{"id":56,"name":"Nyayanga Badavane, Bengaluru","visits":4},{"id":57,"name":"Isaac Layout, Bengaluru","visits":1},{"id":58,"name":"Fair Field Layout, Bengaluru","visits":2},{"id":59,"name":"Gandhi Bazaar, Bengaluru","visits":2},{"id":60,"name":"Fair Field Layout, Bengaluru","visits":2},{"id":61,"name":"Agara, Bengaluru","visits":2}]};
+
+const $ = id => document.getElementById(id);
+const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+const fmt = (v, d = 0) => v == null || !isFinite(v) ? "—" :
+  v.toLocaleString("en-IN", { minimumFractionDigits: d, maximumFractionDigits: d });
+const day = ms => new Date(ms).toLocaleDateString("en-GB", { day: "numeric", month: "short" });
+const dayTime = ms => new Date(ms).toLocaleString("en-GB",
+  { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", hour12: false });
+
+// A drive only speaks about consumption once it is long enough to have measured any: the car
+// reports whole-percent charge, so one percent of the pack is the smallest energy it can express
+// and across a short hop that single step is the whole measurement.
+const per100 = t => {
+  const e = t.energyKwh, m = t.distanceKm * 1000;
+  if (e == null || e < MIN_E || m < MIN_D_M) return null;
+  return e / (m / 100000);
+};
+const mileage = t => { const p = per100(t); return p ? 100 / p : null; };
+const median = a => { if (!a.length) return null; const s = [...a].sort((x, y) => x - y), h = s.length >> 1;
+  return s.length % 2 ? s[h] : (s[h - 1] + s[h]) / 2; };
+
+function render() {
+  const trips = (DATA.trips || []).filter(t => t.elapsedS > 0).sort((a, b) => a.startedAt - b.startedAt);
+  const scored = trips.filter(t => mileage(t) != null);
+  const charges = DATA.charges || [];
+  const places = (DATA.places || []).filter(p => p.visits > 0).sort((a, b) => b.visits - a.visits);
+
+  const km = trips.reduce((s, t) => s + t.distanceKm, 0);
+  const kwh = trips.reduce((s, t) => s + (t.energyKwh || 0), 0);
+  const inr = trips.reduce((s, t) => s + (t.costInr || 0), 0);
+  const drive = trips.reduce((s, t) => s + t.elapsedS, 0);
+  const lifeMile = median(scored.map(mileage));
+
+  $("span").textContent = trips.length
+    ? `${day(trips[0].startedAt)} – ${day(trips[trips.length - 1].startedAt)} · ${trips.length} drives`
+    : "no drives loaded";
+
+  $("tiles").innerHTML = [
+    [fmt(km), "km", "distance"],
+    [fmt(kwh, 1), "kW·h", "energy"],
+    [`₹${fmt(inr)}`, "", "spent"],
+    [fmt(lifeMile, 2), "km/kW·h", "typical mileage"],
+    [fmt(CAP * (lifeMile || 0)), "km", "range from full"],
+    [fmt(drive / 3600, 1), "h", "at the wheel"],
+    [fmt(inr / (km || 1), 2), "₹/km", "running cost"],
+    [String(charges.length), "", "charge sessions"]
+  ].map(([v, u, k]) =>
+    `<div class="tile"><div class="v">${v}<span class="u">${u}</span></div><div class="k">${k}</div></div>`
+  ).join("");
+
+  drawMileage(scored);
+  drawDaily(DATA.range || []);
+  drawDrain(DATA.drain || []);
+
+  const fast = charges.filter(c => c.kind === "fast");
+  $("chgnote").textContent =
+    `${charges.length} sessions · ${fmt(charges.reduce((s, c) => s + c.energyKwh, 0), 1)} kW·h · ` +
+    `₹${fmt(charges.reduce((s, c) => s + (c.costInr || 0), 0))} · ${fast.length} fast`;
+  $("charges").innerHTML =
+    `<thead><tr><th>Started</th><th>Hours</th><th>kW·h</th><th>Avg kW</th><th>Wall kW·h</th><th>Loss</th><th>Cost</th><th>₹/kW·h</th><th>Type</th></tr></thead><tbody>` +
+    charges.slice().sort((a, b) => b.startTime - a.startTime).map(c => {
+      const h = (c.endTime - c.startTime) / 3600000;
+      const avg = h > 0 ? c.energyKwh / h : null;
+      // A session that averaged single-digit kW was not a fast charge, whatever it is labelled:
+      // the label comes from a majority vote over power samples, and a long idle tail after the
+      // charge finished drags that average down where the label cannot follow.
+      const odd = c.kind === "fast" && avg != null && avg < 15;
+      return `<tr><td>${dayTime(c.startTime)}</td><td class="mono">${fmt(h, 2)}</td>` +
+        `<td class="mono">${fmt(c.energyKwh, 2)}</td>` +
+        `<td class="mono${odd ? " flag" : ""}">${fmt(avg, 1)}</td>` +
+        `<td class="mono">${c.deliveredKwh == null ? "—" : fmt(c.deliveredKwh, 2)}</td>` +
+        `<td class="mono">${c.lossPct == null ? "—" : fmt(c.lossPct, 1) + "%"}</td>` +
+        `<td class="mono">₹${fmt(c.costInr)}</td>` +
+        `<td class="mono">${fmt((c.costInr || 0) / (c.energyKwh || 1), 2)}</td>` +
+        `<td><span class="chip ${c.kind}">${c.kind}</span></td></tr>`;
+    }).join("") + "</tbody>";
+
+  $("places").innerHTML =
+    `<thead><tr><th>Place</th><th>Visits</th></tr></thead><tbody>` +
+    places.slice(0, 40).map(p =>
+      `<tr><td>${p.name}</td><td class="mono">${p.visits}</td></tr>`).join("") + "</tbody>";
+
+  const named = Object.fromEntries((DATA.places || []).map(p => [p.id, p.name]));
+  $("tripnote").textContent = `${trips.length} drives · ${scored.length} with usable energy`;
+  $("trips").innerHTML =
+    `<thead><tr><th>When</th><th>From → to</th><th>km</th><th>Moving</th><th>kW·h</th><th>km/kW·h</th><th>Cost</th></tr></thead><tbody>` +
+    trips.slice().reverse().map(t => {
+      const mi = mileage(t);
+      const impossible = mi != null && mi > 9;
+      return `<tr><td>${dayTime(t.startedAt)}</td>` +
+        `<td>${named[t.startPlaceId] || "—"} → ${named[t.endPlaceId] || "—"}</td>` +
+        `<td class="mono">${fmt(t.distanceKm, 1)}</td>` +
+        `<td class="mono">${Math.round(t.movingS / 60)}m</td>` +
+        `<td class="mono">${t.energyKwh == null ? "—" : fmt(t.energyKwh, 2)}</td>` +
+        `<td class="mono${impossible ? " flag" : ""}">${mi == null ? "—" : fmt(mi, 2)}</td>` +
+        `<td class="mono">${t.costInr == null ? "—" : "₹" + fmt(t.costInr)}</td></tr>`;
+    }).join("") + "</tbody>";
+
+  const bad = scored.filter(t => mileage(t) > 9);
+  $("foot").innerHTML =
+    `<b>Reading this.</b> Energy comes from the car's own counter where it was reachable and from ` +
+    `whole-percent charge otherwise. The second resolves to <code>0.53 kW·h</code> — one percent of ` +
+    `the pack — so a short drive is mostly rounding, which is why ${bad.length} drive` +
+    `${bad.length === 1 ? "" : "s"} here still claim${bad.length === 1 ? "s" : ""} more than 9 km/kW·h. ` +
+    `A Windsor cannot do that. Those rows are marked, and drives over 20 km are the ones to trust.`;
+}
+
+/* ---- charts, drawn to one scale with room for the outermost labels ---- */
+
+function svg(el, w, h, inner) {
+  el.innerHTML = `<svg viewBox="0 0 ${w} ${h}" role="img" preserveAspectRatio="xMidYMid meet">${inner}</svg>`;
+}
+
+function drawMileage(scored) {
+  const box = $("mileage");
+  if (!scored.length) { box.innerHTML = ""; return; }
+  const W = 900, H = 320, L = 46, R = 16, T = 14, B = 34;
+  const iw = W - L - R, ih = H - T - B;
+  const vals = scored.map(mileage);
+  const top = Math.max(15, Math.ceil(Math.max(...vals) + 1));
+  const x = i => L + (scored.length === 1 ? iw / 2 : i * iw / (scored.length - 1));
+  const y = v => T + ih - (v / top) * ih;
+  const ink3 = css("--ink-3"), grid = css("--grid"), accent = css("--accent"), car = css("--car");
+
+  let s = "";
+  // the physically possible band, which is the point of the chart
+  s += `<rect x="${L}" y="${y(8)}" width="${iw}" height="${y(5) - y(8)}" fill="${css("--car-soft")}" opacity="0.55"/>`;
+  s += `<line x1="${L}" y1="${y(8)}" x2="${L + iw}" y2="${y(8)}" stroke="${car}" stroke-width="1" stroke-dasharray="3 3"/>`;
+  s += `<line x1="${L}" y1="${y(5)}" x2="${L + iw}" y2="${y(5)}" stroke="${car}" stroke-width="1" stroke-dasharray="3 3"/>`;
+  for (let v = 0; v <= top; v += 3) {
+    s += `<line x1="${L}" y1="${y(v)}" x2="${L + iw}" y2="${y(v)}" stroke="${grid}" stroke-width="1"/>`;
+    s += `<text x="${L - 8}" y="${y(v) + 4}" text-anchor="end" fill="${ink3}" font-size="11" font-family="JetBrains Mono, monospace">${v}</text>`;
+  }
+  const pts = scored.map((t, i) => `${x(i)},${y(mileage(t))}`).join(" ");
+  s += `<polyline points="${pts}" fill="none" stroke="${ink3}" stroke-width="1.2" opacity=".45"/>`;
+  scored.forEach((t, i) => {
+    const long = t.distanceKm >= 20;
+    s += `<circle cx="${x(i)}" cy="${y(mileage(t))}" r="${long ? 4.5 : 3}" fill="${long ? accent : ink3}" ${long ? "" : 'opacity=".65"'}>`
+      + `<title>${dayTime(t.startedAt)} · ${fmt(t.distanceKm, 1)} km · ${fmt(mileage(t), 2)} km/kW·h</title></circle>`;
+  });
+  s += `<text x="${L}" y="${H - 10}" fill="${ink3}" font-size="11" font-family="JetBrains Mono, monospace">${day(scored[0].startedAt)}</text>`;
+  s += `<text x="${L + iw}" y="${H - 10}" text-anchor="end" fill="${ink3}" font-size="11" font-family="JetBrains Mono, monospace">${day(scored[scored.length - 1].startedAt)}</text>`;
+  s += `<text x="${L - 8}" y="${T + 4}" text-anchor="end" fill="${ink3}" font-size="10" font-family="Archivo, sans-serif">km/kW·h</text>`;
+  svg(box, W, H, s);
+
+  const long = scored.filter(t => t.distanceKm >= 20).map(mileage);
+  const short = scored.filter(t => t.distanceKm < 10).map(mileage);
+  const spread = a => a.length ? Math.max(...a) - Math.min(...a) : 0;
+  const over9 = a => a.filter(v => v > 9).length;
+  // Scatter, not level, is the thing to point at. Short drives being a little thirstier than long
+  // ones is ordinary — cold starts and crawling — and says nothing about the instrument. What the
+  // measurement shows up as is the spread, and as figures no car can produce.
+  $("milecap").innerHTML =
+    `Drives over 20 km sit at a median <b>${fmt(median(long), 2)} km/kW·h</b> and spread ` +
+    `<b>${fmt(spread(long), 1)}</b>. Under 10 km the median is <b>${fmt(median(short), 2)}</b> — a little ` +
+    `thirstier, which is what cold starts and crawling do — but the spread widens to ` +
+    `<b>${fmt(spread(short), 1)}</b>, and <b>${over9(short)} of ${short.length}</b> claim more than ` +
+    `9 km/kW·h, which this car cannot do. That is the instrument, not the driving: whole-percent ` +
+    `charge resolves to 0.53 kW·h, and across a short hop that one step is most of the reading.`;
+}
+
+function drawDaily(rows) {
+  const box = $("daily");
+  if (!rows.length) { box.innerHTML = ""; return; }
+  const W = 900, H = 240, L = 46, R = 46, T = 14, B = 38;
+  const iw = W - L - R, ih = H - T - B;
+  const maxKm = Math.max(...rows.map(r => r.distanceKm), 1);
+  const bw = Math.max(6, Math.min(52, iw / rows.length - 10));
+  const ink3 = css("--ink-3"), grid = css("--grid"), accent = css("--accent");
+  let s = "";
+  for (let i = 0; i <= 4; i++) {
+    const v = maxKm * i / 4, yy = T + ih - (v / maxKm) * ih;
+    s += `<line x1="${L}" y1="${yy}" x2="${L + iw}" y2="${yy}" stroke="${grid}" stroke-width="1"/>`;
+    s += `<text x="${L - 8}" y="${yy + 4}" text-anchor="end" fill="${ink3}" font-size="11" font-family="JetBrains Mono, monospace">${Math.round(v)}</text>`;
+  }
+  rows.forEach((r, i) => {
+    const cx = L + (i + 0.5) * iw / rows.length;
+    const h = (r.distanceKm / maxKm) * ih;
+    s += `<rect x="${cx - bw / 2}" y="${T + ih - h}" width="${bw}" height="${Math.max(h, 1)}" fill="${accent}" rx="2">`
+      + `<title>${r.day} · ${fmt(r.distanceKm, 1)} km · ${fmt(r.energyKwh, 1)} kW·h · ${r.drives} drives</title></rect>`;
+    const label = String(r.day).slice(6) + "/" + String(r.day).slice(4, 6);
+    s += `<text x="${cx}" y="${H - 12}" text-anchor="middle" fill="${ink3}" font-size="10" font-family="JetBrains Mono, monospace">${label}</text>`;
+  });
+  s += `<text x="${L - 8}" y="${T + 4}" text-anchor="end" fill="${ink3}" font-size="10" font-family="Archivo, sans-serif">km</text>`;
+  svg(box, W, H, s);
+}
+
+function drawDrain(rows) {
+  const box = $("drain");
+  if (rows.length < 2) { box.innerHTML = ""; return; }
+  const W = 520, H = 200, L = 40, R = 14, T = 14, B = 30;
+  const iw = W - L - R, ih = H - T - B;
+  const t0 = rows[0].t, t1 = rows[rows.length - 1].t;
+  const socs = rows.map(r => r.socPercent);
+  const lo = Math.max(0, Math.min(...socs) - 2), hi = Math.min(100, Math.max(...socs) + 2);
+  const x = t => L + (t1 === t0 ? iw / 2 : (t - t0) / (t1 - t0) * iw);
+  const y = v => T + ih - (v - lo) / (hi - lo || 1) * ih;
+  const ink3 = css("--ink-3"), grid = css("--grid"), car = css("--car");
+  let s = "";
+  [lo, (lo + hi) / 2, hi].forEach(v => {
+    s += `<line x1="${L}" y1="${y(v)}" x2="${L + iw}" y2="${y(v)}" stroke="${grid}" stroke-width="1"/>`;
+    s += `<text x="${L - 7}" y="${y(v) + 4}" text-anchor="end" fill="${ink3}" font-size="11" font-family="JetBrains Mono, monospace">${Math.round(v)}</text>`;
+  });
+  s += `<polyline points="${rows.map(r => `${x(r.t)},${y(r.socPercent)}`).join(" ")}" fill="none" stroke="${car}" stroke-width="2"/>`;
+  s += `<circle cx="${x(t1)}" cy="${y(socs[socs.length - 1])}" r="4" fill="${car}"/>`;
+  s += `<text x="${L}" y="${H - 9}" fill="${ink3}" font-size="11" font-family="JetBrains Mono, monospace">${day(t0)}</text>`;
+  s += `<text x="${L + iw}" y="${H - 9}" text-anchor="end" fill="${ink3}" font-size="11" font-family="JetBrains Mono, monospace">${day(t1)}</text>`;
+  s += `<text x="${L - 7}" y="${T + 4}" text-anchor="end" fill="${ink3}" font-size="10" font-family="Archivo, sans-serif">%</text>`;
+  svg(box, W, H, s);
+}
+
+/* ---- loading a fresh export ---- */
+// Files rather than a fetch: this page is served over https and the box over http on the LAN, so
+// the browser blocks the request before it leaves. Dropping the export sidesteps that entirely and
+// works the same whether the JSON came from the box or from the backup sheet.
+function absorb(text, name) {
+  let j;
+  try { j = JSON.parse(text); } catch { return `${name}: not JSON`; }
+  if (Array.isArray(j)) {
+    const k = j[0] || {};
+    if ("distanceKm" in k && "movingS" in k) { DATA.trips = j; return `${name} → ${j.length} drives`; }
+    if ("kind" in k && "energyKwh" in k) { DATA.charges = j; return `${name} → ${j.length} charges`; }
+    if ("visits" in k) { DATA.places = j; return `${name} → ${j.length} places`; }
+    if ("socPercent" in k) { DATA.drain = j; return `${name} → drain`; }
+    if ("day" in k && "drives" in k) { DATA.range = j; return `${name} → daily`; }
+    return `${name}: unrecognised list`;
+  }
+  // the backup sheet's ?export=all bundle
+  if (j.kind === "odograph-backup" || j.trips) {
+    if (j.trips) DATA.trips = j.trips.map(t => ({
+      id: t.id, startedAt: +t.start, distanceKm: +t.km || 0,
+      elapsedS: +t.duration_s || 0, movingS: +t.moving_s || 0,
+      energyKwh: t.energy_kwh == null ? null : +t.energy_kwh,
+      costInr: t.cost_inr == null ? null : +t.cost_inr,
+      startPlaceId: null, endPlaceId: null
+    }));
+    if (j.places) DATA.places = j.places.map(p => ({ id: +p.id, name: p.label || "unnamed", visits: +p.visits || 0 }));
+    if (j.charges) DATA.charges = j.charges.map(c => ({
+      id: c.id, startTime: +c.start, endTime: +c.end, energyKwh: +c.energy_kwh || 0,
+      deliveredKwh: c.delivered_kwh == null ? null : +c.delivered_kwh, lossPct: null,
+      kind: +c.kind === 1 ? "fast" : "slow", costInr: c.cost_inr == null ? null : +c.cost_inr
+    }));
+    return `${name} → backup sheet`;
+  }
+  return `${name}: unrecognised shape`;
+}
+
+/* ---- live sources ---- */
+// Two of them, because the car and the laptop are not always on the same network. The box is the
+// freshest answer and only reachable from the LAN; the sheet is reachable from anywhere and only
+// as fresh as the last successful upload. Neither is required — a saved export renders offline.
+
+const LS = "odograph.logbook.sources";
+const remember = () => { try {
+  localStorage.setItem(LS, JSON.stringify({ box: $("boxUrl").value, sheet: $("sheetUrl").value }));
+} catch { /* a private window, or storage switched off; the page works without it */ } };
+try {
+  const v = JSON.parse(localStorage.getItem(LS) || "{}");
+  if (v.box) $("boxUrl").value = v.box;
+  if (v.sheet) $("sheetUrl").value = v.sheet;
+} catch { /* ignore */ }
+
+function say(el, text, kind) { el.textContent = text; el.className = "state" + (kind ? " " + kind : ""); }
+
+async function fromBox() {
+  const base = $("boxUrl").value.trim().replace(/\/$/, "");
+  const st = $("boxState");
+  if (!base) return say(st, "enter the box's address first", "bad");
+  remember();
+  say(st, "asking…", "busy");
+  const want = { trips: "trips", charges: "charges", places: "places", range: "range", drain: "drain" };
+  const got = [];
+  try {
+    for (const [key, path] of Object.entries(want)) {
+      const r = await fetch(`${base}/api/${path}`, { cache: "no-store" });
+      if (!r.ok) throw new Error(`${path} returned ${r.status}`);
+      DATA[key] = await r.json();
+      got.push(key);
+    }
+    say(st, `${DATA.trips.length} drives · just now`, "ok");
+    render();
+  } catch (e) {
+    // Naming the two real causes beats "failed": either the car is elsewhere, or the box is
+    // running a build from before the API allowed a page on your own disk to read it.
+    say(st, got.length
+      ? `stopped after ${got.join(", ")} — ${e.message}`
+      : "no answer. Is the car on this network, and the app running?", "bad");
+  }
+}
+
+async function fromSheet() {
+  const url = $("sheetUrl").value.trim();
+  const st = $("sheetState");
+  if (!url) return say(st, "paste the script's /exec link", "bad");
+  if (url.includes("/spreadsheets/")) {
+    return say(st, "that is the spreadsheet, not the script that serves it — deploy the Apps Script and use its /exec link", "bad");
+  }
+  remember();
+  say(st, "asking…", "busy");
+  try {
+    const r = await fetch(url + (url.includes("?") ? "&" : "?") + "export=all", { cache: "no-store" });
+    if (!r.ok) throw new Error(`returned ${r.status}`);
+    const note = absorb(await r.text(), "sheet");
+    if (note.includes("unrecognised")) throw new Error("that did not look like a backup");
+    say(st, `${(DATA.trips || []).length} drives · from the sheet`, "ok");
+    render();
+  } catch (e) {
+    say(st, e.message, "bad");
+  }
+}
+
+$("boxGo").addEventListener("click", fromBox);
+$("sheetGo").addEventListener("click", fromSheet);
+$("pick").addEventListener("click", () => $("file").click());
+$("file").addEventListener("change", async e => {
+  const notes = [];
+  for (const f of e.target.files) notes.push(absorb(await f.text(), f.name));
+  $("src").textContent = notes.join(" · ");
+  render();
+});
+["dragover", "drop"].forEach(t => document.addEventListener(t, e => e.preventDefault()));
+document.addEventListener("drop", async e => {
+  const notes = [];
+  for (const f of e.dataTransfer.files) notes.push(absorb(await f.text(), f.name));
+  $("src").textContent = notes.join(" · ");
+  render();
+});
+
+say($("src"), "or drop them anywhere");
+render();
+// If the box's address is already remembered, go and get today's numbers without being asked.
+if ($("boxUrl").value.trim()) fromBox();
+</script>
+
+</body>
+</html>
