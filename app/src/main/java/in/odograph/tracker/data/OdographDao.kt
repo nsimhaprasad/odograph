@@ -819,6 +819,14 @@ data class EfficiencySampleRow(
     val climateShare: Double? = null
 )
 
+/**
+ * The row as the efficiency model wants it. One mapping, because the same six fields were being
+ * copied by hand in five places, and a sixth would have been the one that forgot climateShare.
+ */
+fun EfficiencySampleRow.toSample() = `in`.odograph.tracker.core.EfficiencyStats.Sample(
+    startedAt, distanceM, movingS, energyKwh, avgTempC, climateShare
+)
+
 data class RouteTripEff(
     val startId: Long,
     val endId: Long,

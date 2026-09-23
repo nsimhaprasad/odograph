@@ -5,6 +5,7 @@ import `in`.odograph.tracker.core.EfficiencyStats
 import `in`.odograph.tracker.core.EnergyRecovery
 import `in`.odograph.tracker.core.RangeCalibration
 import `in`.odograph.tracker.data.OdographDao
+import `in`.odograph.tracker.data.toSample
 import java.util.TimeZone
 
 /**
@@ -113,11 +114,7 @@ object EnergySweep {
         if (effs.size < BatteryMath.MIN_TRIPS_FOR_REAL_ESTIMATE) return null
         val raw = BatteryMath.rollingKwhPer100Km(effs) ?: return null
 
-        val samples = dao.efficiencySamples().map {
-            EfficiencyStats.Sample(
-                it.startedAt, it.distanceM, it.movingS, it.energyKwh, it.avgTempC, it.climateShare
-            )
-        }
+        val samples = dao.efficiencySamples().map { it.toSample() }
         return RangeCalibration.calibrate(
             raw,
             RangeCalibration.accuracy(RangeCalibration.backtest(samples, zone))

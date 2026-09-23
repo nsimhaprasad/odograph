@@ -416,7 +416,6 @@ object DashboardServer {
                                 outsideRateInr = settings.outsideRateInr,
                                 cityEfficiencyKwhPer100Km = cityEff,
                                 longEfficiencyKwhPer100Km = longEff,
-                                totalKwh = dao.totalEnergyKwh(),
                                 lastPollAt = lastPoll
                             ),
                             ContentType.Text.Html

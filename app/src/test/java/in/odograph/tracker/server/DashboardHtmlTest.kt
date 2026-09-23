@@ -184,7 +184,7 @@ class DashboardHtmlTest {
         val learned = DashboardHtml.plannerPage(
             socPercent = 62.0, capacityKwh = 49.2, homeRateInr = 8.0, outsideRateInr = 25.0,
             cityEfficiencyKwhPer100Km = 11.5, longEfficiencyKwhPer100Km = 14.2,
-            totalKwh = 240.0, lastPollAt = 1_700_000_000_000L
+            lastPollAt = 1_700_000_000_000L
         )
         assertThat(learned).contains("265 km")
         assertThat(learned).contains("city: 8.70")
@@ -193,7 +193,7 @@ class DashboardHtmlTest {
         val bare = DashboardHtml.plannerPage(
             socPercent = null, capacityKwh = 49.2, homeRateInr = 8.0, outsideRateInr = 25.0,
             cityEfficiencyKwhPer100Km = null, longEfficiencyKwhPer100Km = null,
-            totalKwh = 0.0, lastPollAt = null
+            lastPollAt = null
         )
         assertThat(bare).contains("never")
         assertThat(bare).contains("Not enough real driving yet")

@@ -37,6 +37,7 @@ import `in`.odograph.tracker.core.RangeCalibration
 import `in`.odograph.tracker.core.Telematics
 import `in`.odograph.tracker.core.BatteryMath
 import `in`.odograph.tracker.data.OdographDb
+import `in`.odograph.tracker.data.toSample
 import `in`.odograph.tracker.data.PeriodCharges
 import `in`.odograph.tracker.data.PeriodCost
 import `in`.odograph.tracker.ui.theme.Palette
@@ -117,12 +118,7 @@ fun InsightsScreen(palette: Palette) {
             runCatching {
                 val dao = OdographDb.get(ctx).dao()
                 val capacity = Settings(ctx).batteryCapacityKwh
-                val samples = dao.efficiencySamples().map {
-                    EfficiencyStats.Sample(
-                        it.startedAt, it.distanceM, it.movingS, it.energyKwh, it.avgTempC,
-                        it.climateShare
-                    )
-                }
+                val samples = dao.efficiencySamples().map { it.toSample() }
                 InsightsUi(
                     cost = dao.periodCost(fromMs),
                     charges = dao.periodCharges(fromMs),

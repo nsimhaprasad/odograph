@@ -35,6 +35,7 @@ import `in`.odograph.tracker.core.RangeCalibration
 import `in`.odograph.tracker.core.EfficiencyStats
 import `in`.odograph.tracker.core.BatteryMath
 import `in`.odograph.tracker.data.OdographDb
+import `in`.odograph.tracker.data.toSample
 import `in`.odograph.tracker.data.TRIP_PAGE_SIZE
 import `in`.odograph.tracker.data.TripEntity
 import `in`.odograph.tracker.ui.map.BareRouteTrace
@@ -199,12 +200,7 @@ fun TripListScreen(showTiles: Boolean, palette: Palette) {
                         drive = EfficiencyStats.Sample(
                             t.startedAt, t.distanceM, t.movingS, it, t.avgTempC
                         ),
-                        before = dao.efficiencySamplesBefore(t.startedAt).map { row ->
-                            EfficiencyStats.Sample(
-                                row.startedAt, row.distanceM, row.movingS, row.energyKwh,
-                                row.avgTempC, row.climateShare
-                            )
-                        },
+                        before = dao.efficiencySamplesBefore(t.startedAt).map { it.toSample() },
                         zone = Settings(ctx).zone
                     )
                 },
@@ -649,7 +645,7 @@ private fun TripDetailPane(
         if (carEnergy != null || carDistance != null || socEnergy != null) {
             SectionLabel("WHERE THE ENERGY CAME FROM", palette, m)
             val usedCar = carEnergy != null && carEnergy > 0.0 &&
-                t.energyKwh != null && kotlin.math.abs(t.energyKwh!! - carEnergy) < 0.011
+                t.energyKwh != null && kotlin.math.abs(t.energyKwh - carEnergy) < 0.011
             DetailRow(
                 "Source",
                 if (usedCar) "the car's own counter" else "charge level (0.53 kWh steps)",

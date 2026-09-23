@@ -94,7 +94,7 @@ fun DriverScreen(
 
         when {
             aspect < TALL_ASPECT -> TallLayout(live, palette, m, secondary, perRow, gauge)
-            aspect > WIDE_ASPECT -> WideLayout(live, palette, m, secondary, perRow, gauge)
+            aspect > WIDE_ASPECT -> WideLayout(live, palette, m, secondary, gauge)
             else -> BalancedLayout(live, palette, m, secondary, perRow, gauge)
         }
     }
@@ -162,7 +162,6 @@ private fun WideLayout(
     palette: Palette,
     m: Metrics,
     secondary: List<DriverStat>,
-    perRow: Int,
     gauge: @Composable (Modifier) -> Unit
 ) {
     Row(

@@ -40,7 +40,9 @@ import `in`.odograph.tracker.core.SpeedSanity
 import `in`.odograph.tracker.core.TripStats
 import `in`.odograph.tracker.core.TripRepair
 import `in`.odograph.tracker.core.Telematics
+import `in`.odograph.tracker.core.BatteryFrame
 import `in`.odograph.tracker.core.EnergyRecovery
+import `in`.odograph.tracker.data.toSample
 import `in`.odograph.tracker.core.TelematicsSchedule
 import io.windsor.telematics.TelematicsClient
 import kotlinx.coroutines.CoroutineScope
@@ -453,12 +455,6 @@ class TripRecorderService : Service() {
      * interrupted mid-drive or is booting after one ended.
      */
     private var pendingInterruption = false
-    /**
-     * The car's own account of being shut down, from the most recent telematics frame.
-     *
-     * Lets a drive end the moment the car is locked instead of waiting out the stationary timer.
-     * Stays empty when telematics is off or unreachable, and the timer carries it alone.
-     */
     /** Lifetime odometer at boot: seeded baseline + every closed trip's distance. */
     private var odoBaseKm: Double = 0.0
     private lateinit var settings: Settings
@@ -689,53 +685,8 @@ class TripRecorderService : Service() {
                         lastMovedAt != Long.MIN_VALUE &&
                         (now - lastMovedAt) > PARKED_MOVE_GAP_MS
                     dao.insertBattery(
-                        BatteryEntity(
-                            tripId = if (parked) -1 else tripId,
-                            t = t,
-                            socPercent = ch.soc,
-                            charging = ch.isCharging,
-                            rangeKm = ch.rangeKm,
-                            chargingPowerKw = powerKw,
-                            workingVoltage = ch.workingVoltage,
-                            workingCurrent = ch.workingCurrent,
-                            odometerKm = ch.odometerKm,
-                            batteryEnergyKwh = ch.batteryEnergyKwh,
-                            chargeTimeRemainingMin = ch.chargeTimeRemainingMin,
-                            distanceSinceLastChargeKm = ch.distanceSinceLastChargeKm,
-                            powerUsageSinceLastChargeKwh = ch.powerUsageSinceLastChargeKwh,
-                            exteriorTempC = status.exteriorTemperature,
-                            // Readings the car has been sending all along that nobody wrote down.
-                            // A frame not recorded cannot be recovered afterwards, so they are
-                            // stored now and reasoned about later.
-                            climateRunning = status.climateRunning,
-                            interiorTempC = status.interiorTemperature,
-                            chargingType = ch.chargingType,
-                            pluggedIn = ch.isPluggedIn,
-                            carCapacityKwh = ch.totalBatteryCapacityKwh,
-                            auxVoltage = status.auxBatteryVoltage,
-                            // The rest of the frame. Recorded rather than reasoned about: a column
-                            // is cheap and a frame that goes by unrecorded is evidence destroyed,
-                            // while deciding what any of it means is a separate question with a
-                            // separate bar of proof.
-                            carJourneyId = status.currentJourneyId,
-                            carJourneyDistanceRaw = status.currentJourneyDistanceRaw,
-                            engineStatusRaw = status.engineStatusRaw,
-                            powerModeRaw = status.powerModeRaw,
-                            handbrake = status.handbrake,
-                            tyreFlPsi = status.frontLeftTyrePsi,
-                            tyreFrPsi = status.frontRightTyrePsi,
-                            tyreRlPsi = status.rearLeftTyrePsi,
-                            tyreRrPsi = status.rearRightTyrePsi,
-                            carGpsSatellites = status.gps?.satellites,
-                            carGpsStatus = status.gps?.gpsStatus?.name,
-                            carSpeedKmh = status.gps?.speedKmh,
-                            chargerId = ch.chargingPileId,
-                            chargerSupplier = ch.chargingPileSupplier,
-                            lastChargeEndKwh = ch.lastChargeEndingPowerKwh,
-                            staticDrainRaw = ch.staticEnergyConsumptionRaw,
-                            chargeElapsedS = ch.chargeTimeElapsedS,
-                            dayDistanceRaw = ch.mileageOfDayRaw,
-                            dayPowerRaw = ch.powerUsageOfDayRaw
+                        BatteryFrame.from(
+                            status, ch, tripId = if (parked) -1 else tripId, t = t, powerKw = powerKw
                         )
                     )
                 }
@@ -810,63 +761,21 @@ class TripRecorderService : Service() {
                         if (samples.isNotEmpty()) {
                             dao.setChargeSummary(tripId, samples.first().socPercent, soc, energy)
                         }
-                        val kmPerKwh = BatteryMath.kmPerKwh(energy, state.distanceM)
-                        val effs = dao.tripEnergies()
-                            .mapNotNull { BatteryMath.kwhPer100Km(it.energyKwh, it.distanceM) }
-                        // Feed this drive's live efficiency into the rolling window too, so RANGE@100
-                        // and MILEAGE move on every poll instead of freezing until more trips close,
-                        // and a long single drive keeps correcting the estimate on the drive screen.
-                        val liveEff = kmPerKwh?.let { 100.0 / it }
-                        val rollingEffs = if (liveEff != null) listOf(liveEff) + effs else effs
-                        // Corrected by how wrong the estimate has actually been. The rolling figure
-                        // observes what drives cost; it never asks whether its own predictions came
-                        // true, so a bias in the same direction can sit there for months unnoticed.
-                        // The correction is measured out of sample — each past drive scored against
-                        // a model built only from the drives before it — and is refreshed on the
-                        // same cadence as everything else here rather than on every fix.
-                        val rolling = BatteryMath.rollingKwhPer100Km(rollingEffs)?.let { raw ->
-                            RangeCalibration.calibrate(raw, rangeAccuracy)
-                        }
-                        val rangeAtFull = if (
-                            rollingEffs.size >= BatteryMath.MIN_TRIPS_FOR_REAL_ESTIMATE &&
-                            rolling != null
-                        ) {
-                            BatteryMath.rangeAtFullKwh(capacity, rolling)
-                        } else {
-                            Telematics.carRangeAtFullKm(ch)
-                        }
-                        // Same gate as range-at-full: only real measured efficiency gets to quote a
-                        // remaining range. Before that the car's own number is the only honest one.
-                        val smartRange = if (
-                            rollingEffs.size >= BatteryMath.MIN_TRIPS_FOR_REAL_ESTIMATE && rolling != null
-                        ) {
-                            BatteryMath.rangeAtSocKwh(capacity, soc, rolling)
-                        } else null
-                        // "The total for this ride" is billed exactly like the closing trip will be —
-                        // the same blended fill rate, so what the screen quotes is what shows up next
-                        // week in the archive. No fills yet, no price yet — the honest unknown.
-                        val tripCost = TripRecovery.driveCost(
-                            dao, energy, dao.tripById(tripId)?.startedAt ?: 0L
+                        val readout = LiveRangeReadout.compute(
+                            dao, tripId, state.distanceM, soc, ch, capacity, rangeAccuracy, energy
                         )
-                        // The same charge read two other ways: across every drive ever recorded,
-                        // and across the one happening right now. See RangeModel for why those
-                        // want opposite things from the history.
-                        val lifetimeEff = RangeModel.lifetimeKwhPer100Km(
-                            dao.allTripEnergies().map { it.distanceM to it.energyKwh }
-                        )
-                        val liveEffNow = RangeModel.liveKwhPer100Km(energy, state.distanceM)
                         _state.value = state.copy(
                             batterySocPercent = soc,
                             batteryCharging = ch.isCharging,
-                            batteryMileageKmPerKwh = kmPerKwh,
-                            batteryRangeAtFullKm = rangeAtFull,
-                            batteryRangeKm = smartRange,
+                            batteryMileageKmPerKwh = readout.kmPerKwh,
+                            batteryRangeAtFullKm = readout.rangeAtFullKm,
+                            batteryRangeKm = readout.smartRangeKm,
                             mgBatteryRangeKm = ch.rangeKm,
-                            lifetimeRangeKm = RangeModel.remainingKm(capacity, soc, lifetimeEff),
-                            liveRangeKm = RangeModel.remainingKm(capacity, soc, liveEffNow),
-                            batteryTotalKwh = dao.totalEnergyKwh(),
+                            lifetimeRangeKm = readout.lifetimeRangeKm,
+                            liveRangeKm = readout.liveRangeKm,
+                            batteryTotalKwh = readout.totalKwh,
                             tripEnergyKwh = energy,
-                            tripCostInr = tripCost
+                            tripCostInr = readout.tripCostInr
                         )
                     } else {
                         _state.value = _state.value.copy(
@@ -1003,12 +912,7 @@ class TripRecorderService : Service() {
     private fun resolveInterruption(dao: OdographDao, fix: Fix) {
         pendingInterruption = false
         val outcome = runCatching {
-            TripRecovery.resumeOrClose(
-                dao, fix,
-                capacityKwh = settings.batteryCapacityKwh,
-                homeRateInr = settings.homeRateInr,
-                outsideRateInr = settings.outsideRateInr
-            )
+            TripRecovery.resumeOrClose(dao, fix, capacityKwh = settings.batteryCapacityKwh)
         }.getOrElse { TripRecovery.Interrupted.Closed(TripRecovery.Recovery()) }
 
         when (outcome) {
@@ -1104,12 +1008,9 @@ class TripRecorderService : Service() {
      */
     private fun closeTripOnArrival(dao: OdographDao) {
         val closed = tripId
-        recovery = TripRecovery.close(
-            dao, closed,
-            capacityKwh = settings.batteryCapacityKwh,
-            homeRateInr = settings.homeRateInr,
-            outsideRateInr = settings.outsideRateInr
-        )
+        // Pricing is not passed in: a closing drive is billed from the fills that preceded it,
+        // by driveCost, and the flat rates that used to travel here were read by nothing.
+        recovery = TripRecovery.close(dao, closed, capacityKwh = settings.batteryCapacityKwh)
         tripId = NO_TRIP
         startedAt = null
         pendingFixes.clear()
@@ -1131,11 +1032,7 @@ class TripRecorderService : Service() {
      */
     private fun refreshRangeAccuracy(dao: OdographDao) {
         runCatching {
-            val samples = dao.efficiencySamples().map {
-                EfficiencyStats.Sample(
-                    it.startedAt, it.distanceM, it.movingS, it.energyKwh, it.avgTempC, it.climateShare
-                )
-            }
+            val samples = dao.efficiencySamples().map { it.toSample() }
             rangeAccuracy = RangeCalibration.accuracy(
                 RangeCalibration.backtest(samples, settings.zone)
             )

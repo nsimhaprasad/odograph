@@ -88,7 +88,7 @@ object BatteryMath {
      */
     fun consumedKwh(samples: List<BatteryEntity>, capacityKwh: Double): Double? {
         if (capacityKwh <= 0) return null
-        val socs = samples.filter { it.socPercent != null && it.socPercent!!.isFinite() }
+        val socs = samples.filter { it.socPercent != null && it.socPercent.isFinite() }
             .map { it.socPercent!!.coerceIn(0.0, 100.0) }
         if (socs.size < 2) return null
         val drawn = capacityKwh * (socs.first() - socs.last()) / 100.0

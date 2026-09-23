@@ -82,21 +82,19 @@ object TripRecovery {
     fun resumeOrClose(
         dao: OdographDao,
         fix: Fix,
-        capacityKwh: Double = BatteryMath.DEFAULT_CAPACITY_KWH,
-        homeRateInr: Double = 8.0,
-        outsideRateInr: Double = 25.0
+        capacityKwh: Double = BatteryMath.DEFAULT_CAPACITY_KWH
     ): Interrupted {
         val open = dao.openTrip() ?: return Interrupted.Closed(Recovery())
         val points = dao.pointsFor(open.id)
         val last = points.lastOrNull()
-            ?: return Interrupted.Closed(close(dao, open.id, capacityKwh, homeRateInr, outsideRateInr))
+            ?: return Interrupted.Closed(close(dao, open.id, capacityKwh))
 
         val gapMs = fix.t - last.t
         val movedM = Geo.haversineMetres(last.lat, last.lon, fix.lat, fix.lon)
         val interrupted = gapMs in 0..RESUME_WINDOW_MS && movedM <= RESUME_RADIUS_M
 
         if (!interrupted) {
-            return Interrupted.Closed(close(dao, open.id, capacityKwh, homeRateInr, outsideRateInr))
+            return Interrupted.Closed(close(dao, open.id, capacityKwh))
         }
         return Interrupted.Resume(
             tripId = open.id,
@@ -118,10 +116,8 @@ object TripRecovery {
      */
     fun recover(
         dao: OdographDao,
-        capacityKwh: Double = BatteryMath.DEFAULT_CAPACITY_KWH,
-        homeRateInr: Double = 8.0,
-        outsideRateInr: Double = 25.0
-    ): Recovery = recoverInternal(dao, capacityKwh, homeRateInr, outsideRateInr)
+        capacityKwh: Double = BatteryMath.DEFAULT_CAPACITY_KWH
+    ): Recovery = recoverInternal(dao, capacityKwh)
 
     /**
      * Opens a trip at the moment the car was first seen to move, back-dated to [at].
@@ -147,11 +143,9 @@ object TripRecovery {
     fun recoverAndStart(
         dao: OdographDao,
         nowFromGnss: Long?,
-        capacityKwh: Double = BatteryMath.DEFAULT_CAPACITY_KWH,
-        homeRateInr: Double = 8.0,
-        outsideRateInr: Double = 25.0
+        capacityKwh: Double = BatteryMath.DEFAULT_CAPACITY_KWH
     ): Long {
-        val recovered = recoverInternal(dao, capacityKwh, homeRateInr, outsideRateInr)
+        val recovered = recoverInternal(dao, capacityKwh)
         val newId = dao.startTrip(nowFromGnss ?: 0L)
         val lat = recovered.seedLat
         val lon = recovered.seedLon
@@ -173,9 +167,7 @@ object TripRecovery {
     fun close(
         dao: OdographDao,
         tripId: Long,
-        capacityKwh: Double = BatteryMath.DEFAULT_CAPACITY_KWH,
-        homeRateInr: Double = 8.0,
-        outsideRateInr: Double = 25.0
+        capacityKwh: Double = BatteryMath.DEFAULT_CAPACITY_KWH
     ): Recovery {
         val trip = dao.tripById(tripId) ?: return Recovery()
         val points = dao.pointsFor(tripId)
@@ -258,20 +250,15 @@ object TripRecovery {
         return Recovery(last.lat, last.lon)
     }
 
-    private fun recoverInternal(
-        dao: OdographDao,
-        capacityKwh: Double,
-        homeRateInr: Double,
-        outsideRateInr: Double
-    ): Recovery {
+    private fun recoverInternal(dao: OdographDao, capacityKwh: Double): Recovery {
         val orphan = dao.openTrip() ?: return Recovery()
-        return close(dao, orphan.id, capacityKwh, homeRateInr, outsideRateInr)
+        return close(dao, orphan.id, capacityKwh)
     }
 
     /**
-     * Bills a drive by the fills that completed before it started: [BatteryMath.fillsBefore]
-     * respects [homeRateInr] and [outsideRateInr] snapshot at close, so a mix of slow home
-     * refills and fast highway refills is blended by their energy into one honest rate. No fills,
+     * Bills a drive by the fills that completed before it started. Each fill carries the price it
+     * was actually paid at, so a mix of slow home refills and fast highway refills is blended by
+     * their energy into one honest rate — no flat tariff is consulted anywhere. No fills,
      * or fills with no energy and thus no price, leave the cost unknown rather than a guess.
      *
      * Public because the same exact billing is what the drive screen quotes live while the drive

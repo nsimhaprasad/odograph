@@ -594,7 +594,6 @@ $rows
         outsideRateInr: Double,
         cityEfficiencyKwhPer100Km: Double?,
         longEfficiencyKwhPer100Km: Double?,
-        totalKwh: Double,
         lastPollAt: Long?
     ): String {
         val socTxt = socPercent?.let { "%.0f".format(it) } ?: "\u2014"
