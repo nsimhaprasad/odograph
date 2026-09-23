@@ -45,7 +45,7 @@ class SheetsSyncPagingTest {
             val at = 1_000_000L + i * 3_600_000L
             val id = dao.startTrip(at)
             repeat(pointsEach) { k ->
-                dao.appendPoint(PointEntity(0, id, at + k * 1000L, 12.97 + k * 0.001, 77.59, 5f, null, 900.0, 5f, false))
+                dao.appendPoint(PointEntity(0, id, at + k * 10_000L, 12.97 + k * 0.001, 77.59, 5f, null, 900.0, 5f, false))
             }
             dao.finishTrip(id, at + 600_000L, 1500.0, 600, 500, 10f, 5.0, 3.0, 0.0, 0.0)
         }

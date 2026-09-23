@@ -86,7 +86,8 @@ function doPost(e) {
       logSheet.deleteRows(2, logSheet.getLastRow() - 250);
     }
 
-    buildAnalytics(ss, meta);
+    // A catch-up run sends many pages; the analytics tab only needs rebuilding after the last.
+    if (!meta.more) buildAnalytics(ss, meta);
 
     afterPost(ss);
 

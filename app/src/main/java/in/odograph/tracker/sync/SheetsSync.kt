@@ -3,6 +3,7 @@ package `in`.odograph.tracker.sync
 import android.content.Context
 import `in`.odograph.tracker.data.DailyTelemetryEntity
 import `in`.odograph.tracker.data.OdographDb
+import `in`.odograph.tracker.data.PointEntity
 import `in`.odograph.tracker.ui.theme.Settings
 import org.json.JSONObject
 import java.util.Calendar
@@ -29,12 +30,6 @@ object SheetsSync {
     /** Closed a moment ago but still settling its final energy/cost; wait this long before export. */
     private const val SETTLE_GRACE_MS = 2 * 60_000L
 
-    /**
-     * Uploads everything unseen since the last export. Returns a per-row count on success, or a
-     * message that explains the one fixable cause — most often: the configured value is a
-     * spreadsheet link, and the bundled Apps Script still needs deploying. Watermarks only
-     * advance on a healthy response, so a failed run simply retries the same delta next time.
-     */
     /**
      * How many drives travel in one POST.
      *
@@ -102,7 +97,10 @@ object SheetsSync {
                     return Outbound.Result(sent, sent)
                 }
 
-                val points = trips.flatMap { dao.pointsFor(it.id) }
+                val points = trips.flatMap { DocsDelta.thinPoints(dao.pointsFor(it.id)) }
+                // Whether another page follows. The script rebuilds its analytics tab on every
+                // POST, which is pointless forty times in a row; it now waits for the last one.
+                val more = trips.size == TRIPS_PER_PAGE || battery.size == BATTERY_PER_PAGE
                 val body = SheetsJson.stats(
                     deviceId = deviceId,
                     trips = trips,
@@ -114,7 +112,8 @@ object SheetsSync {
                     capacityKwh = s.batteryCapacityKwh,
                     homeRateInr = s.homeRateInr,
                     outsideRateInr = s.outsideRateInr,
-                    gstRatePct = s.gstRatePct
+                    gstRatePct = s.gstRatePct,
+                    more = more
                 )
                 val code = post(url, body)
                 if (code !in 200..299) {
@@ -257,6 +256,36 @@ object DocsDelta {
      * they will never change) plus today's mutable row, which is re-sent every run and
      * overwritten on the sheet.
      */
+    /**
+     * How far apart two points must be in time for both to reach the sheet, milliseconds.
+     *
+     * Ten seconds. The recorder writes a fix a second, so a drive is a few thousand rows, and a
+     * history of hundreds of drives is over a million — past what a Google Sheet can hold, and
+     * more than the receiving script can index on every page. At ten seconds a route draws the
+     * same and the distance on the trip row is unaffected, because that was measured from the
+     * full track before any of this.
+     */
+    const val POINT_SPACING_MS = 10_000L
+
+    /**
+     * The points worth sending: the first, the last, and any at least [POINT_SPACING_MS] after
+     * the previous one kept. Endpoints always survive, so a restored drive still starts and ends
+     * where it did.
+     */
+    fun thinPoints(points: List<PointEntity>, spacingMs: Long = POINT_SPACING_MS): List<PointEntity> {
+        if (points.size <= 2) return points
+        val kept = ArrayList<PointEntity>(points.size / 10 + 2)
+        var lastKeptT = Long.MIN_VALUE / 2
+        points.forEachIndexed { i, p ->
+            val isEnd = i == 0 || i == points.lastIndex
+            if (isEnd || p.t - lastKeptT >= spacingMs) {
+                kept += p
+                lastKeptT = p.t
+            }
+        }
+        return kept
+    }
+
     fun selectDays(days: List<DailyTelemetryEntity>, today: Int): List<DailyTelemetryEntity> {
         val finalized = days.filter { it.day > 0 && it.day < today }
         return finalized + listOfNotNull(days.firstOrNull { it.day == today })

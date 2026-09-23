@@ -60,7 +60,12 @@ object Outbound {
         val conn = (URL(url).openConnection() as HttpURLConnection).apply {
             requestMethod = "POST"
             connectTimeout = 15_000
-            readTimeout = 20_000
+            // Two minutes, not twenty seconds. The receiving script upserts thousands of rows and
+            // answers only when it has finished, and a page of ten drives took it forty seconds
+            // on a real workbook. Hanging up early was worse than waiting: the page landed, the
+            // acknowledgement was never read, the watermark never moved, and the next run sent
+            // the same page again — and hung up again.
+            readTimeout = 120_000
             doOutput = true
             // Apps Script redirects the POST to a googleusercontent URL; follow it.
             instanceFollowRedirects = true

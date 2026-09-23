@@ -29,7 +29,8 @@ object SheetsJson {
         capacityKwh: Double,
         homeRateInr: Double,
         outsideRateInr: Double,
-        gstRatePct: Double
+        gstRatePct: Double,
+        more: Boolean = false
     ): String {
         val meta = "{" +
             // The schema this data came out of. A restore that cannot tell which shape it is
@@ -38,7 +39,10 @@ object SheetsJson {
             "\"capacityKwh\":${num(capacityKwh)}," +
             "\"homeRateInr\":${num(homeRateInr)}," +
             "\"outsideRateInr\":${num(outsideRateInr)}," +
-            "\"gstRatePct\":${num(gstRatePct)}" +
+            "\"gstRatePct\":${num(gstRatePct)}," +
+            // Whether another page follows this one, so the script can defer its analytics
+            // rebuild to the last page of a run rather than doing it forty times.
+            "\"more\":$more" +
             "}"
         return "{" +
             "\"kind\":\"odograph\"," +
