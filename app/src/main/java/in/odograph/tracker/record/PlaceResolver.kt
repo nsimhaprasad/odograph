@@ -5,11 +5,12 @@ import `in`.odograph.tracker.data.OdographDao
 import `in`.odograph.tracker.data.PlaceEntity
 
 /**
- * Persisted counterpart to [in.odograph.tracker.core.PlaceIndex].
+ * Groups trip endpoints into named places, persistently.
  *
- * Same greedy-leader rule — assign to the nearest known place within [radiusM], otherwise start a
- * new one — but backed by the database so places accumulate across ignition cycles rather than
- * being rebuilt from scratch each boot.
+ * Greedy-leader clustering: assign to the nearest known place within [radiusM], otherwise start a
+ * new one. Backed by the database so places accumulate across ignition cycles rather than being
+ * rebuilt from scratch each boot — an in-memory version of the same rule preceded this and was
+ * removed once nothing called it.
  */
 class PlaceResolver(
     private val dao: OdographDao,
