@@ -227,7 +227,7 @@ class TripRecorderService : Service() {
          * Bumped when a new correction is added, which reruns the pass over drives an earlier
          * revision already visited.
          */
-        private const val REPAIR_REVISION = 2
+        private const val REPAIR_REVISION = 3
 
         /** No trip is open. Battery frames recorded under it are parked readings, not a drive. */
         const val NO_TRIP = -1L
@@ -504,10 +504,14 @@ class TripRecorderService : Service() {
                 // same revision: both are one-off corrections of history, and neither should walk
                 // the table again on every boot for the rest of the box's life.
                 val stitched = runCatching { TripRepair.stitchShreddedDrives(dao) }.getOrNull()
-                if (outcome != null && stitched != null) {
+                // Energies the car cannot have produced, written before the ceiling existed.
+                // Cleared rather than corrected: the sweep reckons them from the distance next.
+                val cleared = runCatching { TripRepair.repairImplausibleEnergies(dao) }.getOrNull()
+                if (outcome != null && stitched != null && cleared != null) {
                     settings.repairRevision = REPAIR_REVISION
                     Diagnostics.crumb(
-                        "repair: examined ${outcome.examined} drives, corrected ${outcome.corrected}" +
+                        "repair: cleared ${cleared.cleared} impossible energies of ${cleared.examined}; " +
+                            "examined ${outcome.examined} drives, corrected ${outcome.corrected}" +
                             (if (outcome.corrected > 0)
                                 ", worst was %.0f km/h".format(outcome.worstBeforeMps * 3.6f)
                             else "") +

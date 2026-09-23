@@ -173,4 +173,34 @@ object TripRepair {
         }
         return Outcome(examined, corrected, worst)
     }
+
+    /** What clearing impossible energies did. */
+    data class Cleared(val examined: Int, val cleared: Int)
+
+    /**
+     * Forgets every stored energy the car cannot physically have produced.
+     *
+     * The ceiling in [BatteryMath.plausible] arrived after these drives were written. Trip 435
+     * sits in the history at 138 km/kWh — a counter that ticked once between two sparse frames —
+     * and trip 426 at 14, one whole percent of charge across a short errand. Both feed the rolling
+     * mean the driving screen quotes. Nothing that runs at close can reach them, and the sweep
+     * only looks at drives with no figure at all, so this makes them drives with no figure: the
+     * sweep then reckons them from the distance, which is a better answer than the one stored.
+     *
+     * Never invents. A drive with no energy is left alone; only a figure that fails the same test
+     * a closing drive now faces is removed, and the charge levels it was derived from stay.
+     */
+    fun repairImplausibleEnergies(dao: OdographDao): Cleared {
+        var examined = 0
+        var cleared = 0
+        for (trip in dao.closedTrips()) {
+            val energy = trip.energyKwh ?: continue
+            examined++
+            if (!BatteryMath.plausible(energy, trip.distanceM)) {
+                dao.clearEnergy(trip.id)
+                cleared++
+            }
+        }
+        return Cleared(examined, cleared)
+    }
 }

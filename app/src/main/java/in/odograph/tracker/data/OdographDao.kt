@@ -108,6 +108,16 @@ interface OdographDao {
     @Query("UPDATE trips SET costInr = :costInr WHERE id = :id")
     fun setTripCost(id: Long, costInr: Double?)
 
+    /**
+     * Forgets a drive's energy and what was billed for it, so the sweep can reckon it afresh.
+     *
+     * The one deliberate route to a null energy on a closed drive. [setChargeSummary] refuses
+     * nulls on purpose; this exists for the repair pass, which has found a figure the car cannot
+     * physically have produced and would rather say "unknown" than keep it.
+     */
+    @Query("UPDATE trips SET energyKwh = NULL, costInr = NULL, energySource = NULL WHERE id = :id")
+    fun clearEnergy(id: Long)
+
     /** Every instrumented trip's energy, newest first, for rolling efficiency. */
     /**
      * Recent instrumented drives, newest first, for the rolling efficiency figure.
