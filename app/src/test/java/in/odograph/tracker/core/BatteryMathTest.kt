@@ -398,4 +398,23 @@ class BatteryMathTest {
             .`as`("the charge level alone would say 12.8")
             .isBetween(7.0, 9.0)
     }
+
+    /**
+     * A drive with no battery frames at all.
+     *
+     * The live-drive caller checked `isNotEmpty()` on the line *after* this call, so an empty list
+     * threw from inside here and took the rest of that telematics poll with it — reachable when a
+     * drive's frames all went to the parked bucket. No frames is no measurement, and the honest
+     * answer is null.
+     */
+    @Test
+    fun `no frames is unknown energy, not an exception`() {
+        assertThat(BatteryMath.driveEnergyKwh(emptyList(), 52.9)).isNull()
+    }
+
+    /** One frame cannot be differenced against anything either. */
+    @Test
+    fun `a single frame cannot say what a drive used`() {
+        assertThat(BatteryMath.driveEnergyKwh(listOf(frame(0, 80.0, 10.0)), 52.9)).isNull()
+    }
 }

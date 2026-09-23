@@ -42,9 +42,18 @@ object JourneyAgreement {
      * Two identifiers is not evidence of an error either way on its own — it is evidence the two
      * disagreed, which is the thing worth counting.
      */
-    fun verdict(journeyIds: List<Int>): Verdict = when {
-        journeyIds.isEmpty() -> Verdict.UNKNOWN
-        journeyIds.distinct().size == 1 -> Verdict.AGREED
+    fun verdict(journeyIds: List<Int>): Verdict = verdictOf(journeyIds.distinct().size)
+
+    /**
+     * The same rule, from a count the database worked out rather than a list read into memory.
+     *
+     * Asking the whole history "how many journeys did each drive carry" is one grouped query;
+     * asking it one drive at a time is one query per drive, and this history is years long. The
+     * rule itself lives here either way, so the two routes cannot drift apart.
+     */
+    fun verdictOf(distinctJourneys: Int): Verdict = when {
+        distinctJourneys <= 0 -> Verdict.UNKNOWN
+        distinctJourneys == 1 -> Verdict.AGREED
         else -> Verdict.CAR_SPLIT_IT
     }
 
@@ -55,6 +64,28 @@ object JourneyAgreement {
         /** Share of answerable drives where the boundaries matched, or null with nothing to go on. */
         val agreementPercent: Double?
             get() = if (answered == 0) null else agreed * 100.0 / answered
+    }
+
+    /**
+     * The tally over a whole history, from per-drive journey counts.
+     *
+     * [countsPerDrive] holds one entry for each drive the car did say something about.
+     * [silentDrives] is the rest — drives that produced no identifier at all — and they have to be
+     * passed in separately because a grouped query cannot return a row for a drive that has none.
+     * Leaving them out would quietly turn a fading telematics link into rising agreement.
+     */
+    fun tallyOfCounts(countsPerDrive: List<Int>, silentDrives: Int): Tally {
+        var agreed = 0
+        var split = 0
+        var unknown = silentDrives.coerceAtLeast(0)
+        countsPerDrive.forEach {
+            when (verdictOf(it)) {
+                Verdict.AGREED -> agreed++
+                Verdict.CAR_SPLIT_IT -> split++
+                Verdict.UNKNOWN -> unknown++
+            }
+        }
+        return Tally(agreed, split, unknown)
     }
 
     fun tally(perDrive: List<List<Int>>): Tally {

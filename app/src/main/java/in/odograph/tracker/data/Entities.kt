@@ -70,7 +70,28 @@ data class TripEntity(
      * off across half an hour: it cycles, it gets switched off once the cabin settles, it comes on
      * again at a traffic light. Null when no frame said either way.
      */
-    val climateShare: Double? = null
+    val climateShare: Double? = null,
+    /**
+     * What this drive is reckoned to have cost in energy, when nothing measured it. Indicative.
+     *
+     * Deliberately not [energyKwh]. Six queries build the efficiency model by selecting rows where
+     * `energyKwh IS NOT NULL`, and an estimate sitting in that column would be learned from — a
+     * model trained on its own output agrees with itself ever more closely while getting no
+     * better, and the error it reports falls as it does so. That failure cannot be seen from
+     * inside the model, so the two are kept in different columns rather than one column and a
+     * flag that somebody has to remember to filter on.
+     */
+    val estimatedEnergyKwh: Double? = null,
+    /** What that estimated energy would have cost, at the same rates a measured drive is billed. */
+    val estimatedCostInr: Double? = null,
+    /**
+     * Where [energyKwh] came from: `counter`, `soc`, or `backfill`. Null when nothing measured it.
+     *
+     * Backfill is in this list because it is measurement — the car's counter read either side of a
+     * drive it had no signal during — and it is named because a driver looking at a drive that had
+     * no link deserves to know the figure was recovered rather than watched.
+     */
+    val energySource: String? = null
 )
 
 @Entity(tableName = "points", indices = [Index(value = ["tripId", "t"])])

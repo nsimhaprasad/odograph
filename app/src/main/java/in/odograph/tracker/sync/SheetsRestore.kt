@@ -32,7 +32,7 @@ object SheetsRestore {
      * and guessing is how a restore puts the wrong values in the right names. A sheet from a newer
      * build is refused for the same reason from the other direction.
      */
-    val SUPPORTED_SCHEMAS = setOf(8, 9, 13)
+    val SUPPORTED_SCHEMAS = setOf(8, 9, 13, 14)
 
     data class Snapshot(
         val schema: Int?,
@@ -192,6 +192,12 @@ object SheetsRestore {
         climateShare = num("climate_share"),
         carEnergyKwh = num("car_energy_kwh"),
         carDistanceKm = num("car_distance_km"),
+        // Schema 14 onwards. Restored into their own fields, never folded into energy_kwh: the
+        // efficiency model is built by selecting on that column, so a restore that merged them
+        // would quietly start training the model on figures the model itself produced.
+        estimatedEnergyKwh = num("estimated_energy_kwh"),
+        estimatedCostInr = num("estimated_cost_inr"),
+        energySource = str("energy_source"),
         clusterId = long("cluster_id"),
         startPlaceId = long("start_place_id"),
         endPlaceId = long("end_place_id")

@@ -632,9 +632,77 @@ interface OdographDao {
     )
     fun journeyIdsFor(tripId: Long): List<Int>
 
+    /**
+     * How many of the car's journeys each drive carried, for every drive that carried any.
+     *
+     * One grouped query rather than [journeyIdsFor] per drive, because the aggregate figure is
+     * over the whole history and this history is years long.
+     *
+     * Drives the car said nothing about produce no row at all — there is nothing to group. The
+     * caller has to count those separately against [tripCount], and it matters that it does: a
+     * telematics link that is failing more often would otherwise look like rising agreement.
+     */
+    @Query(
+        """SELECT tripId AS tripId, COUNT(DISTINCT carJourneyId) AS journeys FROM battery
+           WHERE tripId IS NOT NULL AND carJourneyId IS NOT NULL
+           GROUP BY tripId"""
+    )
+    fun journeyCountsPerTrip(): List<TripJourneyCount>
+
     /** Stamps what the car's own counters made of the drive, for comparison with our own figure. */
     @Query("UPDATE trips SET carEnergyKwh = :energyKwh, carDistanceKm = :distanceKm WHERE id = :id")
     fun setCarCounters(id: Long, energyKwh: Double?, distanceKm: Double?)
+
+    // ---- recovering drives the telematics link was down for ----
+
+    /**
+     * The last frame carrying the car's running counters at or before [atMs], whatever drive it
+     * belonged to.
+     *
+     * Deliberately not restricted to one trip. The whole point is to find a reading from *outside*
+     * a drive that has none of its own — the parked poll before it set off, or the tail of the
+     * previous drive.
+     */
+    @Query(
+        """SELECT t, powerUsageSinceLastChargeKwh, distanceSinceLastChargeKm FROM battery
+           WHERE t <= :atMs AND powerUsageSinceLastChargeKwh IS NOT NULL
+           ORDER BY t DESC LIMIT 1"""
+    )
+    fun counterAtOrBefore(atMs: Long): CounterReading?
+
+    /** The first frame carrying the running counters at or after [atMs]. The other bracket. */
+    @Query(
+        """SELECT t, powerUsageSinceLastChargeKwh, distanceSinceLastChargeKm FROM battery
+           WHERE t >= :atMs AND powerUsageSinceLastChargeKwh IS NOT NULL
+           ORDER BY t ASC LIMIT 1"""
+    )
+    fun counterAtOrAfter(atMs: Long): CounterReading?
+
+    /**
+     * Finished drives with no measured energy, newest first — the ones worth revisiting.
+     *
+     * A drive is only listed while it has nothing measured. Once a backfill succeeds it writes
+     * [TripEntity.energyKwh] and drops out of this list for good, so the sweep does not keep
+     * reworking the same drives every time the box wakes up.
+     */
+    @Query(
+        """SELECT * FROM trips
+           WHERE endedAt IS NOT NULL AND energyKwh IS NULL AND distanceM > 0
+           ORDER BY startedAt DESC LIMIT :limit"""
+    )
+    fun tripsMissingEnergy(limit: Int = 50): List<TripEntity>
+
+    /** Records energy recovered from counters read either side of a drive. Measurement, so it lands in energyKwh. */
+    @Query("UPDATE trips SET energyKwh = :energyKwh, costInr = :costInr, energySource = 'backfill' WHERE id = :id")
+    fun setBackfilledEnergy(id: Long, energyKwh: Double?, costInr: Double?)
+
+    /** Records the indicative figure, which is kept well away from the column the model reads. */
+    @Query("UPDATE trips SET estimatedEnergyKwh = :energyKwh, estimatedCostInr = :costInr WHERE id = :id")
+    fun setEstimatedEnergy(id: Long, energyKwh: Double?, costInr: Double?)
+
+    /** Notes how a measured figure was arrived at: `counter` or `soc`. */
+    @Query("UPDATE trips SET energySource = :source WHERE id = :id")
+    fun setEnergySource(id: Long, source: String?)
 
     // ---- route efficiency ----
 
@@ -731,6 +799,16 @@ data class DailyEffRow(
 /** One drive, and the conditions it was made in. */
 /** One frame's charge level against the energy it says the pack holds. */
 data class CapacityClue(val socPercent: Double, val batteryEnergyKwh: Double)
+
+/** One drive, and how many journeys of its own the car counted inside it. */
+data class TripJourneyCount(val tripId: Long, val journeys: Int)
+
+/** One frame's running counters, used to bracket a drive the link was down for. */
+data class CounterReading(
+    val t: Long,
+    val powerUsageSinceLastChargeKwh: Double?,
+    val distanceSinceLastChargeKm: Double?
+)
 
 data class EfficiencySampleRow(
     val startedAt: Long,

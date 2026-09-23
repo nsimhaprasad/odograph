@@ -10,7 +10,7 @@ import java.io.File
 
 @Database(
     entities = [TripEntity::class, PointEntity::class, PlaceEntity::class, BatteryEntity::class, ChargeEventEntity::class, DailyTelemetryEntity::class, PriceReminderEntity::class],
-    version = 13,
+    version = 14,
     exportSchema = true
 )
 abstract class OdographDb : RoomDatabase() {
@@ -159,6 +159,27 @@ abstract class OdographDb : RoomDatabase() {
          *
          * All nullable. A frame that never carried a reading must not gain a zero.
          */
+        /**
+         * Somewhere to put a figure that was reckoned rather than measured.
+         *
+         * The box is powered by the car and the car goes through basements, tunnels and forest, so
+         * drives with no telematics frames in them are ordinary. Those drives used to keep their
+         * nulls forever. Now they can carry an indicative figure — in its own column, because
+         * `energyKwh` is what the efficiency model learns from and a model fed its own output
+         * cannot tell that it has stopped learning anything.
+         */
+        val MIGRATION_13_14 = object : Migration(13, 14) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                listOf(
+                    "estimatedEnergyKwh" to "REAL",
+                    "estimatedCostInr" to "REAL",
+                    "energySource" to "TEXT"
+                ).forEach { (name, type) ->
+                    db.execSQL("ALTER TABLE `trips` ADD COLUMN `$name` $type")
+                }
+            }
+        }
+
         val MIGRATION_12_13 = object : Migration(12, 13) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 listOf(
@@ -284,7 +305,7 @@ abstract class OdographDb : RoomDatabase() {
                 // The car cuts power without warning. Write-ahead logging means a torn write
                 // costs one in-flight row, never the database.
                 .setJournalMode(JournalMode.WRITE_AHEAD_LOGGING)
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13, MIGRATION_13_14)
                 .build()
                 .also { instance = it }
         }

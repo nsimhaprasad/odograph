@@ -253,4 +253,58 @@ class DriverStatsTest {
         assertThat(secondaryPerRow(metricsFor(427f, 240f), 0f)).isGreaterThanOrEqualTo(1)
         assertThat(secondaryPerRow(metricsFor(427f, 240f), 1f)).isGreaterThanOrEqualTo(1)
     }
+
+    // ------------------------------------------------- energy and cost with no link
+
+    private fun labels(state: LiveState) = secondaryStats(state).map { it.label }
+    private fun value(state: LiveState, label: String) =
+        secondaryStats(state).first { it.label == label }.value
+
+    /**
+     * The case this exists for. A drive with no telematics frames used to show no energy and no
+     * cost at all, for the whole drive — and on a box that is only powered while driving, that
+     * was most drives through a basement, a tunnel, or a forest.
+     */
+    @Test
+    fun `with nothing measured, the reckoned figures stand in and say so`() {
+        val unlinked = live.copy(
+            tripEnergyKwh = null, tripCostInr = null,
+            estimatedTripEnergyKwh = 3.2, estimatedTripCostInr = 26.0
+        )
+
+        assertThat(labels(unlinked)).contains("KWH EST", "COST EST")
+        assertThat(labels(unlinked)).doesNotContain("KWH USED", "RIDE COST")
+        assertThat(value(unlinked, "KWH EST")).isEqualTo("~3.2")
+        assertThat(value(unlinked, "COST EST")).isEqualTo("~₹26")
+    }
+
+    /** A measurement is never displaced by a guess of the same thing. */
+    @Test
+    fun `a measured figure wins over an estimate of the same thing`() {
+        val both = live.copy(
+            tripEnergyKwh = 3.5, tripCostInr = 28.0,
+            estimatedTripEnergyKwh = 3.2, estimatedTripCostInr = 26.0
+        )
+
+        assertThat(labels(both)).contains("KWH USED", "RIDE COST")
+        assertThat(labels(both)).doesNotContain("KWH EST", "COST EST")
+        assertThat(value(both, "KWH USED")).isEqualTo("3.5")
+    }
+
+    /**
+     * Energy can be reckoned without a price — no fills yet, so no rate — and the two must be
+     * independent: an estimate of one is not a reason to invent the other.
+     */
+    @Test
+    fun `an estimated energy with no rate shows the energy alone`() {
+        val unpriced = live.copy(estimatedTripEnergyKwh = 3.2, estimatedTripCostInr = null)
+
+        assertThat(labels(unpriced)).contains("KWH EST")
+        assertThat(labels(unpriced)).doesNotContain("COST EST", "RIDE COST")
+    }
+
+    @Test
+    fun `with neither measured nor reckoned, the row is simply absent`() {
+        assertThat(labels(live)).doesNotContain("KWH USED", "KWH EST", "RIDE COST", "COST EST")
+    }
 }

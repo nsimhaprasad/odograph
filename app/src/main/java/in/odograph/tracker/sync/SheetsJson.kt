@@ -59,7 +59,7 @@ object SheetsJson {
     }
 
     /** The database shape this export was produced from. Bumped with every Room migration. */
-    const val SCHEMA_VERSION = 13
+    const val SCHEMA_VERSION = 14
 
     private fun place(p: PlaceEntity): String = "{" +
         "\"id\":${p.id}," +
@@ -146,7 +146,13 @@ object SheetsJson {
         "\"carDistanceKm\":${t.carDistanceKm ?: "null"}," +
         "\"clusterId\":${t.clusterId ?: "null"}," +
         "\"energyKwh\":${t.energyKwh ?: "null"}," +
-        "\"costInr\":${t.costInr ?: "null"}" +
+        "\"costInr\":${t.costInr ?: "null"}," +
+        // Kept distinct in the backup for the same reason they are distinct in the database: a
+        // restore that merged the reckoned figure into the measured one would hand the efficiency
+        // model its own past output to learn from, and nothing downstream could tell.
+        "\"estimatedEnergyKwh\":${t.estimatedEnergyKwh ?: "null"}," +
+        "\"estimatedCostInr\":${t.estimatedCostInr ?: "null"}," +
+        "\"energySource\":${t.energySource?.let { "\"$it\"" } ?: "null"}" +
         "}"
 
     private fun point(p: PointEntity): String = "{" +

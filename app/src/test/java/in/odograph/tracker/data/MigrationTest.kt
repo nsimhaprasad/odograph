@@ -623,4 +623,91 @@ class MigrationTest {
             assertThat(c.getString(3)).isEqualTo("ChargeZone")
         }
     }
+
+    /**
+     * Somewhere to put a figure that was reckoned rather than measured.
+     *
+     * The drives this is for are the ones the telematics link was down during, which on a box
+     * powered only while driving is a great many of them. What matters here is that the existing
+     * measured figures are untouched and that the estimate lands in a *different* column: the
+     * efficiency model selects on `energyKwh`, and an estimate sitting there would be learned
+     * from, which is a failure nothing downstream could detect.
+     */
+    @Test
+    fun `migrating from v13 separates reckoned energy from measured energy`() {
+        val db = openV7()
+        OdographDb.MIGRATION_7_8.migrate(db)
+        OdographDb.MIGRATION_8_9.migrate(db)
+        OdographDb.MIGRATION_9_10.migrate(db)
+        OdographDb.MIGRATION_10_11.migrate(db)
+        OdographDb.MIGRATION_11_12.migrate(db)
+        OdographDb.MIGRATION_12_13.migrate(db)
+        db.execSQL(
+            "INSERT INTO trips (startedAt, endedAt, distanceM, durationS, movingS, " +
+                "maxSpeedMps, avgSpeedMps, slowestKmMps, energyKwh, costInr) " +
+                "VALUES (1000, 2000, 22000.0, 3600, 3000, 20.0, 6.1, 4.0, 3.5, 28.0)"
+        )
+
+        OdographDb.MIGRATION_13_14.migrate(db)
+
+        // The measured drive is exactly as it was, and has gained no estimate.
+        db.query(
+            "SELECT energyKwh, costInr, estimatedEnergyKwh, estimatedCostInr, energySource " +
+                "FROM trips WHERE startedAt = 1000"
+        ).use { c ->
+            assertThat(c.moveToFirst()).isTrue()
+            assertThat(c.getDouble(0)).isEqualTo(3.5)
+            assertThat(c.getDouble(1)).isEqualTo(28.0)
+            assertThat(c.isNull(2)).`as`("a measured drive gains no estimate").isTrue()
+            assertThat(c.isNull(3)).isTrue()
+            assertThat(c.isNull(4)).`as`("provenance is unknown for drives recorded before it").isTrue()
+        }
+
+        // A drive with no measurement can carry an estimate without ever touching energyKwh.
+        db.execSQL(
+            "INSERT INTO trips (startedAt, endedAt, distanceM, durationS, movingS, " +
+                "maxSpeedMps, avgSpeedMps, slowestKmMps, estimatedEnergyKwh, estimatedCostInr) " +
+                "VALUES (5000, 6000, 40000.0, 3600, 3400, 22.0, 11.1, 5.0, 6.4, 51.2)"
+        )
+        db.query(
+            "SELECT energyKwh, estimatedEnergyKwh FROM trips WHERE startedAt = 5000"
+        ).use { c ->
+            assertThat(c.moveToFirst()).isTrue()
+            assertThat(c.isNull(0)).`as`("the model's column stays empty").isTrue()
+            assertThat(c.getDouble(1)).isEqualTo(6.4)
+        }
+
+        // And that is what keeps it out of the learning set, which selects on energyKwh alone.
+        db.query("SELECT COUNT(*) FROM trips WHERE energyKwh IS NOT NULL").use { c ->
+            assertThat(c.moveToFirst()).isTrue()
+            assertThat(c.getInt(0)).`as`("only the measured drive is learnable").isEqualTo(1)
+        }
+    }
+
+    /** Backfill is measurement, so it belongs in energyKwh — labelled, not segregated. */
+    @Test
+    fun `a backfilled drive is stored as measured, and says so`() {
+        val db = openV7()
+        OdographDb.MIGRATION_7_8.migrate(db)
+        OdographDb.MIGRATION_8_9.migrate(db)
+        OdographDb.MIGRATION_9_10.migrate(db)
+        OdographDb.MIGRATION_10_11.migrate(db)
+        OdographDb.MIGRATION_11_12.migrate(db)
+        OdographDb.MIGRATION_12_13.migrate(db)
+        OdographDb.MIGRATION_13_14.migrate(db)
+        db.execSQL(
+            "INSERT INTO trips (startedAt, endedAt, distanceM, durationS, movingS, " +
+                "maxSpeedMps, avgSpeedMps, slowestKmMps, energyKwh, costInr, energySource) " +
+                "VALUES (9000, 9500, 25000.0, 1800, 1700, 25.0, 13.9, 6.0, 4.0, 32.0, 'backfill')"
+        )
+
+        db.query("SELECT COUNT(*) FROM trips WHERE energyKwh IS NOT NULL").use { c ->
+            assertThat(c.moveToFirst()).isTrue()
+            assertThat(c.getInt(0)).`as`("recovered energy is real energy").isEqualTo(1)
+        }
+        db.query("SELECT energySource FROM trips WHERE startedAt = 9000").use { c ->
+            assertThat(c.moveToFirst()).isTrue()
+            assertThat(c.getString(0)).isEqualTo("backfill")
+        }
+    }
 }

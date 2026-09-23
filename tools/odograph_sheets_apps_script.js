@@ -36,7 +36,8 @@ function doPost(e) {
       'slowest_kmh','start_lat','start_lon','end_lat','end_lon','soc_start','soc_end',
       'energy_kwh','cost_inr','climb_m','descent_m',
       'avg_temp_c','climate_share','car_energy_kwh','car_distance_km','cluster_id',
-      'start_place_id','end_place_id'];
+      'start_place_id','end_place_id',
+      'estimated_energy_kwh','estimated_cost_inr','energy_source'];
     upsertRows(tripSheet, tripCols, trips.map(tripRow), 0);
 
     var pointSheet = tab(ss, 'Points');
@@ -257,7 +258,10 @@ function tripRow(t) {
     // The conditions the drive was made in. Without them a restored history can say what every
     // drive cost but no longer why, and every efficiency split comes back empty.
     n(t.avgTempC), n(t.climateShare), n(t.carEnergyKwh), n(t.carDistanceKm), n(t.clusterId),
-    n(t.startPlaceId), n(t.endPlaceId)];
+    n(t.startPlaceId), n(t.endPlaceId),
+    // Kept in their own columns, never merged into energy_kwh. That column is what the app's
+    // efficiency model learns from, and a reckoned figure sitting in it would be trained on.
+    n(t.estimatedEnergyKwh), n(t.estimatedCostInr), n(t.energySource)];
 }
 
 function pointRow(p) {

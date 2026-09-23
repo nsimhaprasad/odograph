@@ -40,6 +40,8 @@ import `in`.odograph.tracker.core.SpeedSanity
 import `in`.odograph.tracker.core.TripStats
 import `in`.odograph.tracker.core.TripRepair
 import `in`.odograph.tracker.core.Telematics
+import `in`.odograph.tracker.core.EnergyRecovery
+import `in`.odograph.tracker.core.TelematicsSchedule
 import io.windsor.telematics.TelematicsClient
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -108,6 +110,18 @@ class TripRecorderService : Service() {
          * blended rate of the fills that began before it. Null when nothing has priced it yet.
          */
         val tripCostInr: Double? = null,
+        /**
+         * What this drive is reckoned to have used so far, when nothing has measured it. kW·h.
+         *
+         * Stands in for [tripEnergyKwh] only while that is null — a drive with no telematics link,
+         * which on a box powered by the car is an ordinary drive. Distance times what the car has
+         * been using, so it improves as the history does. Never stored: the closing trip is
+         * estimated separately by the sweep, from the same rule, into a column the efficiency
+         * model does not read.
+         */
+        val estimatedTripEnergyKwh: Double? = null,
+        /** The reckoned figure priced at the same blended fill rate a measured drive would be. */
+        val estimatedTripCostInr: Double? = null,
         /** Metres climbed this drive, deadbanded — the context battery consumption depends on. */
         val elevGainM: Double = 0.0,
         /** Metres descended this drive, never netted against the climb because descent regenerates. */
@@ -417,6 +431,18 @@ class TripRecorderService : Service() {
      */
     private var rangeAccuracy: RangeCalibration.Accuracy? = null
 
+    /**
+     * What a hundred kilometres has been costing, cached for the fix pump.
+     *
+     * The pump runs once a second and this figure needs the whole backtest to compute, so it is
+     * refreshed where [rangeAccuracy] is — at boot, when a trip closes, when one opens — and read
+     * from here in between. Volatile because the pump and the refresh run on different threads.
+     */
+    @Volatile private var learnedKwhPer100Km: Double? = null
+
+    /** The blended fill rate this drive would be billed at, ₹ per kW·h. Same cadence as above. */
+    @Volatile private var blendedRateInr: Double? = null
+
     /** What the last run left behind, held until there is a trip to attach it to. */
     private var recovery = TripRecovery.Recovery()
 
@@ -439,7 +465,8 @@ class TripRecorderService : Service() {
     private lateinit var alertSound: AlertSound
     private var speedAlert = SpeedAlert(AlertConfig(limitKmh = 0f))
     private var configuredLimit = -1
-    private var lastMgLostNotifyAt = Long.MIN_VALUE
+    /** When the "MG link is down" reminder last went out. Null means it never has. */
+    private var lastMgLostNotifyAt: Long? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -544,19 +571,32 @@ class TripRecorderService : Service() {
         val dao = OdographDb.get(this).dao()
         var client: TelematicsClient? = null
         var creds: Triple<String, String, String>? = null
-        var lastCallElapsed = Long.MIN_VALUE
+        // Null is "never", and it stays null rather than becoming a sentinel. The sentinel this
+        // replaces was subtracted from the clock, overflowed, and left the box unable to make its
+        // own first call for months — it connected only when somebody opened the MG screen.
+        var lastCallElapsed: Long? = null
+        var lastAttemptElapsed: Long? = null
 
         while (true) {
             delay(TELEMATICS_WAKE_MS)
 
-            val sinceLast = SystemClock.elapsedRealtime() - lastCallElapsed
-            val neverCalled = lastCallElapsed == Long.MIN_VALUE
-            val demanded =
-                telematicsVisible.value ||
-                    telematicsRefresh.value ||
-                    sinceLast >= TELEMATICS_HEARTBEAT_MS
-            val cooled = neverCalled || sinceLast >= TELEMATICS_MIN_INTERVAL_MS
-            if (!demanded || !cooled) continue
+            // Monotonic, and named so it cannot be confused with the wall-clock `now` further in.
+            // The two measure different things: this one survives a clock correction, that one is
+            // what battery frames and fixes are stamped with.
+            val nowElapsed = SystemClock.elapsedRealtime()
+            val shouldAttempt = TelematicsSchedule.shouldAttempt(
+                sinceLastCallMs = lastCallElapsed?.let { nowElapsed - it },
+                sinceLastAttemptMs = lastAttemptElapsed?.let { nowElapsed - it },
+                screenVisible = telematicsVisible.value,
+                refreshRequested = telematicsRefresh.value,
+                heartbeatMs = TELEMATICS_HEARTBEAT_MS,
+                minIntervalMs = TELEMATICS_MIN_INTERVAL_MS
+            )
+            if (!shouldAttempt) continue
+            // Stamped here rather than after the call, so an attempt abandoned below — no
+            // credentials, no validated network — still counts against the retry floor and a box
+            // with no signal cannot spin once a second.
+            lastAttemptElapsed = nowElapsed
             telematicsRefresh.value = false
 
             val settings = Settings(this)
@@ -640,7 +680,13 @@ class TripRecorderService : Service() {
 
                 if (Telematics.hasBatteryReading(ch) && ch != null) {
                     val t = lastFix?.t ?: now
+                    // Guarded against the sentinel: `now - Long.MIN_VALUE` overflows negative, so
+                    // before the first movement this compared -9.2e18 against the gap and came out
+                    // "not parked". That happened to be harmless only because NO_TRIP and the
+                    // parked bucket are both -1 — the same bug that broke the telematics
+                    // scheduler, saved by a coincidence rather than a check.
                     val parked = ch.isCharging == false &&
+                        lastMovedAt != Long.MIN_VALUE &&
                         (now - lastMovedAt) > PARKED_MOVE_GAP_MS
                     dao.insertBattery(
                         BatteryEntity(
@@ -846,6 +892,20 @@ class TripRecorderService : Service() {
                 // reminder is cancelled: the connection it was nagging about is back.
                 _state.update { it.copy(telematicsConnected = true) }
                 clearMgLostNotification()
+
+                // A fresh frame is exactly what a drive that had no link may have been waiting
+                // for: the reading that closes a bracket around it. Run the sweep here rather
+                // than on a timer of its own, because this is the only moment new evidence
+                // arrives, and it cannot throw into the poll — its own failure is its own.
+                runCatching { EnergySweep.run(dao, settings.zone) }
+                    .onSuccess {
+                        if (it.backfilled > 0 || it.estimated > 0) {
+                            Diagnostics.crumb(
+                                "energy sweep: ${it.backfilled} backfilled, ${it.estimated} estimated"
+                            )
+                        }
+                    }
+                    .onFailure { Diagnostics.crumb("energy sweep failed: $it") }
             }.onFailure {
                 Diagnostics.crumb("telematics poll failed: $it")
                 _state.update { it.copy(telematicsConnected = false) }
@@ -1014,6 +1074,9 @@ class TripRecorderService : Service() {
     private fun openTripFromPending(dao: OdographDao) {
         val first = pendingFixes.first()
         tripId = TripRecovery.startOnMove(dao, first.t, first.lat, first.lon, recovery)
+        // A drive that sets off with no link needs the estimate ready from its first kilometre,
+        // and the rate is priced from the fills before *this* drive, so both are refreshed here.
+        refreshRangeAccuracy(dao)
         recovery = TripRecovery.Recovery()
         startedAt = first.t
         Diagnostics.crumb("trip opened on movement trip=$tripId")
@@ -1076,6 +1139,12 @@ class TripRecorderService : Service() {
             rangeAccuracy = RangeCalibration.accuracy(
                 RangeCalibration.backtest(samples, settings.zone)
             )
+            // The same two figures the sweep uses to estimate a closed drive, so what the screen
+            // shows live and what the archive shows afterwards come from one rule.
+            learnedKwhPer100Km = EnergySweep.learnedKwhPer100Km(dao, settings.zone)
+            // The cost of one kilowatt-hour *is* the blended rate: asking the real billing
+            // function for it keeps this from ever disagreeing with how a measured drive is priced.
+            blendedRateInr = TripRecovery.driveCost(dao, 1.0, startedAt ?: System.currentTimeMillis())
         }
     }
 
@@ -1135,6 +1204,17 @@ class TripRecorderService : Service() {
             speedMps = speedMps,
             distanceM = if (moving) track.distanceM else 0.0,
             elapsedS = if (moving) (fix.t - (startedAt ?: fix.t)) / 1000 else 0,
+            // Reckoned only while nothing has measured the drive. The moment a telematics frame
+            // gives a real figure the MG poll fills tripEnergyKwh, the screen switches to it, and
+            // this is ignored — a measurement is never overwritten by a guess of the same thing.
+            estimatedTripEnergyKwh = if (moving && cur.tripEnergyKwh == null) {
+                EnergyRecovery.estimatedKwh(track.distanceM / 1000.0, learnedKwhPer100Km)
+            } else null,
+            estimatedTripCostInr = if (moving && cur.tripEnergyKwh == null) {
+                val kwh = EnergyRecovery.estimatedKwh(track.distanceM / 1000.0, learnedKwhPer100Km)
+                val rate = blendedRateInr
+                if (kwh != null && rate != null) BatteryMath.round2(kwh * rate) else null
+            } else null,
             // The same test the stored trip applies, so the live readout and the saved figure
             // cannot disagree about what the car was doing — and a spike cannot park itself at the
             // top of the screen for the rest of the drive.
@@ -1360,7 +1440,12 @@ class TripRecorderService : Service() {
      */
     private fun notifyMgLost() {
         val now = System.currentTimeMillis()
-        if (now - lastMgLostNotifyAt < MG_LOST_NOTIFY_GAP_MS) return
+        // Null is "never notified". It used to be Long.MIN_VALUE, and `now - Long.MIN_VALUE`
+        // overflows to about -9.2e18 — which is below any gap, so this returned early every time
+        // and the stamp below was never reached. The warning that the car link was down could
+        // therefore never appear, which is precisely why the link being down went unnoticed.
+        val since = lastMgLostNotifyAt?.let { now - it }
+        if (since != null && since < MG_LOST_NOTIFY_GAP_MS) return
         lastMgLostNotifyAt = now
         runCatching {
             val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager

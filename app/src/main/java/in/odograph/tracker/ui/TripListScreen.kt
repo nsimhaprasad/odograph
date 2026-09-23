@@ -30,6 +30,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import `in`.odograph.tracker.core.Fix
+import `in`.odograph.tracker.core.JourneyAgreement
 import `in`.odograph.tracker.core.RangeCalibration
 import `in`.odograph.tracker.core.EfficiencyStats
 import `in`.odograph.tracker.core.BatteryMath
@@ -69,7 +70,23 @@ private data class TripDetail(
     val impliedRateInr: Double?,
     /** How the range estimate did on this drive, or null when there was nothing to score. */
     val verdict: RangeCalibration.Verdict? = null,
-    val capacityKwh: Double = BatteryMath.DEFAULT_CAPACITY_KWH
+    val capacityKwh: Double = BatteryMath.DEFAULT_CAPACITY_KWH,
+    /** Energy to show: measured where there is one, the indicative figure otherwise. */
+    val shownEnergyKwh: Double? = null,
+    val shownCostInr: Double? = null,
+    /** How a measured figure was arrived at: `counter`, `soc` or `backfill`. */
+    val energySource: String? = null,
+    /** Whether the figures shown are reckoned rather than measured. */
+    val estimated: Boolean = false,
+    /**
+     * Whether the car agreed this was one journey.
+     *
+     * [JourneyAgreement.Verdict.UNKNOWN] for most drives, because the telematics link is down more
+     * often than it is up. That is displayed rather than hidden: a drive the car said nothing
+     * about is evidence of nothing, and showing a blank where the answer should be is how the
+     * driver learns the difference between agreement and silence.
+     */
+    val boundary: JourneyAgreement.Verdict = JourneyAgreement.Verdict.UNKNOWN
 )
 
 private sealed interface TripRowItem {
@@ -149,7 +166,12 @@ fun TripListScreen(showTiles: Boolean, palette: Palette) {
             val dao = OdographDb.get(ctx).dao()
             val t = dao.tripById(id) ?: return@withContext null
             val energyKwh = t.energyKwh
-            val kwhPer100 = BatteryMath.kwhPer100Km(energyKwh, t.distanceM)
+            // The estimate only stands in where nothing measured the drive. It never replaces a
+            // measurement, and the prediction verdict below deliberately ignores it — scoring the
+            // estimate against a figure derived from the same model would be marking its own work.
+            val shownEnergy = energyKwh ?: t.estimatedEnergyKwh
+            val shownCost = t.costInr ?: t.estimatedCostInr
+            val kwhPer100 = BatteryMath.kwhPer100Km(shownEnergy, t.distanceM)
             TripDetail(
                 startPlace = t.startPlaceId?.let { dao.placeById(it)?.displayName },
                 endPlace = t.endPlaceId?.let { dao.placeById(it)?.displayName },
@@ -160,9 +182,15 @@ fun TripListScreen(showTiles: Boolean, palette: Palette) {
                         BatteryMath.rangeAtFullKwh(Settings(ctx).batteryCapacityKwh, it)
                     )
                 },
-                impliedRateInr = if (energyKwh != null && energyKwh > 0 && t.costInr != null) {
-                    BatteryMath.round2(t.costInr!! / energyKwh)
+                impliedRateInr = if (shownEnergy != null && shownEnergy > 0 && shownCost != null) {
+                    BatteryMath.round2(shownCost / shownEnergy)
                 } else null,
+                shownEnergyKwh = shownEnergy,
+                shownCostInr = shownCost,
+                energySource = t.energySource,
+                // True when nothing measured this drive and the figures above are reckoned from
+                // its distance and the app's learned consumption.
+                estimated = energyKwh == null && t.estimatedEnergyKwh != null,
                 // Scored against the drives that came before this one and nothing else, so the
                 // figure is what the app would have told the driver that morning rather than one
                 // worked out afterwards with the answer already in hand.
@@ -180,7 +208,13 @@ fun TripListScreen(showTiles: Boolean, palette: Palette) {
                         zone = Settings(ctx).zone
                     )
                 },
-                capacityKwh = Settings(ctx).batteryCapacityKwh
+                capacityKwh = Settings(ctx).batteryCapacityKwh,
+                // Read-only for now, on purpose. This records whether the car drew the same
+                // boundary the app inferred; it does not move the boundary. Acting on the
+                // signal before there is enough history to know how this car numbers a
+                // journey — per ignition, per drive, or something else — is the mistake that
+                // `locked` and `canBusActive` already made twice.
+                boundary = JourneyAgreement.verdict(dao.journeyIdsFor(t.id))
             )
             }.let { if (it is Loaded.Ready) it.value else null }
         }
@@ -528,18 +562,79 @@ private fun TripDetailPane(
         DetailRow("Start", detail.startPlace ?: coords(t.startLat, t.startLon), palette, m)
         DetailRow("End", detail.endPlace ?: coords(t.endLat, t.endLon), palette, m)
         DetailRow("Track", "${formatKm(t.distanceM)} km  ·  ${detail.points} points", palette, m)
+        // Where this drive's start and end came from. Every boundary in this app is inferred from
+        // stillness, and the car is the only second opinion available — it numbers its own
+        // journeys, so a drive carrying two of its numbers is one the app ran together.
+        DetailRow(
+            "Boundary",
+            when (detail.boundary) {
+                JourneyAgreement.Verdict.AGREED ->
+                    "the car agrees this was one journey"
+                JourneyAgreement.Verdict.CAR_SPLIT_IT ->
+                    "the car counted more than one journey here"
+                JourneyAgreement.Verdict.UNKNOWN ->
+                    "the car did not say — no link during this drive"
+            },
+            palette, m,
+            valueColor = when (detail.boundary) {
+                JourneyAgreement.Verdict.AGREED -> palette.good
+                JourneyAgreement.Verdict.CAR_SPLIT_IT -> palette.caution
+                JourneyAgreement.Verdict.UNKNOWN -> palette.dim
+            }
+        )
 
         SectionLabel("BATTERY", palette, m)
         if (t.socStart != null && t.socEnd != null) {
             DetailRow("Charge", "%.0f → %.0f %%".format(t.socStart, t.socEnd), palette, m)
         }
-        t.energyKwh?.let { DetailRow("Energy", "%.2f kWh".format(it), palette, m) }
-        BatteryMath.kmPerKwh(t.energyKwh, t.distanceM)?.let {
-            DetailRow("Mileage", "%.2f km/kWh".format(it), palette, m)
+        // An estimated drive says so before it says anything else, because every number under
+        // this line is reckoned from its distance rather than watched, and a figure whose nature
+        // is disclosed two rows later has already been read as a measurement.
+        if (detail.estimated) {
+            DetailRow(
+                "These figures",
+                "indicative — no car link during this drive",
+                palette, m,
+                valueColor = palette.caution
+            )
+        }
+        detail.shownEnergyKwh?.let {
+            DetailRow(
+                if (detail.estimated) "Energy (est.)" else "Energy",
+                "%.2f kWh".format(it),
+                palette, m,
+                valueColor = if (detail.estimated) palette.caution else palette.numeral
+            )
+        }
+        BatteryMath.kmPerKwh(detail.shownEnergyKwh, t.distanceM)?.let {
+            DetailRow(
+                if (detail.estimated) "Mileage (est.)" else "Mileage",
+                "%.2f km/kWh".format(it),
+                palette, m,
+                valueColor = if (detail.estimated) palette.caution else palette.numeral
+            )
         }
         detail.kwhPer100?.let { DetailRow("Consumption", "%.2f kWh/100km".format(it), palette, m) }
         detail.rangeAtFullKm?.let { DetailRow("Range at 100%", "%.0f km".format(it), palette, m) }
-        t.costInr?.let { DetailRow("Cost", "₹ %.2f".format(it), palette, m) }
+        detail.shownCostInr?.let {
+            DetailRow(
+                if (detail.estimated) "Cost (est.)" else "Cost",
+                "₹ %.2f".format(it),
+                palette, m,
+                valueColor = if (detail.estimated) palette.caution else palette.numeral
+            )
+        }
+        // A drive the link was down for, whose energy was recovered afterwards from the car's own
+        // running counters. Measured, not guessed — but worth saying, because the driver knows
+        // perfectly well there was no signal and would otherwise wonder where the number came from.
+        if (detail.energySource == "backfill") {
+            DetailRow(
+                "Recovered",
+                "from the car's counters after the drive",
+                palette, m,
+                valueColor = palette.good
+            )
+        }
         detail.impliedRateInr?.let {
             DetailRow("Effective rate", "₹ %.2f /kWh".format(it), palette, m)
         }

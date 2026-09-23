@@ -77,8 +77,21 @@ fun secondaryStats(live: TripRecorderService.LiveState): List<DriverStat> = buil
     if (live.speedLimitKmh > 0) add(DriverStat("${live.speedLimitKmh}", "KM/H LIMIT"))
     add(DriverStat("${mpsToKmh(live.maxSpeedMps).roundToInt()}", "KM/H MAX"))
     add(DriverStat(formatHhMm(live.movingS), "MOVING"))
-    live.tripEnergyKwh?.let { add(DriverStat("%.1f".format(it), "KWH USED")) }
-    live.tripCostInr?.let { add(DriverStat("₹%.0f".format(it), "RIDE COST")) }
+    // Measured first; the reckoned figure only when nothing measured this drive. A tilde and a
+    // changed label rather than a hidden flag, because a number on this screen is read in a
+    // glance and the glance has to carry the caveat with it.
+    when {
+        live.tripEnergyKwh != null ->
+            add(DriverStat("%.1f".format(live.tripEnergyKwh), "KWH USED"))
+        live.estimatedTripEnergyKwh != null ->
+            add(DriverStat("~%.1f".format(live.estimatedTripEnergyKwh), "KWH EST"))
+    }
+    when {
+        live.tripCostInr != null ->
+            add(DriverStat("₹%.0f".format(live.tripCostInr), "RIDE COST"))
+        live.estimatedTripCostInr != null ->
+            add(DriverStat("~₹%.0f".format(live.estimatedTripCostInr), "COST EST"))
+    }
     live.batteryMileageKmPerKwh?.let { add(DriverStat("%.1f".format(it), "KM/KWH")) }
     // The same charge read two other ways. They sit next to each other on purpose: where they
     // disagree is the information — a live figure well above the lifetime one is a gentle hour,

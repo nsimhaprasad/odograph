@@ -32,6 +32,7 @@ import `in`.odograph.tracker.core.Analytics
 import `in`.odograph.tracker.core.BatteryHealth
 import `in`.odograph.tracker.core.DriveContext
 import `in`.odograph.tracker.core.EfficiencyStats
+import `in`.odograph.tracker.core.JourneyAgreement
 import `in`.odograph.tracker.core.RangeCalibration
 import `in`.odograph.tracker.core.Telematics
 import `in`.odograph.tracker.core.BatteryMath
@@ -72,6 +73,14 @@ private data class InsightsUi(
     /** The pack size the car's own frames imply, against the one configured on the box. */
     val impliedPackKwh: Double? = null,
     val accuracy: RangeCalibration.Accuracy? = null,
+    /**
+     * How often the app's trip boundaries matched the car's own journey numbering.
+     *
+     * Reported, not acted on. Every boundary in this app is inferred from stillness and every
+     * threshold in that inference is a guess; this is the only independent check on those guesses
+     * that exists. It has to earn trust before anything is allowed to depend on it.
+     */
+    val boundaries: JourneyAgreement.Tally? = null,
     val capacityKwh: Double = BatteryMath.DEFAULT_CAPACITY_KWH,
     val loaded: Boolean = false
 )
@@ -147,6 +156,16 @@ fun InsightsScreen(palette: Palette) {
                             .map { it.socPercent to it.batteryEnergyKwh }
                     ),
                     accuracy = RangeCalibration.accuracy(RangeCalibration.backtest(samples, zone)),
+                    boundaries = run {
+                        // Drives the car never commented on produce no row, so they are counted
+                        // against the total rather than dropped. Dropping them would turn a
+                        // worsening telematics link into an improving agreement figure.
+                        val counted = dao.journeyCountsPerTrip()
+                        JourneyAgreement.tallyOfCounts(
+                            countsPerDrive = counted.map { it.journeys },
+                            silentDrives = dao.tripCount() - counted.size
+                        )
+                    },
                     capacityKwh = capacity,
                     loaded = true
                 )
@@ -176,6 +195,7 @@ fun InsightsScreen(palette: Palette) {
             conditionsSection(ui, palette, m)
             healthSection(ui, palette, m)
             accuracySection(ui, palette, m)
+            boundarySection(ui, palette, m)
             routeSection(ui, palette, m)
             drainSection(ui, palette, m)
         }
@@ -450,6 +470,71 @@ private fun accuracySection(ui: InsightsUi, palette: Palette, m: Metrics) {
     Text(
         text = "typical miss %.0f%% over %d drives, corrected automatically".format(
             accuracy.typicalMissPercent, accuracy.scored
+        ),
+        color = palette.label,
+        fontSize = m.label
+    )
+}
+
+/**
+ * Whether the app's idea of where a drive begins and ends matches the car's.
+ *
+ * Its own section rather than a line in the range self-check, because it answers a different
+ * question and survives the range estimate having nothing to say. The two together are the whole
+ * of what the app knows about its own reliability: one measures the number it predicts, this
+ * measures the drives it draws.
+ *
+ * Nothing acts on this. It is here to accumulate evidence about how this car numbers a journey,
+ * which is the thing that has to be known before the signal can be trusted to move a boundary.
+ */
+@Composable
+private fun boundarySection(ui: InsightsUi, palette: Palette, m: Metrics) {
+    val t = ui.boundaries ?: return
+    // Nothing to report until the car has commented on something. An empty section would read as
+    // a finding, and "no data yet" is not one.
+    if (t.answered == 0 && t.unknown == 0) return
+    Text(
+        text = "TRIP BOUNDARIES  ·  SELF-CHECK",
+        color = palette.label,
+        fontSize = m.label,
+        letterSpacing = 2.2.sp,
+        modifier = Modifier.padding(top = m.gap, bottom = m.gap / 2)
+    )
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(vertical = m.gap / 4),
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+        Text("THE CAR AGREED", color = palette.dim, fontSize = m.body)
+        Text(
+            text = t.agreementPercent?.let {
+                "%.0f%% of %d drives".format(it, t.answered)
+            } ?: "not yet — the car has said nothing",
+            color = when {
+                t.agreementPercent == null -> palette.dim
+                t.agreementPercent!! >= 90.0 -> palette.good
+                else -> palette.caution
+            },
+            fontSize = m.body
+        )
+    }
+    // The split count is the actionable half: those are drives the app ran together that the car
+    // considered separate, which is the shape of a boundary set too loose.
+    if (t.carSplit > 0) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(vertical = m.gap / 4),
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Text("THE CAR SPLIT", color = palette.dim, fontSize = m.body)
+            Text(
+                text = "%d drive%s".format(t.carSplit, if (t.carSplit == 1) "" else "s"),
+                color = palette.caution,
+                fontSize = m.body
+            )
+        }
+    }
+    Text(
+        text = "%d drive%s had no telematics link, so the car could not say".format(
+            t.unknown, if (t.unknown == 1) "" else "s"
         ),
         color = palette.label,
         fontSize = m.label

@@ -166,6 +166,11 @@ object BatteryMath {
      * is no worse a guess than a confident nought.
      */
     fun driveEnergyKwh(frames: List<`in`.odograph.tracker.data.BatteryEntity>, capacityKwh: Double): Double? {
+        // No frames is no measurement, and the answer is "unknown" rather than an exception. One
+        // caller guards this and the live-drive caller guards the line after the call instead, so
+        // a drive whose frames all landed in the parked bucket threw from here and abandoned the
+        // rest of that poll. Refusing empty input at the source covers every caller at once.
+        if (frames.isEmpty()) return null
         val fromCar = counterDelta(
             frames.first().powerUsageSinceLastChargeKwh,
             frames.last().powerUsageSinceLastChargeKwh
