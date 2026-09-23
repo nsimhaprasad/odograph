@@ -88,6 +88,11 @@ object ApiJson {
             append(kv("movingS", t.movingS.toString())).append(",")
             append(kv("energyKwh", numOrNull(t.energyKwh))).append(",")
             append(kv("costInr", numOrNull(t.costInr))).append(",")
+            // Kept apart from energyKwh here for the same reason as in the database: a reader
+            // that cannot tell a measurement from a reckoning will average them together.
+            append(kv("estimatedEnergyKwh", numOrNull(t.estimatedEnergyKwh))).append(",")
+            append(kv("estimatedCostInr", numOrNull(t.estimatedCostInr))).append(",")
+            append(kv("energySource", t.energySource?.let { "\"$it\"" } ?: "null")).append(",")
             append(kv("startPlaceId", t.startPlaceId?.toString() ?: "null")).append(",")
             append(kv("endPlaceId", t.endPlaceId?.toString() ?: "null"))
             append("}")

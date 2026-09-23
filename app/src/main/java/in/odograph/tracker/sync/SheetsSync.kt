@@ -35,7 +35,48 @@ object SheetsSync {
      * spreadsheet link, and the bundled Apps Script still needs deploying. Watermarks only
      * advance on a healthy response, so a failed run simply retries the same delta next time.
      */
-    fun exportDocs(ctx: Context, url: String, deviceId: String): Outbound.Result {
+    /**
+     * How many drives travel in one POST.
+     *
+     * Small on purpose. Every drive brings its points — an hour's driving is about 3,600 of them
+     * — and the payload is built as one string on a heap of 128 MB. Ten drives is a few
+     * megabytes; the whole history in one go was 69 MB and never reached the network.
+     */
+    const val TRIPS_PER_PAGE = 10
+
+    /** Battery frames per POST. The frame table is the largest, and this was already bounded. */
+    const val BATTERY_PER_PAGE = 2_000
+
+    /**
+     * The most pages one run will send before yielding.
+     *
+     * A box that has never backed up has months to send, and the schedule only runs this once
+     * an hour — so one run must be allowed to catch up, or the archive stays weeks behind for
+     * weeks. But the box is alive only for the length of a drive, and a run must not hold the
+     * whole of one hostage: a thousand drives is more than enough to clear any backlog, and
+     * whatever remains goes next time.
+     */
+    const val MAX_PAGES_PER_RUN = 100
+
+    /**
+     * Uploads everything unseen since the last export, a page at a time.
+     *
+     * Each page is a complete, self-consistent document — drives with their points, and every
+     * place every time — posted on its own, with the watermarks advanced only when it lands. A
+     * page that fails leaves the watermarks where they were, so the next run retries the same
+     * delta; the receiving script upserts by key, so a page that landed but was not acknowledged
+     * is harmless to send twice. That is what makes it safe to resume an export that the ignition
+     * cut short.
+     *
+     * [post] is how a page reaches the network; it is a parameter so the paging can be exercised
+     * against the real database without one.
+     */
+    fun exportDocs(
+        ctx: Context,
+        url: String,
+        deviceId: String,
+        post: (url: String, body: String) -> Int = Outbound::postJson
+    ): Outbound.Result {
         if (url.isBlank()) return Outbound.Result(0, 0, "no docs link configured")
         if (Outbound.isSpreadsheetLink(url)) {
             return Outbound.Result(0, 0, spreadLinkHelp())
@@ -43,47 +84,58 @@ object SheetsSync {
         return runCatching {
             val dao = OdographDb.get(ctx).dao()
             val s = Settings(ctx)
-            val now = System.currentTimeMillis()
             val zone = s.zone
-            val trips = dao.docsNewTrips(s.lastDocsTripId, now - SETTLE_GRACE_MS)
-            val charges = dao.docsNewCharges(s.lastDocsChargeId)
             val today = dayOf(today(), zone)
-            val days = DocsDelta.selectDays(dao.telemetryDaysAfter(s.lastDocsDay), today)
-            val battery = dao.docsNewBattery(s.lastDocsBatteryId)
-
-            if (trips.isEmpty() && charges.isEmpty() && days.isEmpty() && battery.isEmpty()) {
-                return Outbound.Result(0, 0, null)
-            }
-
-            val points = trips.flatMap { dao.pointsFor(it.id) }
             // Every place, every time: the table is small, and a backup carrying trips that
             // reference places it does not contain restores a history with no route names in it.
             val places = dao.allPlaces()
-            val body = SheetsJson.stats(
-                deviceId = deviceId,
-                trips = trips,
-                points = points,
-                charges = charges,
-                days = days,
-                places = places,
-                battery = battery,
-                capacityKwh = s.batteryCapacityKwh,
-                homeRateInr = s.homeRateInr,
-                outsideRateInr = s.outsideRateInr,
-                gstRatePct = s.gstRatePct
-            )
-            val code = Outbound.postJson(url, body)
-            if (code !in 200..299) {
-                return Outbound.Result(
-                    0, 0, "endpoint returned HTTP $code. Is the bundled Apps Script deployed at this URL?"
+            var sent = 0
+
+            repeat(MAX_PAGES_PER_RUN) {
+                val now = System.currentTimeMillis()
+                val trips = dao.docsNewTrips(s.lastDocsTripId, now - SETTLE_GRACE_MS, TRIPS_PER_PAGE)
+                val charges = dao.docsNewCharges(s.lastDocsChargeId)
+                val days = DocsDelta.selectDays(dao.telemetryDaysAfter(s.lastDocsDay), today)
+                val battery = dao.docsNewBattery(s.lastDocsBatteryId, BATTERY_PER_PAGE)
+
+                if (trips.isEmpty() && charges.isEmpty() && days.isEmpty() && battery.isEmpty()) {
+                    return Outbound.Result(sent, sent)
+                }
+
+                val points = trips.flatMap { dao.pointsFor(it.id) }
+                val body = SheetsJson.stats(
+                    deviceId = deviceId,
+                    trips = trips,
+                    points = points,
+                    charges = charges,
+                    days = days,
+                    places = places,
+                    battery = battery,
+                    capacityKwh = s.batteryCapacityKwh,
+                    homeRateInr = s.homeRateInr,
+                    outsideRateInr = s.outsideRateInr,
+                    gstRatePct = s.gstRatePct
                 )
+                val code = post(url, body)
+                if (code !in 200..299) {
+                    return Outbound.Result(
+                        sent + trips.size + points.size + charges.size + days.size, sent,
+                        "endpoint returned HTTP $code. Is the bundled Apps Script deployed at this URL?"
+                    )
+                }
+                trips.maxOfOrNull { it.id }?.let { s.lastDocsTripId = it }
+                charges.maxOfOrNull { it.id }?.let { s.lastDocsChargeId = it }
+                battery.maxOfOrNull { it.id }?.let { s.lastDocsBatteryId = it }
+                s.lastDocsDay = DocsDelta.nextDayWatermark(s.lastDocsDay, days, today)
+                sent += trips.size + points.size + charges.size + days.size
+
+                // A page that was not full was the last one; the loop above would only find it
+                // empty next time round, at the cost of five more queries.
+                if (trips.size < TRIPS_PER_PAGE && battery.size < BATTERY_PER_PAGE) {
+                    return Outbound.Result(sent, sent)
+                }
             }
-            trips.maxOfOrNull { it.id }?.let { s.lastDocsTripId = it }
-            charges.maxOfOrNull { it.id }?.let { s.lastDocsChargeId = it }
-            battery.maxOfOrNull { it.id }?.let { s.lastDocsBatteryId = it }
-            s.lastDocsDay = DocsDelta.nextDayWatermark(s.lastDocsDay, days, today)
-            val rows = trips.size + points.size + charges.size + days.size
-            Outbound.Result(rows, rows)
+            Outbound.Result(sent, sent)
         }.getOrElse { Outbound.Result(0, 0, it.message ?: it::class.java.simpleName) }
     }
 

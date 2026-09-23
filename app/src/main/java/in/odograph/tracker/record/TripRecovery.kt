@@ -201,7 +201,7 @@ object TripRecovery {
         // setChargeSummary refuses null arguments with COALESCE.
         val battery = dao.batteryRangeFor(tripId)
         if (battery.isNotEmpty()) {
-            val energy = BatteryMath.driveEnergyKwh(battery, capacityKwh)
+            val energy = BatteryMath.driveEnergyKwh(battery, capacityKwh, stats.distanceM)
             dao.setChargeSummary(tripId, battery.first().socPercent, battery.last().socPercent, energy)
         }
 

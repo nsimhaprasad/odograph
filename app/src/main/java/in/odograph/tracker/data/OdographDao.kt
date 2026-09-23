@@ -395,8 +395,13 @@ interface OdographDao {
      * energy/cost is finalised by the battery poller a moment after it closes, so exporting
      * something still settling would freeze an incomplete row on the workbook forever.
      */
-    @Query("SELECT * FROM trips WHERE endedAt IS NOT NULL AND endedAt < :beforeMs AND id > :fromId ORDER BY id ASC")
-    fun docsNewTrips(fromId: Long, beforeMs: Long): List<TripEntity>
+    /**
+     * Paged, because a box that has never backed up owes the sheet its entire history, and every
+     * trip brings its points. Unbounded, the first export built one 69 MB string on a 128 MB heap
+     * and died before it reached the network.
+     */
+    @Query("SELECT * FROM trips WHERE endedAt IS NOT NULL AND endedAt < :beforeMs AND id > :fromId ORDER BY id ASC LIMIT :limit")
+    fun docsNewTrips(fromId: Long, beforeMs: Long, limit: Int = 10): List<TripEntity>
 
     /** Charge sessions the docs export has not yet uploaded. Closed means stable. */
     @Query("SELECT * FROM charge_events WHERE kind IS NOT NULL AND id > :fromId ORDER BY id ASC")

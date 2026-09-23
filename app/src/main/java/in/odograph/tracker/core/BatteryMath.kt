@@ -165,18 +165,51 @@ object BatteryMath {
      * sparse to catch the movement rather than that the car used nothing, and the state of charge
      * is no worse a guess than a confident nought.
      */
-    fun driveEnergyKwh(frames: List<`in`.odograph.tracker.data.BatteryEntity>, capacityKwh: Double): Double? {
+    fun driveEnergyKwh(
+        frames: List<`in`.odograph.tracker.data.BatteryEntity>,
+        capacityKwh: Double,
+        distanceM: Double? = null
+    ): Double? {
         // No frames is no measurement, and the answer is "unknown" rather than an exception. One
         // caller guards this and the live-drive caller guards the line after the call instead, so
         // a drive whose frames all landed in the parked bucket threw from here and abandoned the
         // rest of that poll. Refusing empty input at the source covers every caller at once.
         if (frames.isEmpty()) return null
+        // A counter that barely moved over a real distance did not measure the drive; it missed
+        // it. 0.1 kWh across 13.8 km was accepted here because 0.1 is more than zero, and the
+        // drive went into the history at 138 km/kWh. The charge level is tried next, and if that
+        // is just as impossible the drive is unknown — which the sweep will estimate honestly.
         val fromCar = counterDelta(
             frames.first().powerUsageSinceLastChargeKwh,
             frames.last().powerUsageSinceLastChargeKwh
-        )?.takeIf { it > 0.0 }
-        val energy = fromCar ?: consumedKwh(frames, capacityKwh)
+        )?.takeIf { it > 0.0 && plausible(it, distanceM) }
+        val energy = (fromCar ?: consumedKwh(frames, capacityKwh))?.takeIf { plausible(it, distanceM) }
         return energy?.let { round2(it) }
+    }
+
+    /**
+     * The most kilometres this car can physically get from a kilowatt-hour over a real distance.
+     *
+     * Twelve. Measured drives sit at five to eight; a long downhill with regeneration can touch
+     * ten. Anything past this over more than [MIN_EFFICIENCY_DISTANCE_M] is not a frugal drive,
+     * it is an energy figure that missed most of the drive — a counter that did not tick, or a
+     * charge level that did not move — and it must not reach the rolling mean the screen shows.
+     */
+    const val MAX_PLAUSIBLE_KM_PER_KWH = 12.0
+
+    /**
+     * Whether [energyKwh] could really have carried the car [distanceM]. Unknown distance passes.
+     *
+     * Negative passes too: a long descent can put more back than it takes, and that is a real
+     * measurement — it is what stops such a drive being billed. Exactly zero over a real distance
+     * is the opposite case: the car cannot cover kilometres on nothing, so a zero means the
+     * counter did not tick and the charge level did not move, and nothing was measured at all.
+     */
+    fun plausible(energyKwh: Double, distanceM: Double?): Boolean {
+        if (distanceM == null || distanceM < MIN_EFFICIENCY_DISTANCE_M) return true
+        if (energyKwh < 0.0) return true
+        if (energyKwh == 0.0) return false
+        return distanceM / 1000.0 / energyKwh <= MAX_PLAUSIBLE_KM_PER_KWH
     }
 
     /**

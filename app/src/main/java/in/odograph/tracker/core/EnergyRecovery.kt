@@ -78,6 +78,9 @@ object EnergyRecovery {
         val distanceDelta = counterDelta(bracket.beforeKm, bracket.afterKm) ?: return null
         if (distanceKm < MIN_DISTANCE_KM || distanceDelta <= 0.0) return null
         if (abs(distanceDelta - distanceKm) / distanceKm > DISTANCE_TOLERANCE) return null
+        // The same physical ceiling the live path applies: a counter that barely moved across a
+        // real distance did not measure the drive.
+        if (!BatteryMath.plausible(energyDelta, distanceKm * 1000.0)) return null
 
         return BatteryMath.round2(energyDelta)
     }

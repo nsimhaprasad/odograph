@@ -417,4 +417,44 @@ class BatteryMathTest {
     fun `a single frame cannot say what a drive used`() {
         assertThat(BatteryMath.driveEnergyKwh(listOf(frame(0, 80.0, 10.0)), 52.9)).isNull()
     }
+
+    // ------------------------------------------------- the physical ceiling
+
+    /**
+     * Trip 435 on the real box: 13.8 km on a counter delta of 0.1 kWh, accepted because 0.1 is
+     * more than zero, filed at 138 km/kWh, and fed to the rolling mean the screen shows. The
+     * counter had ticked once between two sparse frames; it had not measured the drive.
+     */
+    @Test
+    fun `a counter that barely moved over a real distance is not a measurement`() {
+        val frames = listOf(frame(0, 70.0, 10.0), frame(1000, 70.0, 10.1))
+
+        // The charge level did not move either, so there is no honest figure at all.
+        assertThat(BatteryMath.driveEnergyKwh(frames, 52.9, distanceM = 13_800.0)).isNull()
+    }
+
+    @Test
+    fun `an implausible counter falls back to a plausible charge level`() {
+        // Counter says 0.1 kWh, the charge level says 2% of 52.9 = 1.06 kWh over 6 km: 5.7 km/kWh.
+        val frames = listOf(frame(0, 70.0, 10.0), frame(1000, 68.0, 10.1))
+
+        assertThat(BatteryMath.driveEnergyKwh(frames, 52.9, distanceM = 6_000.0)!!)
+            .isCloseTo(1.06, within(0.01))
+    }
+
+    /** A short errand cannot be judged this way; any energy over 300 m is a silly ratio. */
+    @Test
+    fun `the ceiling does not apply below the minimum distance`() {
+        val frames = listOf(frame(0, 70.0, 10.0), frame(1000, 70.0, 10.1))
+
+        assertThat(BatteryMath.driveEnergyKwh(frames, 52.9, distanceM = 300.0)!!)
+            .isCloseTo(0.1, within(0.001))
+    }
+
+    @Test
+    fun `without a distance nothing changes`() {
+        val frames = listOf(frame(0, 70.0, 10.0), frame(1000, 70.0, 10.1))
+
+        assertThat(BatteryMath.driveEnergyKwh(frames, 52.9)!!).isCloseTo(0.1, within(0.001))
+    }
 }

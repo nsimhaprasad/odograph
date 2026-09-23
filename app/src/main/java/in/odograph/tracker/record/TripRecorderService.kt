@@ -757,7 +757,7 @@ class TripRecorderService : Service() {
                         // car that does eight. Worse, that figure is fed back into the rolling
                         // window, so the range at full climbed through the drive: 431 km at the
                         // start, 447 twenty minutes later, while the car's own estimate fell.
-                        val energy = BatteryMath.driveEnergyKwh(samples, capacity)
+                        val energy = BatteryMath.driveEnergyKwh(samples, capacity, state.distanceM)
                         if (samples.isNotEmpty()) {
                             dao.setChargeSummary(tripId, samples.first().socPercent, soc, energy)
                         }
