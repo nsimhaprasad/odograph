@@ -368,58 +368,46 @@ private fun healthSection(ui: InsightsUi, palette: Palette, m: Metrics) {
     // every range, cost and efficiency figure in the app by the same proportion.
     ui.impliedPackKwh?.let { implied ->
         val off = (ui.capacityKwh - implied) / implied * 100.0
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(vertical = m.gap / 4),
-            horizontalArrangement = Arrangement.SpaceBetween
-        ) {
-            Text("THE CAR IMPLIES", color = palette.dim, fontSize = m.body)
-            Text(
-                text = "%.1f kWh".format(implied) +
-                    if (kotlin.math.abs(off) < 1.0) "  ·  matches yours"
-                    else "  ·  yours is %.1f%% %s".format(
-                        kotlin.math.abs(off), if (off > 0) "high" else "low"
-                    ),
-                color = if (kotlin.math.abs(off) < 3.0) palette.numeral else palette.warn,
-                fontSize = m.body
-            )
-        }
-    }
-    trend?.let {
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(vertical = m.gap / 4),
-            horizontalArrangement = Arrangement.SpaceBetween
-        ) {
-            Text("SINCE THE EARLIER HALF", color = palette.dim, fontSize = m.body)
-            Text(
-                text = when {
-                    kotlin.math.abs(it) < 1.0 -> "holding steady"
-                    it < 0 -> "%.1f%% down".format(-it)
-                    else -> "%.1f%% up — more readings needed".format(it)
-                },
-                color = when {
-                    kotlin.math.abs(it) < 1.0 -> palette.good
-                    it < -5.0 -> palette.warn
-                    else -> palette.numeral
-                },
-                fontSize = m.body
-            )
-        }
-    }
-    Row(
-        modifier = Modifier.fillMaxWidth().padding(vertical = m.gap / 4),
-        horizontalArrangement = Arrangement.SpaceBetween
-    ) {
-        Text("MEASURED AT FULL", color = palette.dim, fontSize = m.body)
-        Text(
-            text = "%.1f kWh of %.1f  ·  %.0f%%".format(
-                health.capacityKwh, ui.capacityKwh, health.sohPercent ?: 0.0
-            ),
-            // Scattered readings are quoted with a warning colour rather than silently, because a
-            // capacity that will not sit still is a reason to distrust the figure, not to round it.
-            color = if (health.consistent) palette.numeral else palette.caution,
-            fontSize = m.body
+        DetailRow(
+            "THE CAR IMPLIES",
+            "%.1f kWh".format(implied) +
+                if (kotlin.math.abs(off) < 1.0) "  ·  matches yours"
+                else "  ·  yours is %.1f%% %s".format(
+                    kotlin.math.abs(off), if (off > 0) "high" else "low"
+                ),
+            palette, m,
+            valueColor = if (kotlin.math.abs(off) < 3.0) palette.numeral else palette.warn,
+            valueWeight = FontWeight.Normal
         )
     }
+    trend?.let {
+        DetailRow(
+            "SINCE THE EARLIER HALF",
+            when {
+                kotlin.math.abs(it) < 1.0 -> "holding steady"
+                it < 0 -> "%.1f%% down".format(-it)
+                else -> "%.1f%% up — more readings needed".format(it)
+            },
+            palette, m,
+            valueColor = when {
+                kotlin.math.abs(it) < 1.0 -> palette.good
+                it < -5.0 -> palette.warn
+                else -> palette.numeral
+            },
+            valueWeight = FontWeight.Normal
+        )
+    }
+    // Scattered readings are quoted with a warning colour rather than silently, because a
+    // capacity that will not sit still is a reason to distrust the figure, not to round it.
+    DetailRow(
+        "MEASURED AT FULL",
+        "%.1f kWh of %.1f  ·  %.0f%%".format(
+            health.capacityKwh, ui.capacityKwh, health.sohPercent ?: 0.0
+        ),
+        palette, m,
+        valueColor = if (health.consistent) palette.numeral else palette.caution,
+        valueWeight = FontWeight.Normal
+    )
     Text(
         text = if (health.consistent) {
             "from %d readings near full".format(health.readings)
@@ -449,20 +437,16 @@ private fun accuracySection(ui: InsightsUi, palette: Palette, m: Metrics) {
         letterSpacing = 2.2.sp,
         modifier = Modifier.padding(top = m.gap, bottom = m.gap / 2)
     )
-    Row(
-        modifier = Modifier.fillMaxWidth().padding(vertical = m.gap / 4),
-        horizontalArrangement = Arrangement.SpaceBetween
-    ) {
-        Text("BIAS", color = palette.dim, fontSize = m.body)
-        Text(
-            text = if (accuracy.medianErrorPercent > 0)
-                "%.0f%% optimistic".format(accuracy.medianErrorPercent)
-            else "%.0f%% cautious".format(-accuracy.medianErrorPercent),
-            color = if (kotlin.math.abs(accuracy.medianErrorPercent) < 10) palette.good
-            else palette.caution,
-            fontSize = m.body
-        )
-    }
+    DetailRow(
+        "BIAS",
+        if (accuracy.medianErrorPercent > 0)
+            "%.0f%% optimistic".format(accuracy.medianErrorPercent)
+        else "%.0f%% cautious".format(-accuracy.medianErrorPercent),
+        palette, m,
+        valueColor = if (kotlin.math.abs(accuracy.medianErrorPercent) < 10) palette.good
+        else palette.caution,
+        valueWeight = FontWeight.Normal
+    )
     Text(
         text = "typical miss %.0f%% over %d drives, corrected automatically".format(
             accuracy.typicalMissPercent, accuracy.scored
@@ -496,37 +480,29 @@ private fun boundarySection(ui: InsightsUi, palette: Palette, m: Metrics) {
         letterSpacing = 2.2.sp,
         modifier = Modifier.padding(top = m.gap, bottom = m.gap / 2)
     )
-    Row(
-        modifier = Modifier.fillMaxWidth().padding(vertical = m.gap / 4),
-        horizontalArrangement = Arrangement.SpaceBetween
-    ) {
-        Text("THE CAR AGREED", color = palette.dim, fontSize = m.body)
-        Text(
-            text = t.agreementPercent?.let {
-                "%.0f%% of %d drives".format(it, t.answered)
-            } ?: "not yet — the car has said nothing",
-            color = when {
-                t.agreementPercent == null -> palette.dim
-                t.agreementPercent!! >= 90.0 -> palette.good
-                else -> palette.caution
-            },
-            fontSize = m.body
-        )
-    }
+    val agreed = t.agreementPercent
+    DetailRow(
+        "THE CAR AGREED",
+        agreed?.let { "%.0f%% of %d drives".format(it, t.answered) }
+            ?: "not yet — the car has said nothing",
+        palette, m,
+        valueColor = when {
+            agreed == null -> palette.dim
+            agreed >= 90.0 -> palette.good
+            else -> palette.caution
+        },
+        valueWeight = FontWeight.Normal
+    )
     // The split count is the actionable half: those are drives the app ran together that the car
     // considered separate, which is the shape of a boundary set too loose.
     if (t.carSplit > 0) {
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(vertical = m.gap / 4),
-            horizontalArrangement = Arrangement.SpaceBetween
-        ) {
-            Text("THE CAR SPLIT", color = palette.dim, fontSize = m.body)
-            Text(
-                text = "%d drive%s".format(t.carSplit, if (t.carSplit == 1) "" else "s"),
-                color = palette.caution,
-                fontSize = m.body
-            )
-        }
+        DetailRow(
+            "THE CAR SPLIT",
+            "%d drive%s".format(t.carSplit, if (t.carSplit == 1) "" else "s"),
+            palette, m,
+            valueColor = palette.caution,
+            valueWeight = FontWeight.Normal
+        )
     }
     Text(
         text = "%d drive%s had no telematics link, so the car could not say".format(

@@ -686,36 +686,4 @@ private fun TripDetailPane(
 private fun coords(lat: Double?, lon: Double?): String =
     if (lat != null && lon != null) "%.4f, %.4f".format(lat, lon) else "—"
 
-@Composable
-private fun SectionLabel(title: String, palette: Palette, m: Metrics) {
-    Text(
-        text = title,
-        color = palette.label,
-        fontSize = m.label,
-        letterSpacing = 2.2.sp,
-        modifier = Modifier.padding(top = m.gap, bottom = m.gap / 3)
-    )
-}
-
-@Composable
-private fun DetailRow(
-    label: String,
-    value: String,
-    palette: Palette,
-    m: Metrics,
-    valueColor: androidx.compose.ui.graphics.Color? = null
-) {
-    Row(
-        Modifier.fillMaxWidth().padding(vertical = m.gap / 4),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = androidx.compose.ui.Alignment.CenterVertically
-    ) {
-        Text(label, color = palette.dim, fontSize = m.body)
-        Text(
-            value,
-            color = valueColor ?: palette.numeral,
-            fontSize = m.body,
-            fontWeight = FontWeight.Medium
-        )
-    }
-}
+// SectionLabel and DetailRow live in Widgets.kt: Insights draws the same rows.

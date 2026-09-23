@@ -7,10 +7,12 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
@@ -121,4 +123,42 @@ fun Chip(text: String, selected: Boolean, palette: Palette, m: Metrics, onClick:
             .clickable(onClick = onClick)
             .padding(horizontal = m.chipPadH, vertical = m.chipPadV)
     )
+}
+
+/** A spaced, letter-spaced heading over a group of rows. */
+@Composable
+fun SectionLabel(title: String, palette: Palette, m: Metrics, bottomFraction: Float = 1f / 3f) {
+    Text(
+        text = title,
+        color = palette.label,
+        fontSize = m.label,
+        letterSpacing = 2.2.sp,
+        modifier = Modifier.padding(top = m.gap, bottom = m.gap * bottomFraction)
+    )
+}
+
+/**
+ * One fact: a dim label on the left, its value on the right.
+ *
+ * Shared because the same row was written out by hand in two screens — once as a private
+ * composable here, and six more times inline in Insights. [valueWeight] exists so the Insights
+ * rows, which were regular weight, stay exactly as they were.
+ */
+@Composable
+fun DetailRow(
+    label: String,
+    value: String,
+    palette: Palette,
+    m: Metrics,
+    valueColor: Color? = null,
+    valueWeight: FontWeight = FontWeight.Medium
+) {
+    Row(
+        Modifier.fillMaxWidth().padding(vertical = m.gap / 4),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(label, color = palette.dim, fontSize = m.body)
+        Text(value, color = valueColor ?: palette.numeral, fontSize = m.body, fontWeight = valueWeight)
+    }
 }
