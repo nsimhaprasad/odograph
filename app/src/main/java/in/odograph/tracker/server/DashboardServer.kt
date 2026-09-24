@@ -333,6 +333,15 @@ object DashboardServer {
                     post("/config") {
                         val params = call.receiveParameters()
                         params["webhook"]?.let { settings.webhookUrl = it }
+                        // Forget what has been sent, so the next backup sends the whole history
+                        // again. For a workbook whose tabs were rebuilt: the receiving script
+                        // upserts by key, so re-sending into clean tabs is safe and complete.
+                        if (params["resend"] == "1") {
+                            settings.lastDocsTripId = 0
+                            settings.lastDocsChargeId = 0
+                            settings.lastDocsBatteryId = 0
+                            settings.lastDocsDay = 0
+                        }
                         params["hours"]?.toIntOrNull()?.let { settings.docsSyncHours = it }
                         params["device"]?.let { if (it.isNotBlank()) settings.deviceId = it }
                         params["capacity"]?.toDoubleOrNull()?.let { settings.batteryCapacityKwh = it }

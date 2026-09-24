@@ -42,6 +42,7 @@ import `in`.odograph.tracker.core.TripRepair
 import `in`.odograph.tracker.core.Telematics
 import `in`.odograph.tracker.core.BatteryFrame
 import `in`.odograph.tracker.core.EnergyRecovery
+import `in`.odograph.tracker.core.FixWindow
 import `in`.odograph.tracker.data.toSample
 import `in`.odograph.tracker.core.TelematicsSchedule
 import io.windsor.telematics.TelematicsClient
@@ -227,7 +228,7 @@ class TripRecorderService : Service() {
          * Bumped when a new correction is added, which reruns the pass over drives an earlier
          * revision already visited.
          */
-        private const val REPAIR_REVISION = 3
+        private const val REPAIR_REVISION = 4
 
         /** No trip is open. Battery frames recorded under it are parked readings, not a drive. */
         const val NO_TRIP = -1L
@@ -507,10 +508,15 @@ class TripRecorderService : Service() {
                 // Energies the car cannot have produced, written before the ceiling existed.
                 // Cleared rather than corrected: the sweep reckons them from the distance next.
                 val cleared = runCatching { TripRepair.repairImplausibleEnergies(dao) }.getOrNull()
-                if (outcome != null && stitched != null && cleared != null) {
+                // Drives begun from the location source's stale cached fix — a start months
+                // before the drive, and a trip timer that read 7508:59.
+                val reanchored = runCatching { TripRepair.repairStaleStarts(dao) }.getOrNull()
+                if (outcome != null && stitched != null && cleared != null && reanchored != null) {
                     settings.repairRevision = REPAIR_REVISION
                     Diagnostics.crumb(
-                        "repair: cleared ${cleared.cleared} impossible energies of ${cleared.examined}; " +
+                        "repair: re-anchored ${reanchored.reanchored} drives begun from a stale fix " +
+                            "(worst %.0f days); ".format(reanchored.worstDays) +
+                            "cleared ${cleared.cleared} impossible energies of ${cleared.examined}; " +
                             "examined ${outcome.examined} drives, corrected ${outcome.corrected}" +
                             (if (outcome.corrected > 0)
                                 ", worst was %.0f km/h".format(outcome.worstBeforeMps * 3.6f)
@@ -1125,7 +1131,15 @@ class TripRecorderService : Service() {
                     maxOf(cur.maxSpeedMps, speedMps).also { lastAcceptedSpeedMps = speedMps }
                 else -> cur.maxSpeedMps
             },
-            movingS = if (moving && speedMps > 0.5f) cur.movingS + 1 else if (moving) cur.movingS else 0,
+            // Real elapsed time between fixes, not one second per fix: the receiver delivers up
+            // to five fixes a second, and counting each as a second made MOVING run five times
+            // fast. The stored trip already measures this from the points; the live figure now
+            // agrees with it.
+            movingS = when {
+                !moving -> 0
+                speedMps > 0.5f -> cur.movingS + secondsSinceLastFix(fix).toLong().coerceIn(0L, 10L)
+                else -> cur.movingS
+            },
             elevGainM = if (moving) track.elevGainM else 0.0,
             elevLossM = if (moving) track.elevLossM else 0.0,
             tripId = tripId,
@@ -1147,8 +1161,12 @@ class TripRecorderService : Service() {
             // No trip yet, so nothing to write these against. They are held instead, and the
             // window is rebuilt into the track each time so a car standing still under GPS jitter
             // accumulates at most a minute of wander rather than a whole night of it.
-            pendingFixes.addLast(fix)
-            while (pendingFixes.size > MAX_PENDING_FIXES) pendingFixes.removeFirst()
+            // Time-bounded, not just count-bounded: the oldest held fix becomes the drive's
+            // start, and the location source's cached "last known" position — months old on a
+            // box with no SIM — used to arrive first and sit there. See FixWindow.
+            val window = FixWindow.admit(pendingFixes.toList(), fix)
+            pendingFixes.clear()
+            pendingFixes.addAll(window)
             track = LiveTrack().also { t -> pendingFixes.forEach(t::add) }
 
             if (departed()) {

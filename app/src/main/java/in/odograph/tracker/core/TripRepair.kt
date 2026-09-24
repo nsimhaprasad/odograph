@@ -203,4 +203,68 @@ object TripRepair {
         }
         return Cleared(examined, cleared)
     }
+
+    /** What re-anchoring drives that began from a stale fix did. */
+    data class Reanchored(val examined: Int, val reanchored: Int, val worstDays: Double)
+
+    /**
+     * A leading gap this long or longer means the first point was never part of the drive.
+     *
+     * An hour. A car does not sit at its origin for an hour with the recorder running and then
+     * set off as the same drive — the arrival rule would have closed it long before. So a first
+     * point that far ahead of the second is the location source's cached position, and the drive
+     * actually began at the second.
+     */
+    const val STALE_START_GAP_MS = 60 * 60_000L
+
+    /**
+     * Re-derives drives whose start is a stale cached fix.
+     *
+     * The location source used to hand over the system's "last known" position as a real fix.
+     * A network fix is stamped with the system clock, and on a box with no SIM that clock can be
+     * sitting at the Android image's build date at boot — so the cached fix carried a date from
+     * before the car existed. It became the origin of the next drive, and the drive was stored
+     * with a duration of three hundred and thirteen days — which also made its average speed
+     * nothing and its start date a lie in every list it appears in.
+     *
+     * The stale points are removed, the drive's start moves to its first real fix, and every
+     * figure derived from the track is worked out again from what remains. Nothing else about
+     * the drive changes: energy, cost and places were never a function of the stale point.
+     */
+    fun repairStaleStarts(dao: OdographDao): Reanchored {
+        var examined = 0
+        var reanchored = 0
+        var worstDays = 0.0
+        for (trip in dao.closedTrips()) {
+            val points = dao.pointsFor(trip.id)
+            if (points.size < 2) continue
+            examined++
+
+            // Walk forward past every point that is followed by a gap of an hour or more.
+            var firstReal = 0
+            while (firstReal < points.lastIndex &&
+                points[firstReal + 1].t - points[firstReal].t >= STALE_START_GAP_MS
+            ) firstReal++
+            if (firstReal == 0) continue
+
+            val stale = points[firstReal].t - points[0].t
+            if (stale / 86_400_000.0 > worstDays) worstDays = stale / 86_400_000.0
+
+            val kept = points.drop(firstReal)
+            val fixes = kept.map {
+                Fix(it.t, it.lat, it.lon, it.speedMps, it.accuracyM, it.interpolated, it.altitudeM)
+            }
+            val stats = TripStats.compute(fixes)
+            dao.deletePointsBefore(trip.id, kept.first().t)
+            dao.setStartedAt(trip.id, kept.first().t)
+            dao.finishTrip(
+                trip.id, kept.last().t, stats.distanceM, stats.durationS,
+                stats.movingS, stats.maxSpeedMps, stats.avgSpeedMps, stats.slowestKmSpeedMps,
+                stats.elevGainM, stats.elevLossM
+            )
+            dao.setOrigin(trip.id, kept.first().lat, kept.first().lon)
+            reanchored++
+        }
+        return Reanchored(examined, reanchored, worstDays)
+    }
 }

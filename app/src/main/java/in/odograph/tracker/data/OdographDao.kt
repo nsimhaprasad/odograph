@@ -118,6 +118,10 @@ interface OdographDao {
     @Query("UPDATE trips SET energyKwh = NULL, costInr = NULL, energySource = NULL WHERE id = :id")
     fun clearEnergy(id: Long)
 
+    /** Drops a drive's points from before [beforeMs]: the stale cached fix a drive was wrongly begun from. */
+    @Query("DELETE FROM points WHERE tripId = :tripId AND t < :beforeMs")
+    fun deletePointsBefore(tripId: Long, beforeMs: Long)
+
     /** Every instrumented trip's energy, newest first, for rolling efficiency. */
     /**
      * Recent instrumented drives, newest first, for the rolling efficiency figure.

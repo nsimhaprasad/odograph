@@ -195,7 +195,7 @@ function indexByFirstColumn(sheet) {
  */
 function upsertRows(sheet, header, rows, keyCol) {
   if (rows.length === 0) return;
-  ensureHeader(sheet, header);
+  sheet = ensureHeader(sheet, header);
   var existing = indexByFirstColumn(sheet);
   var fresh = [];
   rows.forEach(function (row) {
@@ -236,7 +236,7 @@ function batteryRow(b) {
 /** Append a trip's points once, and once only. */
 function appendNewPoints(sheet, header, rows) {
   if (rows.length === 0) return;
-  ensureHeader(sheet, header);
+  sheet = ensureHeader(sheet, header);
   var present = indexByFirstColumn(sheet);
   var fresh = rows.filter(function (row) { return !(String(row[0]) in present); });
   if (fresh.length) {
@@ -244,10 +244,36 @@ function appendNewPoints(sheet, header, rows) {
   }
 }
 
+/**
+ * Makes sure row 1 is this header, and that the rows under it are in this layout.
+ *
+ * The old check was `join('|').length`, and an empty row of twenty-nine cells joins to
+ * twenty-eight pipe characters — never zero — so no tab ever received a header, and a tab that
+ * already held rows in an older layout quietly took new rows in the new one underneath them.
+ * A workbook like that cannot be restored from, because the reader finds no column names.
+ *
+ * Three cases now: an empty tab gets the header; a tab whose row 1 is this header is fine; a
+ * tab holding anything else is renamed aside, untouched, and a clean tab takes its name. Nothing
+ * is ever deleted — the old rows stay readable under the old name.
+ */
 function ensureHeader(sheet, header) {
-  if (!sheet.getRange(1, 1, 1, header.length).getValues()[0].join('|').length) {
+  var first = sheet.getLastRow() === 0 ? [] : sheet.getRange(1, 1, 1, header.length).getValues()[0];
+  var empty = first.every(function (v) { return v === '' || v === null; });
+  if (empty) {
     sheet.getRange(1, 1, 1, header.length).setValues([header]);
+    return sheet;
   }
+  var matches = first.length === header.length &&
+    first.every(function (v, i) { return String(v) === header[i]; });
+  if (matches) return sheet;
+  var ss = sheet.getParent();
+  var name = sheet.getName();
+  var n = 1;
+  while (ss.getSheetByName(name + ' (old ' + n + ')')) n++;
+  sheet.setName(name + ' (old ' + n + ')');
+  var fresh = ss.insertSheet(name);
+  fresh.getRange(1, 1, 1, header.length).setValues([header]);
+  return fresh;
 }
 
 function tripRow(t) {
