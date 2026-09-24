@@ -228,7 +228,7 @@ class TripRecorderService : Service() {
          * Bumped when a new correction is added, which reruns the pass over drives an earlier
          * revision already visited.
          */
-        private const val REPAIR_REVISION = 4
+        private const val REPAIR_REVISION = 5
 
         /** No trip is open. Battery frames recorded under it are parked readings, not a drive. */
         const val NO_TRIP = -1L
@@ -511,9 +511,13 @@ class TripRecorderService : Service() {
                 // Drives begun from the location source's stale cached fix — a start months
                 // before the drive, and a trip timer that read 7508:59.
                 val reanchored = runCatching { TripRepair.repairStaleStarts(dao) }.getOrNull()
-                if (outcome != null && stitched != null && cleared != null && reanchored != null) {
+                // A fill booked twice: once watched by the ledger, once reconstructed from the
+                // charge level by a reconciler that ran on the frame that had just closed it.
+                val deduped = runCatching { TripRepair.repairDuplicateReconstructions(dao) }.getOrNull()
+                if (outcome != null && stitched != null && cleared != null && reanchored != null && deduped != null) {
                     settings.repairRevision = REPAIR_REVISION
                     Diagnostics.crumb(
+                        "repair: removed ${deduped.removed} duplicate reconstructed fills; " +
                         "repair: re-anchored ${reanchored.reanchored} drives begun from a stale fix " +
                             "(worst %.0f days); ".format(reanchored.worstDays) +
                             "cleared ${cleared.cleared} impossible energies of ${cleared.examined}; " +

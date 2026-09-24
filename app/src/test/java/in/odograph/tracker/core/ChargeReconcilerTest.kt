@@ -199,4 +199,41 @@ class ChargeReconcilerTest {
 
         assertThat(action).isInstanceOf(ChargeReconciler.Action.Record::class.java)
     }
+
+    /**
+     * The real case. The box died on plugging in at 65%, and at the next boot the first frame said
+     * 100%, not charging. The ledger closed the watched session at 100 on that frame; then this
+     * ran on the same frame with a last-known reading of 65, and booked 65→100 a second time
+     * "from charge level". One overnight charge, two rows.
+     */
+    @Test
+    fun `a session the ledger closed on this very frame is not booked again`() {
+        val pluggedIn = 1_000_000L
+        val nextBoot = pluggedIn + 12 * 3_600_000L
+        val closedJustNow = session(8, 100.0, nextBoot, false)
+
+        val action = ChargeReconciler.reconcile(
+            lastKnown = reading(65.0, pluggedIn),
+            latest = reading(100.0, nextBoot),
+            lastSession = closedJustNow
+        )
+
+        assertThat(action).isEqualTo(ChargeReconciler.Action.Nothing)
+    }
+
+    /** The extend case must survive: a session that ended *before* the last reading still extends. */
+    @Test
+    fun `a session that ended before the last reading is still extended, not ignored`() {
+        val died = 1_000_000L
+        val nextBoot = died + 12 * 3_600_000L
+        val closedWhenTheBoxDied = session(8, 67.0, died - 1_000L, false)
+
+        val action = ChargeReconciler.reconcile(
+            lastKnown = reading(67.0, died),
+            latest = reading(100.0, nextBoot),
+            lastSession = closedWhenTheBoxDied
+        )
+
+        assertThat(action).isInstanceOf(ChargeReconciler.Action.Extend::class.java)
+    }
 }

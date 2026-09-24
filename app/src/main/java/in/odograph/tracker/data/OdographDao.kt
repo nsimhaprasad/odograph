@@ -275,6 +275,10 @@ interface OdographDao {
     @Query("SELECT * FROM charge_events ORDER BY startTime ASC")
     fun allChargeEvents(): List<ChargeEventEntity>
 
+    /** Removes one session. For the repair pass, which deletes a reconstruction that duplicates a watched fill. */
+    @Query("DELETE FROM charge_events WHERE id = :id")
+    fun deleteChargeEvent(id: Long)
+
     // ---- keeping the ledger honest against the state of charge ----
 
     /**

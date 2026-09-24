@@ -98,6 +98,17 @@ object ChargeReconciler {
         // exactly what ChargeLedger does with them. Stepping in would double-book the same energy.
         if (lastSession != null && lastSession.open) return Action.Nothing
 
+        // The ledger has already carried the pack to where it is now. Its most recent session
+        // ended *after* the reading being compared against, at the level the car reports — which
+        // is what happens when the ledger closes a session on this very frame, a moment before
+        // this runs. Booking the rise again would be a second row for one fill: on the real box
+        // a 65→100 overnight charge appeared twice, once watched and once "from charge level".
+        val accounted = lastSession != null && !lastSession.open &&
+            lastSession.endSoc != null &&
+            lastSession.endedAt > lastKnown.at &&
+            kotlin.math.abs(lastSession.endSoc - latest.socPercent) <= NOISE_PERCENT
+        if (accounted) return Action.Nothing
+
         // The pack picked up where the last session left off, and nothing was driven in between:
         // the plug was never pulled, so this is that same fill continuing past the last frame.
         val continues = lastSession != null &&

@@ -267,4 +267,42 @@ object TripRepair {
         }
         return Reanchored(examined, reanchored, worstDays)
     }
+
+    /** What removing double-booked fills did. */
+    data class Deduped(val examined: Int, val removed: Int)
+
+    /** How close two sessions' ends must be, in time, to be the same fill. */
+    const val SAME_FILL_END_MS = 60_000L
+
+    /**
+     * Removes reconstructed fills that duplicate a watched one.
+     *
+     * The ledger closed a watched session on a frame, and the reconciler then ran on the same
+     * frame, found a session that ended at 100 against a last-known reading of 65, and booked the
+     * rise again "from charge level". Two rows for one overnight charge, both 65→100, ending at
+     * the same instant. The reconciler no longer does this; these are the rows it left behind.
+     *
+     * Only a *reconstructed* row is ever removed, and only when a *watched* one ends within a
+     * minute of it at the same level. A watched session is evidence the box saw with its own
+     * eyes; a reconstruction is an inference, and the inference loses.
+     */
+    fun repairDuplicateReconstructions(dao: OdographDao): Deduped {
+        val all = dao.allChargeEvents()
+        val watched = all.filter { !it.reconstructed && it.endTime != null && it.endSoc != null }
+        var examined = 0
+        var removed = 0
+        for (r in all) {
+            if (!r.reconstructed || r.endTime == null || r.endSoc == null) continue
+            examined++
+            val twin = watched.any { w ->
+                kotlin.math.abs(w.endTime!! - r.endTime) <= SAME_FILL_END_MS &&
+                    kotlin.math.abs(w.endSoc!! - r.endSoc) <= ChargeReconciler.NOISE_PERCENT
+            }
+            if (twin) {
+                dao.deleteChargeEvent(r.id)
+                removed++
+            }
+        }
+        return Deduped(examined, removed)
+    }
 }
