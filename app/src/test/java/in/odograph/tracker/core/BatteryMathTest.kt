@@ -457,4 +457,38 @@ class BatteryMathTest {
 
         assertThat(BatteryMath.driveEnergyKwh(frames, 52.9)!!).isCloseTo(0.1, within(0.001))
     }
+
+    // ------------------------------------------------- a frame that says the battery filled itself
+
+    /**
+     * The real case: a frame reporting 100% partway through a drive at 63%. For as long as it
+     * stood, the range at the current charge equalled the range at full on the driving screen.
+     */
+    @Test
+    fun `a charge level that jumps up while driving is not believed`() {
+        assertThat(BatteryMath.plausibleLiveSoc(reported = 100.0, previous = 63.0, charging = false))
+            .isEqualTo(63.0)
+    }
+
+    @Test
+    fun `an ordinary fall while driving is believed`() {
+        assertThat(BatteryMath.plausibleLiveSoc(62.0, 63.0, false)).isEqualTo(62.0)
+    }
+
+    /** Regeneration on a descent is real, and small. */
+    @Test
+    fun `a small rise while driving is believed`() {
+        assertThat(BatteryMath.plausibleLiveSoc(65.0, 63.0, false)).isEqualTo(65.0)
+    }
+
+    @Test
+    fun `while charging any rise is believed`() {
+        assertThat(BatteryMath.plausibleLiveSoc(100.0, 63.0, charging = true)).isEqualTo(100.0)
+    }
+
+    @Test
+    fun `with nothing to compare against the frame stands`() {
+        assertThat(BatteryMath.plausibleLiveSoc(100.0, null, false)).isEqualTo(100.0)
+        assertThat(BatteryMath.plausibleLiveSoc(null, 63.0, false)).isNull()
+    }
 }

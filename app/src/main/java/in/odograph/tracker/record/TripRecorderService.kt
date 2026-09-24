@@ -753,8 +753,13 @@ class TripRecorderService : Service() {
                 checkOdoRecordDue(dao, settings)
 
                 // Per-trip energy and the live efficiency readouts the drive screen shows.
-                val soc = ch?.soc
-                if (soc != null) {
+                // Not the frame's word alone. A frame that says the pack filled itself while
+                // driving is recorded above as evidence, but the readout, the trip's charge
+                // summary and every range figure carry on from the previous level instead.
+                val soc = BatteryMath.plausibleLiveSoc(
+                    ch?.soc, socBeforeThisFrame?.socPercent, ch?.isCharging
+                )
+                if (soc != null && ch != null) {
                     val state = _state.value
                     if (tripId >= 0) {
                         val samples = dao.batteryRangeFor(tripId)

@@ -198,6 +198,28 @@ object BatteryMath {
     const val MAX_PLAUSIBLE_KM_PER_KWH = 12.0
 
     /**
+     * The most the charge level may rise between two frames while the car is not charging.
+     *
+     * Five percent. Regeneration on a long descent puts a percent or two back over several
+     * minutes, and frames arrive at least thirty seconds apart, so anything more is not the pack
+     * — it is the frame. One such frame said 100% in the middle of a drive at 63%, and for as
+     * long as it stood the range at the current charge equalled the range at full.
+     */
+    const val MAX_SOC_RISE_WHILE_DRIVING = 5.0
+
+    /**
+     * The charge level to show live: [reported], unless it has jumped up while driving.
+     *
+     * A frame that says the battery filled itself is kept on disk — it is evidence — but the
+     * readout carries on from [previous] instead. Charging passes untouched: a rising level is
+     * the whole point of it. With nothing to compare against, [reported] stands.
+     */
+    fun plausibleLiveSoc(reported: Double?, previous: Double?, charging: Boolean?): Double? {
+        if (reported == null || previous == null || charging == true) return reported
+        return if (reported - previous > MAX_SOC_RISE_WHILE_DRIVING) previous else reported
+    }
+
+    /**
      * Whether [energyKwh] could really have carried the car [distanceM]. Unknown distance passes.
      *
      * Negative passes too: a long descent can put more back than it takes, and that is a real
