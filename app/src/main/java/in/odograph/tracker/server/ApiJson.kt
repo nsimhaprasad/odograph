@@ -110,6 +110,10 @@ object ApiJson {
             append(kv("id", e.id.toString())).append(",")
             append(kv("startTime", e.startTime.toString())).append(",")
             append(kv("endTime", e.endTime?.toString() ?: "null")).append(",")
+            // The two ends of the fill. Without them a reader cannot do the one check that
+            // matters most — kilometres driven per charge cycle — from the API alone.
+            append(kv("startSoc", numOrNull(e.startSoc))).append(",")
+            append(kv("endSoc", numOrNull(e.endSoc))).append(",")
             append(kv("energyKwh", num(e.energyKwh))).append(",")
             append(kv("deliveredKwh", numOrNull(e.deliveredKwh))).append(",")
             append(kv("lossPct", numOrNull(BatteryMath.lossPct(e.energyKwh, e.deliveredKwh)))).append(",")

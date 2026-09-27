@@ -18,6 +18,47 @@
  *   - Editing the Control tab and importing (box "Import now", or any visit of /import) pushes
  *     rates and capacity back to the box.
  */
+/**
+ * Bumped with every change to this file. The box's export reports it, so "which script is
+ * actually deployed" is one GET away instead of an inference from how the tabs look — a tab that
+ * stays headerless after a redeploy means the redeploy did not take, and this says so directly.
+ */
+var SCRIPT_VERSION = 3;
+
+/** Every tab this script owns, with the header it expects. Used by the export's self-check. */
+var TAB_HEADERS = {
+  Trips: ['id','start','end','km','duration_s','moving_s','max_kmh','avg_kmh',
+    'slowest_kmh','start_lat','start_lon','end_lat','end_lon','soc_start','soc_end',
+    'energy_kwh','cost_inr','climb_m','descent_m',
+    'avg_temp_c','climate_share','car_energy_kwh','car_distance_km','cluster_id',
+    'start_place_id','end_place_id',
+    'estimated_energy_kwh','estimated_cost_inr','energy_source'],
+  Points: ['trip_id','t_ms','lat','lon','speed_mps','altitude_m','interpolated'],
+  Charges: ['id','start','end','start_soc','end_soc','energy_kwh','peak_kw','kind','cost_inr',
+    'delivered_kwh','place_id','samples_total','samples_above','reconstructed',
+    'entered_rate_inr','entered_bill_inr','gst_rate_pct'],
+  Telemetry: ['day','first_poll_ms','last_poll_ms'],
+  Places: ['id','lat','lon','visits','label','auto_name','geocoded_at'],
+  Battery: ['id','trip_id','t_ms','soc_pct','charging','range_km','charge_kw',
+    'odometer_km','battery_kwh','exterior_temp_c',
+    'working_v','working_a','charge_remaining_min','dist_since_charge_km','power_since_charge_kwh',
+    'climate_on','interior_temp_c','charging_type','plugged_in','car_capacity_kwh','aux_v',
+    'car_journey_id','car_journey_dist_raw','engine_status_raw','power_mode_raw','handbrake',
+    'tyre_fl_psi','tyre_fr_psi','tyre_rl_psi','tyre_rr_psi',
+    'car_gps_sats','car_gps_status','car_speed_kmh','charger_id','charger_supplier',
+    'last_charge_end_kwh','static_drain_raw','charge_elapsed_s','day_dist_raw','day_power_raw']
+};
+
+/** Whether a tab's first row is the header this script writes. Null when the tab is absent. */
+function tabHeaded(ss, name) {
+  var sheet = ss.getSheetByName(name);
+  if (!sheet) return null;
+  var header = TAB_HEADERS[name];
+  if (sheet.getLastRow() === 0) return true;
+  var first = sheet.getRange(1, 1, 1, header.length).getValues()[0];
+  return first.every(function (v, i) { return String(v) === header[i]; });
+}
+
 function doPost(e) {
   try {
     var body = JSON.parse(e.postData.contents);
@@ -132,9 +173,13 @@ function doGet(e) {
     // The whole sheet, for restoring a box that has lost its database. Behind a parameter so the
     // ordinary control read stays small and cheap — this one can be megabytes.
     if (e && e.parameter && e.parameter.export === 'all') {
+      var headed = {};
+      Object.keys(TAB_HEADERS).forEach(function (n) { headed[n] = tabHeaded(ss, n); });
       return json({
         kind: 'odograph-backup',
         schema: writtenSchema(),
+        scriptVersion: SCRIPT_VERSION,
+        headed: headed,
         exportedAt: new Date().getTime(),
         trips: readTab(ss, 'Trips'),
         points: readTab(ss, 'Points'),
@@ -146,7 +191,7 @@ function doGet(e) {
     }
 
     var control = ss.getSheetByName('Control');
-    var out = {};
+    var out = { scriptVersion: SCRIPT_VERSION };
     if (control) {
       var v = control.getDataRange().getValues();
       for (var i = 0; i < v.length; i++) {
