@@ -1,7 +1,9 @@
 package `in`.odograph.tracker.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
@@ -19,7 +21,9 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -36,6 +40,8 @@ import `in`.odograph.tracker.core.EfficiencyStats
 import `in`.odograph.tracker.core.BatteryMath
 import `in`.odograph.tracker.data.OdographDb
 import `in`.odograph.tracker.data.toSample
+import `in`.odograph.tracker.record.TripRecorderService
+import `in`.odograph.tracker.record.TripRecovery
 import `in`.odograph.tracker.data.TRIP_PAGE_SIZE
 import `in`.odograph.tracker.data.TripEntity
 import `in`.odograph.tracker.ui.map.BareRouteTrace
@@ -43,6 +49,7 @@ import `in`.odograph.tracker.ui.map.RouteMap
 import `in`.odograph.tracker.ui.theme.Palette
 import `in`.odograph.tracker.ui.theme.Settings
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -105,6 +112,12 @@ fun TripListScreen(showTiles: Boolean, palette: Palette) {
     var collapsed by remember { mutableStateOf<Set<String>>(emptySet()) }
     var view by remember { mutableStateOf(TripView.DETAILS) }
     var detail by remember { mutableStateOf<TripDetail?>(null) }
+    // Drives picked by long-press, for joining. Two at most is the useful number; a set because
+    // the second long-press on a chosen drive un-chooses it.
+    var chosen by remember { mutableStateOf<Set<Long>>(emptySet()) }
+    var merging by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+    val live by TripRecorderService.state.collectAsState()
 
     // The box has no SIM and therefore no NITZ, so its own timezone may be UTC. Render against
     // the configured zone rather than trusting the device.
@@ -327,8 +340,18 @@ fun TripListScreen(showTiles: Boolean, palette: Palette) {
                             }
                         }
                         is TripRowItem.Drive -> TripRow(
-                            item.trip, item.trip.id == selected?.id, palette, m, fmt
-                        ) { selected = item.trip }
+                            item.trip, item.trip.id == selected?.id, item.trip.id in chosen,
+                            palette, m, fmt,
+                            onClick = { selected = item.trip },
+                            onLongClick = {
+                                val id = item.trip.id
+                                chosen = when {
+                                    id in chosen -> chosen - id
+                                    chosen.size >= 2 -> setOf(id)
+                                    else -> chosen + id
+                                }
+                            }
+                        )
                     }
                 }
             }
@@ -342,6 +365,38 @@ fun TripListScreen(showTiles: Boolean, palette: Palette) {
             ) {
                 Chip("MAP", view == TripView.MAP, palette, m) { view = TripView.MAP }
                 Chip("DETAILS", view == TripView.DETAILS, palette, m) { view = TripView.DETAILS }
+                // The driver's own end to the drive. The arrival rule needs twelve minutes of
+                // stillness; a driver who knows they have arrived does not.
+                if (live.tripId >= 0) {
+                    Chip("END TRIP", false, palette, m) { TripRecorderService.requestTripEnd() }
+                }
+                // Two drives long-pressed become one, closed again from the combined track.
+                if (chosen.size == 2) {
+                    Chip(if (merging) "JOINING…" else "JOIN 2 DRIVES", merging, palette, m) {
+                        if (merging) return@Chip
+                        merging = true
+                        val (a, b) = chosen.toList()
+                        scope.launch {
+                            withContext(Dispatchers.IO) {
+                                runCatching {
+                                    TripRecovery.mergeTrips(
+                                        OdographDb.get(ctx).dao(), a, b, Settings(ctx).batteryCapacityKwh
+                                    )
+                                }
+                            }
+                            chosen = emptySet()
+                            selected = null
+                            trips = emptyList()
+                            loadedPages = 0
+                            allLoaded = false
+                            loadNextPage()
+                            merging = false
+                        }
+                    }
+                }
+                if (chosen.isNotEmpty() && !merging) {
+                    Chip("CLEAR", false, palette, m) { chosen = emptySet() }
+                }
             }
             when {
                 view == TripView.DETAILS && (selected == null || detail != null) -> {
@@ -376,24 +431,38 @@ fun TripListScreen(showTiles: Boolean, palette: Palette) {
 }
 
 @Composable
+@OptIn(ExperimentalFoundationApi::class)
 private fun TripRow(
     trip: TripEntity,
     active: Boolean,
+    chosen: Boolean,
     palette: Palette,
     m: Metrics,
     fmt: SimpleDateFormat,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    onLongClick: () -> Unit
 ) {
+    val hhmm = remember(fmt.timeZone) {
+        SimpleDateFormat("HH:mm", Locale.getDefault()).apply { timeZone = fmt.timeZone }
+    }
     Column(
         Modifier
             .fillMaxWidth()
-            .background(if (active) palette.trackSoft else palette.ground)
-            .clickable(onClick = onClick)
+            .background(
+                when {
+                    chosen -> palette.track
+                    active -> palette.trackSoft
+                    else -> palette.ground
+                }
+            )
+            .combinedClickable(onClick = onClick, onLongClick = onLongClick)
             .padding(horizontal = m.pad, vertical = m.gap / 2)
     ) {
+        // When it began and when it ended, on one line. The end used to live three taps away.
         Text(
-            text = fmt.format(Date(trip.startedAt)),
-            color = if (active) palette.accent else palette.numeral,
+            text = fmt.format(Date(trip.startedAt)) +
+                (trip.endedAt?.let { "  →  " + hhmm.format(Date(it)) } ?: "  →  …"),
+            color = if (active || chosen) palette.accent else palette.numeral,
             fontSize = m.stat,
             fontWeight = FontWeight.Medium
         )
@@ -417,6 +486,15 @@ private fun TripRow(
             Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
                 Text(it, color = palette.accent, fontSize = m.label)
             }
+        }
+        // The outside temperature the drive was made in, as a range: a morning that started at
+        // 19° and ended at 34° is not a 26° drive, and heat is the largest cost after speed.
+        if (trip.minTempC != null && trip.maxTempC != null) {
+            Text(
+                text = if (trip.minTempC == trip.maxTempC) "outside %.0f°".format(trip.minTempC)
+                else "outside %.0f–%.0f°".format(trip.minTempC, trip.maxTempC),
+                color = palette.dim, fontSize = m.label
+            )
         }
     }
 }
@@ -558,6 +636,15 @@ private fun TripDetailPane(
         DetailRow("Start", detail.startPlace ?: coords(t.startLat, t.startLon), palette, m)
         DetailRow("End", detail.endPlace ?: coords(t.endLat, t.endLon), palette, m)
         DetailRow("Track", "${formatKm(t.distanceM)} km  ·  ${detail.points} points", palette, m)
+        if (t.minTempC != null && t.maxTempC != null) {
+            DetailRow(
+                "Outside",
+                if (t.minTempC == t.maxTempC) "%.0f °C".format(t.minTempC)
+                else "%.0f – %.0f °C".format(t.minTempC, t.maxTempC) +
+                    (t.avgTempC?.let { "  ·  mean %.0f".format(it) } ?: ""),
+                palette, m
+            )
+        }
         // Where this drive's start and end came from. Every boundary in this app is inferred from
         // stillness, and the car is the only second opinion available — it numbers its own
         // journeys, so a drive carrying two of its numbers is one the app ran together.

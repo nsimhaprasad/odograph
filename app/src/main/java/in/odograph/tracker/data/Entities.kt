@@ -91,7 +91,16 @@ data class TripEntity(
      * drive it had no signal during — and it is named because a driver looking at a drive that had
      * no link deserves to know the figure was recovered rather than watched.
      */
-    val energySource: String? = null
+    val energySource: String? = null,
+    /**
+     * The coolest and warmest outside temperature seen during the drive, °C.
+     *
+     * The mean above says what the drive was like on average; these say how much it varied, and
+     * a morning that started at 19° and ended at 34° is not a 26° drive. Null when no frame
+     * carried a reading.
+     */
+    val minTempC: Double? = null,
+    val maxTempC: Double? = null
 )
 
 @Entity(tableName = "points", indices = [Index(value = ["tripId", "t"])])

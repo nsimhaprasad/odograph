@@ -336,6 +336,11 @@ object DashboardServer {
                         // Forget what has been sent, so the next backup sends the whole history
                         // again. For a workbook whose tabs were rebuilt: the receiving script
                         // upserts by key, so re-sending into clean tabs is safe and complete.
+                        // Thin every stored track. Safe to repeat: a track already thinned is untouched.
+                        if (params["thin"] == "1") {
+                            val dao = OdographDb.get(app).dao()
+                            runCatching { `in`.odograph.tracker.core.TripRepair.thinAllTracks(dao) }
+                        }
                         if (params["resend"] == "1") {
                             settings.lastDocsTripId = 0
                             settings.lastDocsChargeId = 0

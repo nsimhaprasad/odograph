@@ -122,6 +122,10 @@ interface OdographDao {
     @Query("DELETE FROM points WHERE tripId = :tripId AND t < :beforeMs")
     fun deletePointsBefore(tripId: Long, beforeMs: Long)
 
+    /** Removes exactly these points. Called in chunks: SQLite takes at most 999 bound values. */
+    @Query("DELETE FROM points WHERE id IN (:ids)")
+    fun deletePointsByIds(ids: List<Long>)
+
     /** Every instrumented trip's energy, newest first, for rolling efficiency. */
     /**
      * Recent instrumented drives, newest first, for the rolling efficiency figure.
@@ -625,6 +629,15 @@ interface OdographDao {
 
     @Query("UPDATE trips SET avgTempC = :avgTempC WHERE id = :id")
     fun setAvgTemp(id: Long, avgTempC: Double?)
+
+    @Query("SELECT MIN(exteriorTempC) FROM battery WHERE tripId = :tripId AND exteriorTempC IS NOT NULL")
+    fun minTempFor(tripId: Long): Double?
+
+    @Query("SELECT MAX(exteriorTempC) FROM battery WHERE tripId = :tripId AND exteriorTempC IS NOT NULL")
+    fun maxTempFor(tripId: Long): Double?
+
+    @Query("UPDATE trips SET minTempC = :minTempC, maxTempC = :maxTempC WHERE id = :id")
+    fun setTempRange(id: Long, minTempC: Double?, maxTempC: Double?)
 
     /**
      * The share of this drive's frames that reported the climate control running, 0 to 1.

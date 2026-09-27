@@ -6,6 +6,7 @@ import `in`.odograph.tracker.core.Geo
 import `in`.odograph.tracker.core.Fix
 import `in`.odograph.tracker.core.TripStats
 import `in`.odograph.tracker.data.OdographDao
+import `in`.odograph.tracker.sync.DocsDelta
 
 object TripRecovery {
     /**
@@ -216,6 +217,7 @@ object TripRecovery {
         // and how hot was it", and rejoining the samples to answer it is the shape of query that
         // stops being free once there are years of them.
         dao.setAvgTemp(tripId, dao.avgTempFor(tripId))
+        dao.setTempRange(tripId, dao.minTempFor(tripId), dao.maxTempFor(tripId))
         dao.setClimateShare(tripId, dao.climateShareFor(tripId))
 
         // What the car's own counters made of the same drive, recorded beside our figure rather
@@ -247,7 +249,58 @@ object TripRecovery {
             endId = places.resolve(last.lat, last.lon)
         )
 
+        // Last, after every figure that wants the full track has been taken from it.
+        thinStoredTrack(dao, tripId)
+
         return Recovery(last.lat, last.lon)
+    }
+
+    /**
+     * Joins two drives into one.
+     *
+     * For a drive the recorder split that the driver knows was one — a long queue at a toll, a
+     * stop the arrival rule mistook for a destination. The earlier drive survives; the later one's
+     * points and frames are handed to it, its row is deleted, and the survivor is closed again
+     * from the combined evidence — so its distance, duration, energy, cost, places and conditions
+     * are all worked out afresh rather than added up, exactly as if the recorder had never split
+     * them. Returns the survivor's id, or null if either drive is missing or still open.
+     */
+    fun mergeTrips(dao: OdographDao, a: Long, b: Long, capacityKwh: Double): Long? {
+        val first = dao.tripById(a) ?: return null
+        val second = dao.tripById(b) ?: return null
+        if (a == b || first.endedAt == null || second.endedAt == null) return null
+        val (keeper, absorbed) = if (first.startedAt <= second.startedAt) first to second else second to first
+
+        dao.movePointsTo(from = absorbed.id, into = keeper.id)
+        dao.moveBatteryTo(from = absorbed.id, into = keeper.id)
+        dao.deleteTrip(absorbed.id)
+        // The origin stays the keeper's; the destination is wherever the combined track ends,
+        // which close() reads from the last point.
+        close(dao, keeper.id, capacityKwh)
+        return keeper.id
+    }
+
+    /**
+     * How far apart two stored points must be in time once a drive has closed, milliseconds.
+     *
+     * Five seconds. The receiver writes up to five fixes a second, so an hour's drive was up to
+     * eighteen thousand rows — for a route that draws identically at one point every five, and
+     * for totals that were measured from the full track before any of it is thinned. First and
+     * last always survive. The backup thins again, to ten, on its way to the sheet.
+     */
+    const val STORED_POINT_SPACING_MS = 5_000L
+
+    /**
+     * Drops the points a closed drive does not need. Idempotent: a track already at this spacing
+     * is left exactly as it is, so this can run at close, in a repair, and from a button, in any
+     * order and any number of times.
+     */
+    fun thinStoredTrack(dao: OdographDao, tripId: Long): Int {
+        val points = dao.pointsFor(tripId)
+        val keep = DocsDelta.thinPoints(points, STORED_POINT_SPACING_MS).map { it.id }.toHashSet()
+        val drop = points.filter { it.id !in keep }.map { it.id }
+        drop.chunked(500).forEach { dao.deletePointsByIds(it) }
+        return drop.size
     }
 
     private fun recoverInternal(dao: OdographDao, capacityKwh: Double): Recovery {

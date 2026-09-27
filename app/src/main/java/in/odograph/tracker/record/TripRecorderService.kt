@@ -228,7 +228,7 @@ class TripRecorderService : Service() {
          * Bumped when a new correction is added, which reruns the pass over drives an earlier
          * revision already visited.
          */
-        private const val REPAIR_REVISION = 5
+        private const val REPAIR_REVISION = 6
 
         /** No trip is open. Battery frames recorded under it are parked readings, not a drive. */
         const val NO_TRIP = -1L
@@ -260,6 +260,20 @@ class TripRecorderService : Service() {
         /** User-triggered freshness (e.g. tapping the battery tile). Honours the min-interval floor. */
         fun requestTelematicsRefresh() {
             telematicsRefresh.value = true
+        }
+
+        /** The running service, for requests that must land on its own serialised recorder. */
+        @Volatile private var running: TripRecorderService? = null
+
+        /**
+         * Ends the open drive now, as if the car had arrived.
+         *
+         * For the driver who knows the drive is over — the car is parked and the arrival timer
+         * has twelve minutes still to run — or who wants a stop to be the end of one drive and the
+         * start of another. Lands on the recorder's own thread, so it cannot race the fix pump.
+         */
+        fun requestTripEnd() {
+            running?.let { svc -> svc.recorder.launch { svc.endTripNow() } }
         }
 
         /**
@@ -467,6 +481,7 @@ class TripRecorderService : Service() {
 
     override fun onCreate() {
         super.onCreate()
+        running = this
         Diagnostics.crumb("service onCreate start")
         startInForeground()
         Diagnostics.crumb("startForeground ok")
@@ -514,9 +529,13 @@ class TripRecorderService : Service() {
                 // A fill booked twice: once watched by the ledger, once reconstructed from the
                 // charge level by a reconciler that ran on the frame that had just closed it.
                 val deduped = runCatching { TripRepair.repairDuplicateReconstructions(dao) }.getOrNull()
-                if (outcome != null && stitched != null && cleared != null && reanchored != null && deduped != null) {
+                // Every old track down to one point per five seconds. The totals were measured
+                // from the full tracks when the drives closed; only the rows go.
+                val thinned = runCatching { TripRepair.thinAllTracks(dao) }.getOrNull()
+                if (outcome != null && stitched != null && cleared != null && reanchored != null && deduped != null && thinned != null) {
                     settings.repairRevision = REPAIR_REVISION
                     Diagnostics.crumb(
+                        "repair: thinned ${thinned.drives} tracks by ${thinned.pointsRemoved} points; " +
                         "repair: removed ${deduped.removed} duplicate reconstructed fills; " +
                         "repair: re-anchored ${reanchored.reanchored} drives begun from a stale fix " +
                             "(worst %.0f days); ".format(reanchored.worstDays) +
@@ -797,14 +816,25 @@ class TripRecorderService : Service() {
                             tripCostInr = readout.tripCostInr
                         )
                     } else {
+                        // No drive open — parked, or the departure not yet confirmed — but the
+                        // charge level is known and the history is what it is, so the prediction
+                        // is still ours to make. Dropping it here was what put the car's own
+                        // quote on the glass between trips, and the driver saw the range jump
+                        // from 200 to 400 and back at every stop.
+                        val readout = LiveRangeReadout.compute(
+                            dao, NO_TRIP, 0.0, soc, ch, capacity, rangeAccuracy, energy = null
+                        )
                         _state.value = _state.value.copy(
                             batterySocPercent = soc,
                             batteryCharging = ch.isCharging,
                             tripEnergyKwh = null,
                             tripCostInr = null,
-                            batteryRangeAtFullKm = null,
-                            batteryRangeKm = null,
-                            mgBatteryRangeKm = ch.rangeKm
+                            batteryMileageKmPerKwh = null,
+                            batteryRangeAtFullKm = readout.rangeAtFullKm,
+                            batteryRangeKm = readout.smartRangeKm,
+                            mgBatteryRangeKm = ch.rangeKm,
+                            lifetimeRangeKm = readout.lifetimeRangeKm,
+                            liveRangeKm = null
                         )
                     }
                 } else {
@@ -1025,6 +1055,15 @@ class TripRecorderService : Service() {
      * parking and a drive closed by a power cut are recorded identically — and one that turns out
      * not to have moved is discarded by that path rather than surfacing as a 0 km row.
      */
+    /** The driver's own "this drive is over". Same close as arrival; the reason is what differs. */
+    private fun endTripNow() {
+        if (tripId == NO_TRIP) return
+        val dao = OdographDb.get(this).dao()
+        Diagnostics.crumb("closing trip=$tripId: ended by the driver")
+        closeTripOnArrival(dao)
+        lastFix?.let { publishLiveState(it, 0f, moving = false) }
+    }
+
     private fun closeTripOnArrival(dao: OdographDao) {
         val closed = tripId
         // Pricing is not passed in: a closing drive is billed from the fills that preceded it,
@@ -1514,6 +1553,7 @@ class TripRecorderService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onDestroy() {
+        running = null
         runCatching { DashboardServer.stop() }
         if (this::alertSound.isInitialized) runCatching { alertSound.release() }
         if (this::source.isInitialized) source.stop()

@@ -109,10 +109,8 @@ fun PlacesScreen(palette: Palette) {
                 val dao = OdographDb.get(ctx).dao()
                 // Two answers, in order of preference: what this exact route has actually cost the
                 // times it was driven, and the rolling average for everywhere else.
-                val rolling = BatteryMath.rollingKwhPer100Km(
-                    dao.tripEnergies().mapNotNull {
-                        BatteryMath.kwhPer100Km(it.energyKwh, it.distanceM)
-                    }
+                val rolling = BatteryMath.rollingKwhPer100KmWeighted(
+                    dao.tripEnergies().map { it.distanceM to it.energyKwh }
                 )
                 Triple(
                     dao.allPlaces(),

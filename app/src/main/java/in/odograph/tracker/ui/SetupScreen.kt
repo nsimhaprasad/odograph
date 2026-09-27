@@ -609,6 +609,25 @@ fun SetupScreen(
                             restoring = false
                         }
                     }
+                    // Every stored track down to one point per five seconds. Safe to tap as often
+                    // as you like: a track already at that spacing is left exactly as it is, and
+                    // the totals on each drive were measured from the full track when it closed.
+                    var thinning by remember { mutableStateOf(false) }
+                    Chip(if (thinning) "THINNING…" else "THIN OLD TRACKS", thinning, palette, m) {
+                        if (thinning) return@Chip
+                        thinning = true
+                        scope.launch {
+                            val r = withContext(Dispatchers.IO) {
+                                runCatching {
+                                    `in`.odograph.tracker.core.TripRepair.thinAllTracks(OdographDb.get(ctx).dao())
+                                }.getOrNull()
+                            }
+                            note = if (r == null) "Thinning failed."
+                            else if (r.pointsRemoved == 0) "Every track is already at one point per 5 s."
+                            else "Removed ${r.pointsRemoved} points from ${r.drives} drives."
+                            thinning = false
+                        }
+                    }
                 }
                 // Beside the chip, not in the shared note far below it. A confirmation whose
                 // wording is off-screen at the moment it is given is not a confirmation — the

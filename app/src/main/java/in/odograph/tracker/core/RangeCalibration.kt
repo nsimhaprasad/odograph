@@ -104,12 +104,10 @@ object RangeCalibration {
      * the head of the list as "recent", so handing it oldest-first would average the wrong decade
      * of driving and quietly invert the whole measurement.
      */
-    private fun predictAsTheScreenWould(before: List<EfficiencyStats.Sample>): Double? {
-        val effs = before.asReversed().mapNotNull {
-            BatteryMath.kwhPer100Km(it.energyKwh, it.distanceM)
-        }
-        return BatteryMath.rollingKwhPer100Km(effs)
-    }
+    private fun predictAsTheScreenWould(before: List<EfficiencyStats.Sample>): Double? =
+        BatteryMath.rollingKwhPer100KmWeighted(
+            before.asReversed().map { it.distanceM to it.energyKwh }
+        )
 
     /** The correction implied by a set of scores, or null when there are too few to mean anything. */
     fun accuracy(scores: List<Score>): Accuracy? {

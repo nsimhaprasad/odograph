@@ -305,4 +305,26 @@ object TripRepair {
         }
         return Deduped(examined, removed)
     }
+
+    /** What thinning the stored tracks did. */
+    data class Thinned(val drives: Int, val pointsRemoved: Int)
+
+    /**
+     * Thins every closed drive's stored track to the spacing a closing drive now keeps.
+     *
+     * Runs once on the revision gate for the history, and again whenever the driver asks from
+     * Setup. Both are safe: a track already at the spacing loses nothing, so the second run and
+     * the tenth do exactly what the first did to a drive that closed since — nothing, or only
+     * what is due. The totals on each drive were measured from the full track when it closed and
+     * are not touched here.
+     */
+    fun thinAllTracks(dao: OdographDao): Thinned {
+        var drives = 0
+        var removed = 0
+        for (trip in dao.closedTrips()) {
+            val n = `in`.odograph.tracker.record.TripRecovery.thinStoredTrack(dao, trip.id)
+            if (n > 0) { drives++; removed += n }
+        }
+        return Thinned(drives, removed)
+    }
 }

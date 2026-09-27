@@ -491,4 +491,47 @@ class BatteryMathTest {
         assertThat(BatteryMath.plausibleLiveSoc(100.0, null, false)).isEqualTo(100.0)
         assertThat(BatteryMath.plausibleLiveSoc(null, 63.0, false)).isNull()
     }
+
+    // ------------------------------------------- the distance-weighted rolling estimate
+
+    /** (metres, kWh), newest first. */
+    private fun w(vararg pairs: Pair<Double, Double>) = BatteryMath.rollingKwhPer100KmWeighted(pairs.toList())
+
+    /**
+     * The reason for weighting. One 2 km errand that happened to catch a whole charge-level step
+     * reads as 26 kWh/100km; in a plain mean it counts as much as the 180 km run beside it. On
+     * the real box that single sample moved the range at full by 14%.
+     */
+    @Test
+    fun `a short errand cannot outvote a long drive`() {
+        val longRun = 180_000.0 to 27.0        // 15 kWh/100km
+        val errand = 2_000.0 to 0.52           // 26 kWh/100km, one step
+
+        val weighted = w(errand, longRun)!!
+        val plain = BatteryMath.rollingKwhPer100Km(listOf(26.0, 15.0))!!
+
+        assertThat(weighted).isCloseTo(15.1, within(0.1))
+        assertThat(plain).isCloseTo(20.5, within(0.1))
+    }
+
+    @Test
+    fun `drives too short or too small to be measurements are left out`() {
+        val real = 20_000.0 to 3.0
+        assertThat(w(500.0 to 0.52, real)!!).isCloseTo(15.0, within(0.01))
+        assertThat(w(20_000.0 to 0.1, real)!!).isCloseTo(15.0, within(0.01))
+    }
+
+    @Test
+    fun `only the newest drives in the window count`() {
+        val recent = List(10) { 10_000.0 to 1.5 }        // 15
+        val old = List(5) { 10_000.0 to 3.0 }            // 30, beyond the window
+
+        assertThat(w(*(recent + old).toTypedArray())!!).isCloseTo(15.0, within(0.01))
+    }
+
+    @Test
+    fun `nothing usable is null, not zero`() {
+        assertThat(w()).isNull()
+        assertThat(w(500.0 to 0.1)).isNull()
+    }
 }

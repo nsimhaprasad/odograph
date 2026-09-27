@@ -32,7 +32,7 @@ object SheetsRestore {
      * and guessing is how a restore puts the wrong values in the right names. A sheet from a newer
      * build is refused for the same reason from the other direction.
      */
-    val SUPPORTED_SCHEMAS = setOf(8, 9, 13, 14)
+    val SUPPORTED_SCHEMAS = setOf(8, 9, 13, 14, 15)
 
     data class Snapshot(
         val schema: Int?,
@@ -198,6 +198,8 @@ object SheetsRestore {
         estimatedEnergyKwh = num("estimated_energy_kwh"),
         estimatedCostInr = num("estimated_cost_inr"),
         energySource = str("energy_source"),
+        minTempC = num("min_temp_c"),
+        maxTempC = num("max_temp_c"),
         clusterId = long("cluster_id"),
         startPlaceId = long("start_place_id"),
         endPlaceId = long("end_place_id")

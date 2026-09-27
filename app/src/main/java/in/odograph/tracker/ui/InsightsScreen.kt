@@ -333,6 +333,33 @@ private fun conditionsSection(ui: InsightsUi, palette: Palette, m: Metrics) {
     ).forEach { (band, label) ->
         ui.byTemperature[band]?.let { conditionRow(label, it, ui.capacityKwh, palette, m) }
     }
+    // The comparison the rows above leave the reader to do: what does heat actually cost. Mild
+    // is the reference because it is where the climate control has least to do. Only spoken when
+    // both sides have enough drives to mean something.
+    val mild = ui.byTemperature[DriveContext.TempBand.MILD]
+    val heat = ui.byTemperature[DriveContext.TempBand.HOT] ?: ui.byTemperature[DriveContext.TempBand.WARM]
+    val cool = ui.byTemperature[DriveContext.TempBand.COOL]
+    if (mild != null && mild.drives >= 3) {
+        listOfNotNull(
+            heat?.takeIf { it.drives >= 3 }?.let { "above 28°" to it },
+            cool?.takeIf { it.drives >= 3 }?.let { "under 20°" to it }
+        ).forEach { (name, bucket) ->
+            val pct = (bucket.kwhPer100Km / mild.kwhPer100Km - 1.0) * 100.0
+            val kmMild = ui.capacityKwh / mild.kwhPer100Km * 100.0
+            val kmThis = ui.capacityKwh / bucket.kwhPer100Km * 100.0
+            Text(
+                text = if (kotlin.math.abs(pct) < 2.0) {
+                    "Drives $name cost about the same per km as at 20–28°."
+                } else {
+                    "Drives $name cost %.0f%% %s energy per km than at 20–28°: %.0f km on a full charge instead of %.0f."
+                        .format(kotlin.math.abs(pct), if (pct > 0) "more" else "less", kmThis, kmMild)
+                },
+                color = if (pct > 5.0) palette.caution else palette.label,
+                fontSize = m.label,
+                modifier = Modifier.padding(top = m.gap / 4)
+            )
+        }
+    }
     // The largest thing the car does with energy that is not moving, and until now it was in the
     // history only as scatter nobody could explain.
     ui.byClimate[DriveContext.Climate.ON]?.let {

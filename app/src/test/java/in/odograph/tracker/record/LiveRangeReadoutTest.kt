@@ -137,4 +137,59 @@ class LiveRangeReadoutTest {
 
         assertThat(r.totalKwh).isCloseTo(7.5, within(0.01))
     }
+
+    // ------------------------------------------------- the prediction holds still
+
+    /**
+     * The 200-to-400 ride. Two kilometres in, on one counter tick, this drive's own rate is
+     * 5 kWh/100km; a kilometre later, on one charge-level step, it is 26. Neither may move the
+     * prediction, because neither is a measurement yet.
+     */
+    @Test
+    fun `a drive's first kilometres do not move the prediction`() {
+        repeat(BatteryMath.MIN_TRIPS_FOR_REAL_ESTIMATE) {
+            closedDrive(1_000_000L + it * 3_600_000L, km = 25.0, kwh = 4.0)
+        }
+        val open = dao.startTrip(90_000_000L)
+        val before = readout(open, 0.0, energy = null).rangeAtFullKm!!
+
+        val tick = readout(open, 2_000.0, energy = 0.1).rangeAtFullKm!!
+        val step = readout(open, 3_000.0, energy = 0.52).rangeAtFullKm!!
+
+        assertThat(tick).isCloseTo(before, within(0.5))
+        assertThat(step).isCloseTo(before, within(0.5))
+    }
+
+    /** Once it is a sample it joins — weighted by its distance, so it nudges rather than swings. */
+    @Test
+    fun `a drive that has gone far enough joins the prediction, gently`() {
+        repeat(BatteryMath.MIN_TRIPS_FOR_REAL_ESTIMATE) {
+            closedDrive(1_000_000L + it * 3_600_000L, km = 25.0, kwh = 4.0)
+        }
+        val open = dao.startTrip(90_000_000L)
+        val before = readout(open, 0.0, energy = null).rangeAtFullKm!!
+
+        // 10 km at 20 kWh/100km against a history at 16: thirstier, so a little less range.
+        val after = readout(open, 10_000.0, energy = 2.0).rangeAtFullKm!!
+
+        assertThat(after).isLessThan(before)
+        assertThat(after / before).isGreaterThan(0.95)
+    }
+
+    /**
+     * Between trips the prediction is still ours. Dropping it left the car's own quote on the
+     * glass, which is what made the figure jump at every stop.
+     */
+    @Test
+    fun `with no trip open the app still quotes its own range`() {
+        repeat(BatteryMath.MIN_TRIPS_FOR_REAL_ESTIMATE) {
+            closedDrive(1_000_000L + it * 3_600_000L, km = 25.0, kwh = 4.0)
+        }
+
+        val r = readout(tripId = -1L, distanceM = 0.0, energy = null)
+
+        assertThat(r.rangeAtFullKm!!).isCloseTo(capacity / 16.0 * 100.0, within(2.0))
+        assertThat(r.smartRangeKm).isNotNull()
+        assertThat(r.tripCostInr).`as`("nothing to bill without a drive").isNull()
+    }
 }

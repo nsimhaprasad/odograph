@@ -109,10 +109,9 @@ object EnergySweep {
      * gives — estimates live in another column precisely so that they cannot reach this.
      */
     fun learnedKwhPer100Km(dao: OdographDao, zone: TimeZone): Double? {
-        val effs = dao.tripEnergies()
-            .mapNotNull { BatteryMath.kwhPer100Km(it.energyKwh, it.distanceM) }
-        if (effs.size < BatteryMath.MIN_TRIPS_FOR_REAL_ESTIMATE) return null
-        val raw = BatteryMath.rollingKwhPer100Km(effs) ?: return null
+        val history = dao.tripEnergies().map { it.distanceM to it.energyKwh }
+        if (history.size < BatteryMath.MIN_TRIPS_FOR_REAL_ESTIMATE) return null
+        val raw = BatteryMath.rollingKwhPer100KmWeighted(history) ?: return null
 
         val samples = dao.efficiencySamples().map { it.toSample() }
         return RangeCalibration.calibrate(

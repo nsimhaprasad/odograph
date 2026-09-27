@@ -257,6 +257,30 @@ object BatteryMath {
     }
 
     /** Mean efficiency over the most recent [window] trips, given newest-first efficiencies. */
+    /**
+     * The consumption the range estimate is built on: the last [window] drives, weighted by how
+     * far each went.
+     *
+     * Sum of energy over sum of distance, not the mean of each drive's own rate. The difference
+     * is the whole point. The charge level moves in whole percent — 0.52 kWh a step on this pack
+     * — so a two-kilometre errand reads as 26 kWh/100km or 5 depending on which side of a tick it
+     * fell, and in a plain mean that errand counts exactly as much as a 180 km run. On the real
+     * history the two figures were 316 and 332 km at full from the same ten drives, and a single
+     * live sample swung the mean by 14% either way. Weighted by distance, the same sample moved it
+     * two percent. Drives too short or too small to be a measurement at all are left out, as they
+     * always were.
+     *
+     * [samples] is (metres, kWh), newest first.
+     */
+    fun rollingKwhPer100KmWeighted(samples: List<Pair<Double, Double>>, window: Int = 10): Double? {
+        val usable = samples.filter { (m, kwh) ->
+            m >= MIN_EFFICIENCY_DISTANCE_M && kwh >= MIN_EFFICIENCY_ENERGY_KWH
+        }.take(window)
+        val metres = usable.sumOf { it.first }
+        if (usable.isEmpty() || metres <= 0.0) return null
+        return usable.sumOf { it.second } / (metres / 1000.0) * 100.0
+    }
+
     fun rollingKwhPer100Km(efficiencies: List<Double>, window: Int = 10): Double? {
         val recent = efficiencies.take(window)
         if (recent.isEmpty()) return null

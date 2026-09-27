@@ -93,6 +93,8 @@ object ApiJson {
             append(kv("estimatedEnergyKwh", numOrNull(t.estimatedEnergyKwh))).append(",")
             append(kv("estimatedCostInr", numOrNull(t.estimatedCostInr))).append(",")
             append(kv("energySource", t.energySource?.let { "\"$it\"" } ?: "null")).append(",")
+            append(kv("minTempC", numOrNull(t.minTempC))).append(",")
+            append(kv("maxTempC", numOrNull(t.maxTempC))).append(",")
             append(kv("startPlaceId", t.startPlaceId?.toString() ?: "null")).append(",")
             append(kv("endPlaceId", t.endPlaceId?.toString() ?: "null"))
             append("}")

@@ -710,4 +710,29 @@ class MigrationTest {
             assertThat(c.getString(0)).isEqualTo("backfill")
         }
     }
+
+    /** The coolest and warmest the outside got during each drive. */
+    @Test
+    fun `migrating from v14 makes room for the temperature range`() {
+        val db = openV7()
+        listOf(
+            OdographDb.MIGRATION_7_8, OdographDb.MIGRATION_8_9, OdographDb.MIGRATION_9_10,
+            OdographDb.MIGRATION_10_11, OdographDb.MIGRATION_11_12, OdographDb.MIGRATION_12_13,
+            OdographDb.MIGRATION_13_14
+        ).forEach { it.migrate(db) }
+        db.execSQL(
+            "INSERT INTO trips (startedAt, endedAt, distanceM, durationS, movingS, " +
+                "maxSpeedMps, avgSpeedMps, slowestKmMps, avgTempC) " +
+                "VALUES (1000, 2000, 22000.0, 3600, 3000, 20.0, 6.1, 4.0, 26.5)"
+        )
+
+        OdographDb.MIGRATION_14_15.migrate(db)
+
+        db.query("SELECT avgTempC, minTempC, maxTempC FROM trips WHERE startedAt = 1000").use { c ->
+            assertThat(c.moveToFirst()).isTrue()
+            assertThat(c.getDouble(0)).isEqualTo(26.5)
+            assertThat(c.isNull(1)).`as`("a drive recorded before this has no range").isTrue()
+            assertThat(c.isNull(2)).isTrue()
+        }
+    }
 }

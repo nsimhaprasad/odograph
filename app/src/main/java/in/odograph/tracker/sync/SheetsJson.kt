@@ -63,7 +63,7 @@ object SheetsJson {
     }
 
     /** The database shape this export was produced from. Bumped with every Room migration. */
-    const val SCHEMA_VERSION = 14
+    const val SCHEMA_VERSION = 15
 
     private fun place(p: PlaceEntity): String = "{" +
         "\"id\":${p.id}," +
@@ -156,7 +156,9 @@ object SheetsJson {
         // model its own past output to learn from, and nothing downstream could tell.
         "\"estimatedEnergyKwh\":${t.estimatedEnergyKwh ?: "null"}," +
         "\"estimatedCostInr\":${t.estimatedCostInr ?: "null"}," +
-        "\"energySource\":${t.energySource?.let { "\"$it\"" } ?: "null"}" +
+        "\"energySource\":${t.energySource?.let { "\"$it\"" } ?: "null"}," +
+        "\"minTempC\":${t.minTempC ?: "null"}," +
+        "\"maxTempC\":${t.maxTempC ?: "null"}" +
         "}"
 
     private fun point(p: PointEntity): String = "{" +
