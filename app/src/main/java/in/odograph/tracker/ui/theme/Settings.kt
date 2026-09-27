@@ -119,6 +119,17 @@ class Settings(ctx: Context) {
         set(value) = prefs.edit().putString(KEY_TL_VIN, value.trim()).apply()
 
     /**
+     * Which protocol the box uses to talk to MG's servers. See [in.odograph.tracker.record.VehicleLink].
+     *
+     * A setting rather than a build constant so that, when the app-store build of iSMART moves to
+     * a new API, the switch on this box is a value on the configure page and not a new APK
+     * hand-carried to the car. Unknown values fall back to the protocol that works today.
+     */
+    var telematicsApi: String
+        get() = prefs.getString(KEY_TL_API, "").orEmpty().ifBlank { "tap" }
+        set(value) = prefs.edit().putString(KEY_TL_API, value.trim().lowercase()).apply()
+
+    /**
      * Whether live MG battery/charge data is shown at all. Off disables the poller entirely, so
      * no MG server calls happen, and the driving screen never asks about the battery.
      */
@@ -274,6 +285,7 @@ class Settings(ctx: Context) {
         const val KEY_TL_PHONE = "tl_phone"
         const val KEY_TL_PASSWORD = "tl_password"
         const val KEY_TL_VIN = "tl_vin"
+        const val KEY_TL_API = "tl_api"
         const val KEY_TL_ENABLED = "tl_enabled"
         const val KEY_BATT_CAP = "battery_capacity_kwh"
         const val KEY_HOME_RATE = "home_rate_inr"

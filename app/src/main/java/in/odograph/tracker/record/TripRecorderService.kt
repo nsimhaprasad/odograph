@@ -45,7 +45,6 @@ import `in`.odograph.tracker.core.EnergyRecovery
 import `in`.odograph.tracker.core.FixWindow
 import `in`.odograph.tracker.data.toSample
 import `in`.odograph.tracker.core.TelematicsSchedule
-import io.windsor.telematics.TelematicsClient
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -598,8 +597,8 @@ class TripRecorderService : Service() {
      */
     private suspend fun telematicsLoop() {
         val dao = OdographDb.get(this).dao()
-        var client: TelematicsClient? = null
-        var creds: Triple<String, String, String>? = null
+        var client: VehicleLink? = null
+        var creds: List<String>? = null
         // Null is "never", and it stays null rather than becoming a sentinel. The sentinel this
         // replaces was subtracted from the clock, overflowed, and left the box unable to make its
         // own first call for months — it connected only when somebody opened the MG screen.
@@ -651,10 +650,11 @@ class TripRecorderService : Service() {
                 notifyMgLost()
                 continue
             }
-            val want = Triple(phone, password, settings.telematicsVin)
+            val want = listOf(phone, password, settings.telematicsVin, settings.telematicsApi)
             if (client == null || creds != want) {
                 val framesDir = RawFrames.directory(this)
-                val fresh = TelematicsClient.create(
+                val fresh = VehicleLink.create(
+                    settings.telematicsApi,
                     phone, password, settings.telematicsVin.takeIf { it.isNotBlank() },
                     onRawResponse = { label, hex ->
                         val kind = when (label) {

@@ -317,7 +317,7 @@ fun SetupScreen(
                             scope.launch {
                                 note = try {
                                     DashboardServer.testTelematics(
-                                        mgPhone, mgPassword, mgVin
+                                        mgPhone, mgPassword, mgVin, settings.telematicsApi
                                     )
                                 } catch (e: Exception) {
                                     "Connection failed: ${e.message ?: e.javaClass.simpleName}"

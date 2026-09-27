@@ -31,7 +31,6 @@ import `in`.odograph.tracker.record.TripRecorderService
 import `in`.odograph.tracker.sync.Outbound
 import `in`.odograph.tracker.sync.SheetsSync
 import `in`.odograph.tracker.ui.theme.Settings
-import io.windsor.telematics.TelematicsClient
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -363,6 +362,8 @@ object DashboardServer {
                         val phone = params["tl_phone"]?.trim().orEmpty()
                         val password = params["tl_password"].orEmpty()
                         val vin = params["tl_vin"]?.trim().orEmpty()
+                        // Which protocol to speak to MG with. Unknown values fall back to today's.
+                        params["tl_api"]?.trim()?.takeIf { it.isNotBlank() }?.let { settings.telematicsApi = it }
 
                         // "Try my connection" logs into the real account before anything is kept;
                         // only a successful round-trip stores the credentials. "Save" (or a plain
@@ -374,7 +375,7 @@ object DashboardServer {
                                 message = "Enter the phone number and password before testing." to true
                             } else {
                                 message = try {
-                                    testTelematics(phone, password, vin) to false
+                                    testTelematics(phone, password, vin, settings.telematicsApi) to false
                                 } catch (e: Exception) {
                                     "Connection failed: ${e.message ?: e.javaClass.simpleName}" to true
                                 }
@@ -576,10 +577,13 @@ object DashboardServer {
      * connection" button. Throws on failure so the caller renders the error; a returned string
      * describes what was found. Public so the on-device setup screen can offer the same test.
      */
-    suspend fun testTelematics(phone: String, password: String, vin: String): String =
+    suspend fun testTelematics(
+        phone: String, password: String, vin: String,
+        api: String = `in`.odograph.tracker.record.VehicleLink.TAP_GATEWAY
+    ): String =
         withContext(Dispatchers.IO) {
-            val client = TelematicsClient.create(
-                phone, password, vin.takeIf { it.isNotBlank() }
+            val client = `in`.odograph.tracker.record.VehicleLink.create(
+                api, phone, password, vin.takeIf { it.isNotBlank() }
             )
             client.login()
             val vehicles = client.vehicles()
