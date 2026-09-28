@@ -1136,18 +1136,48 @@ class TripRecorderService : Service() {
     /** The driver's own "this drive is over". Same close as arrival; the reason is what differs. */
     private fun mergeTripsNow(a: Long, b: Long) {
         val dao = OdographDb.get(this).dao()
-        // If either is the live drive, end it first so there are two closed drives to merge. A
-        // drive that never moved is deleted by the close and cannot be a merge target; guard for
-        // it so the merge simply does nothing rather than joining against a row that is gone.
-        if (a == tripId || b == tripId) {
-            if (tripId != NO_TRIP) closeTripOnArrival(dao)
+        val live = tripId
+        val survivor = if (live != NO_TRIP && (a == live || b == live)) {
+            // One of them is the drive being recorded. It stays open and keeps recording: the
+            // other drive is folded into it and the start back-dated, so a stop that got split
+            // off rejoins the drive in progress rather than ending it. Closing it here — which is
+            // what the first version did — ended the live drive and let a new one start on the
+            // next fix, which is precisely what the driver did not want.
+            mergeIntoLiveTrip(dao, other = if (a == live) b else a)
+        } else {
+            runCatching { TripRecovery.mergeTrips(dao, a, b, settings.batteryCapacityKwh) }.getOrNull()
         }
-        val survivor = runCatching {
-            TripRecovery.mergeTrips(dao, a, b, settings.batteryCapacityKwh)
-        }.getOrNull()
         Diagnostics.crumb("merge $a + $b -> ${survivor ?: "no change"}")
-        lastFix?.let { publishLiveState(it, 0f, moving = false) }
         dataChanged.value = dataChanged.value + 1
+    }
+
+    /**
+     * Folds a finished drive into the one being recorded, and keeps recording.
+     *
+     * The live drive's row is kept — same [tripId], so the fix pump carries straight on. The other
+     * drive's points and frames move onto it, its row is deleted, and if it began earlier the live
+     * drive's start and origin are back-dated to it. The in-memory track is rebuilt from the
+     * combined points so the distance and time on the glass jump to the whole drive and go on
+     * climbing. Energy and cost are left for the eventual close, exactly as for any open drive.
+     *
+     * Returns the live trip id, or null if the other drive is missing or somehow still open.
+     */
+    private fun mergeIntoLiveTrip(dao: OdographDao, other: Long): Long? {
+        if (other == tripId) return null
+
+        // The data move is shared with the two-closed-drives path's sibling and is tested there;
+        // here we add only what is live — the recorder's own start clock and in-memory track.
+        TripRecovery.foldIntoOpenTrip(dao, openId = tripId, closedId = other) ?: return null
+        dao.tripById(tripId)?.let { startedAt = it.startedAt }
+
+        // Rebuild the live track from every point now under this drive, in time order, so the
+        // readout reflects the combined drive and the next fix keeps accumulating onto it.
+        val fixes = dao.pointsFor(tripId).map {
+            Fix(it.t, it.lat, it.lon, it.speedMps, it.accuracyM, it.interpolated, it.altitudeM)
+        }
+        track = LiveTrack().also { t -> fixes.forEach(t::add) }
+        lastFix?.let { publishLiveState(it, it.speedMps, moving = true) }
+        return tripId
     }
 
     private fun endTripNow() {

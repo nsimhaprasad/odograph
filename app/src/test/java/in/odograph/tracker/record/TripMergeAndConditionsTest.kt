@@ -116,11 +116,12 @@ class TripMergeAndConditionsTest {
     }
 
     /**
-     * The open drive cannot be merged as-is — that is why the service ends it first. This pins the
-     * guard so the service's "end then merge" is provably necessary, not defensive habit.
+     * The closed-drive merge refuses an open drive by design: joining onto a *live* drive is a
+     * different operation ([foldIntoOpenTrip], which keeps it open). This pins that mergeTrips
+     * itself only ever joins two finished drives.
      */
     @Test
-    fun `an open drive is refused, but merges once it is closed`() {
+    fun `mergeTrips refuses an open drive, but joins it once closed`() {
         val closed = drive(1_000_000L, km = 5.0)                     // 5 km
         // An open drive of 3 km, continuing from where the closed one ended (no endedAt).
         val open = dao.startTrip(1_000_000L + 10 * 60_000L)
@@ -141,6 +142,55 @@ class TripMergeAndConditionsTest {
         assertThat(survivor).isEqualTo(closed)
         assertThat(dao.tripById(open)).isNull()
         assertThat(dao.tripById(closed)!!.distanceM / 1000.0).isCloseTo(8.0, within(0.5))
+    }
+
+    // -------------------------------------------------- joining a stop onto the live drive
+
+    /**
+     * The case that was wrong: joining a finished stop onto the drive being recorded must keep
+     * that drive going, not end it. The open drive keeps its id and its null end; the stop's
+     * points move onto it; the start back-dates to the earlier piece.
+     */
+    @Test
+    fun `folding a finished drive into the open one keeps it open and recording`() {
+        val earlier = drive(1_000_000L, km = 5.0)                       // finished
+        val liveStart = 1_000_000L + 10 * 60_000L
+        val live = dao.startTrip(liveStart)                             // open, no end
+        val lat0 = 12.9700 + 5.0 / 111.32
+        (0 until 6).forEach { k ->
+            dao.appendPoint(PointEntity(0, live, liveStart + k * 60_000L, lat0 + (3.0 / 111.32) * k / 5, 77.59, 12f, null, 900.0, 5f, false))
+        }
+
+        val survivor = TripRecovery.foldIntoOpenTrip(dao, openId = live, closedId = earlier)
+
+        assertThat(survivor).isEqualTo(live)
+        val t = dao.tripById(live)!!
+        assertThat(t.endedAt).`as`("the drive is still being recorded").isNull()
+        assertThat(t.startedAt).`as`("start back-dated to the earlier piece").isEqualTo(1_000_000L)
+        assertThat(dao.pointsFor(live)).hasSize(12)             // 6 + 6
+        assertThat(dao.tripById(earlier)).`as`("the finished stop is absorbed").isNull()
+    }
+
+    @Test
+    fun `folding refuses when the target is not open`() {
+        val a = drive(1_000_000L, km = 4.0)                             // closed
+        val b = drive(2_000_000L, km = 4.0)                             // closed
+
+        assertThat(TripRecovery.foldIntoOpenTrip(dao, openId = a, closedId = b)).isNull()
+        assertThat(dao.tripById(b)).`as`("nothing absorbed when the target is closed").isNotNull()
+    }
+
+    @Test
+    fun `an open drive that started later than the stop still keeps its own end-open state`() {
+        val earlier = drive(1_000_000L, km = 5.0)
+        val live = dao.startTrip(5_000_000L)
+        dao.appendPoint(PointEntity(0, live, 5_000_000L, 12.99, 77.60, 5f, null, 900.0, 5f, false))
+        dao.appendPoint(PointEntity(0, live, 5_060_000L, 12.995, 77.60, 12f, null, 900.0, 5f, false))
+
+        TripRecovery.foldIntoOpenTrip(dao, openId = live, closedId = earlier)
+
+        assertThat(dao.tripById(live)!!.endedAt).isNull()
+        assertThat(dao.tripById(live)!!.startedAt).isEqualTo(1_000_000L)
     }
 
 }

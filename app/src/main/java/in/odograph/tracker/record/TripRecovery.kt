@@ -265,6 +265,36 @@ object TripRecovery {
      * are all worked out afresh rather than added up, exactly as if the recorder had never split
      * them. Returns the survivor's id, or null if either drive is missing or still open.
      */
+    /**
+     * Folds a finished drive into an open one, leaving the open drive open.
+     *
+     * The data half of "join this stop onto the drive I'm still on": the open drive keeps its id
+     * and its null end, the finished drive's points and frames move onto it, its row is deleted,
+     * and if it began earlier the open drive's start and origin are back-dated to it. Energy and
+     * cost are untouched — the open drive has none yet and will get them at its eventual close.
+     *
+     * Returns the open drive's id, or null if either row is missing, they are the same, or the
+     * drive meant to stay open is not actually open.
+     */
+    fun foldIntoOpenTrip(dao: OdographDao, openId: Long, closedId: Long): Long? {
+        if (openId == closedId) return null
+        val open = dao.tripById(openId) ?: return null
+        val closed = dao.tripById(closedId) ?: return null
+        if (open.endedAt != null || closed.endedAt == null) return null
+
+        dao.movePointsTo(from = closedId, into = openId)
+        dao.moveBatteryTo(from = closedId, into = openId)
+        dao.deleteTrip(closedId)
+
+        if (closed.startedAt < open.startedAt) {
+            dao.setStartedAt(openId, closed.startedAt)
+            val lat = closed.startLat ?: open.startLat
+            val lon = closed.startLon ?: open.startLon
+            if (lat != null && lon != null) dao.setOrigin(openId, lat, lon)
+        }
+        return openId
+    }
+
     fun mergeTrips(dao: OdographDao, a: Long, b: Long, capacityKwh: Double): Long? {
         val first = dao.tripById(a) ?: return null
         val second = dao.tripById(b) ?: return null
