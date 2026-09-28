@@ -23,7 +23,7 @@
  * actually deployed" is one GET away instead of an inference from how the tabs look — a tab that
  * stays headerless after a redeploy means the redeploy did not take, and this says so directly.
  */
-var SCRIPT_VERSION = 4;
+var SCRIPT_VERSION = 5;
 
 /** Every tab this script owns, with the header it expects. Used by the export's self-check. */
 var TAB_HEADERS = {
@@ -199,6 +199,26 @@ function doGet(e) {
       for (var i = 0; i < v.length; i++) {
         var key = String(v[i][0]).trim();
         if (key && v[i][1] !== '') out[key] = v[i][1];
+      }
+    }
+    // Place names the driver typed into the Places tab, for the box to adopt. Only rows that
+    // carry a label, so the ordinary control read stays small — this is a handful of places, not
+    // the whole history. The box reads this before each backup and re-exports what it adopts, so
+    // a name typed here survives the next upload instead of being overwritten by it.
+    var places = ss.getSheetByName('Places');
+    if (places && places.getLastRow() > 1) {
+      var pv = places.getDataRange().getValues();
+      var ph = pv[0];
+      var iId = ph.indexOf('id'), iLabel = ph.indexOf('label');
+      if (iId >= 0 && iLabel >= 0) {
+        var labels = [];
+        for (var r = 1; r < pv.length; r++) {
+          var lbl = pv[r][iLabel];
+          if (lbl !== '' && lbl !== null && pv[r][iId] !== '' && pv[r][iId] !== null) {
+            labels.push({ id: Number(pv[r][iId]), label: String(lbl) });
+          }
+        }
+        out.placeLabels = labels;
       }
     }
     return json(out);

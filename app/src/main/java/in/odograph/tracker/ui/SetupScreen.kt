@@ -577,7 +577,7 @@ fun SetupScreen(
                             importing = true
                             scope.launch {
                                 val msg = withContext(Dispatchers.IO) {
-                                    SheetsSync.importControl(settings, settings.webhookUrl).first
+                                    SheetsSync.importControl(ctx, settings, settings.webhookUrl).first
                                 }
                                 note = msg
                                 importing = false

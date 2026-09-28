@@ -421,7 +421,7 @@ object DashboardServer {
                         call.respondText(configPageView(settings, msg, dao = OdographDb.get(app).dao()), ContentType.Text.Html)
                     }
                     get("/import") {
-                        val (msg, error) = SheetsSync.importControl(settings, settings.webhookUrl)
+                        val (msg, error) = SheetsSync.importControl(app, settings, settings.webhookUrl)
                         call.respondText(configPageView(settings, msg, error, OdographDb.get(app).dao()), ContentType.Text.Html)
                     }
                     get("/planner") {

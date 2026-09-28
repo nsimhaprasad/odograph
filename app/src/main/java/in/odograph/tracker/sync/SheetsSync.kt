@@ -153,7 +153,7 @@ object SheetsSync {
      * rates). Nothing is overwritten unless the sheet actually says so: absent values are
      * ignored, so a fresh workbook with only defaults still imports cleanly.
      */
-    fun importControl(settings: Settings, url: String): Pair<String, Boolean> {
+    fun importControl(ctx: Context, settings: Settings, url: String): Pair<String, Boolean> {
         if (url.isBlank()) return "No docs link configured." to true
         if (Outbound.isSpreadsheetLink(url)) return spreadLinkHelp() to true
         return runCatching {
@@ -172,12 +172,47 @@ object SheetsSync {
             json.optDouble("gstRatePct", Double.NaN).takeIf { !it.isNaN() }?.let {
                 settings.gstRatePct = it; applied++
             }
-            val message = "Imported $applied of 4 control values (capacity, home rate, outside rate, GST)."
-            val nothingApplied = applied == 0
+            val named = applyPlaceLabels(OdographDb.get(ctx).dao(), json)
+            val message = "Imported $applied of 4 control values" +
+                (if (named > 0) " and named $named place${if (named == 1) "" else "s"} from the sheet." else ".")
+            val nothingApplied = applied == 0 && named == 0
             Pair(message, nothingApplied)
         }.getOrElse { e ->
             Pair("Import failed: ${e.message ?: e::class.java.simpleName}", true)
         }
+    }
+
+    /**
+     * Pulls place names typed into the sheet and applies them, returning how many were adopted.
+     *
+     * Called before each backup, so a name a driver types into the Places tab is taken on by the
+     * box and then written back by the same export — surviving the upload rather than being
+     * overwritten by it. Cheap: it reads the small control document, not the whole history.
+     */
+    fun importPlaceLabels(ctx: Context, url: String): Int {
+        if (url.isBlank() || Outbound.isSpreadsheetLink(url)) return 0
+        return runCatching {
+            applyPlaceLabels(OdographDb.get(ctx).dao(), JSONObject(Outbound.getBody(url)))
+        }.getOrDefault(0)
+    }
+
+    /**
+     * Applies the sheet's place labels over the app's own. The sheet is the driver's explicit
+     * input, so it wins; a blank cell is left alone rather than treated as "erase the name",
+     * because a driver clears a field far less often than they leave one empty.
+     */
+    internal fun applyPlaceLabels(dao: `in`.odograph.tracker.data.OdographDao, json: JSONObject): Int {
+        val arr = json.optJSONArray("placeLabels") ?: return 0
+        var n = 0
+        for (i in 0 until arr.length()) {
+            val o = arr.optJSONObject(i) ?: continue
+            val id = o.optLong("id", -1L)
+            val label = o.optString("label").trim()
+            if (id < 0 || label.isBlank()) continue
+            val place = dao.placeById(id) ?: continue
+            if (place.label != label) { dao.setPlaceLabel(id, label); n++ }
+        }
+        return n
     }
 
     /**

@@ -997,6 +997,10 @@ class TripRecorderService : Service() {
     private fun backupNow(why: String): Boolean {
         val s = Settings(this)
         if (s.webhookUrl.isBlank()) return false
+        // Adopt any place names the driver typed into the sheet before pushing, so the export
+        // writes those names back instead of overwriting them.
+        runCatching { SheetsSync.importPlaceLabels(this, s.webhookUrl) }
+            .onSuccess { if (it > 0) Diagnostics.crumb("adopted $it place name(s) from the sheet") }
         val r = runCatching { SheetsSync.exportDocs(this, s.webhookUrl, s.deviceId) }
             .getOrElse { Outbound.Result(0, 0, it.message ?: it::class.java.simpleName) }
         Diagnostics.crumb("backup ($why): " + (r.error ?: "${r.delivered}/${r.attempted} rows"))

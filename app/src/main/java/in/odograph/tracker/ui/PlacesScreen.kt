@@ -286,6 +286,14 @@ fun PlacesScreen(palette: Palette) {
                 fontSize = m.label,
                 letterSpacing = 2.2.sp
             )
+            Text(
+                text = "Tap a place below to name it (Home, Office, Farm…). You can also type the " +
+                    "name into the sheet's Places tab and the box will pick it up.",
+                color = palette.dim,
+                fontSize = m.label,
+                lineHeight = m.label * 1.5f,
+                modifier = Modifier.padding(top = m.gap / 4, bottom = m.gap / 3)
+            )
             Column {
                 if (known.isEmpty()) {
                     Text(
