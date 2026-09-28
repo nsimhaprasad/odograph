@@ -1,10 +1,10 @@
 package `in`.odograph.tracker.ui
 
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -25,10 +25,16 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
@@ -226,7 +232,7 @@ private fun TripStats(
     modifier: Modifier = Modifier
 ) {
     Row(
-        modifier = modifier,
+        modifier = modifier.riseIn(70),
         horizontalArrangement = Arrangement.spacedBy(m.gap),
         verticalAlignment = Alignment.Bottom
     ) {
@@ -263,7 +269,7 @@ private fun SecondaryStrip(
 ) {
     if (stats.isEmpty()) return
     FlowRow(
-        modifier = modifier,
+        modifier = modifier.riseIn(140),
         horizontalArrangement = Arrangement.spacedBy(m.gap),
         verticalArrangement = Arrangement.spacedBy(m.gap / 2),
         maxItemsInEachRow = perRow
@@ -339,6 +345,7 @@ private fun RangePanel(
 
     Row(
         modifier = modifier
+            .riseIn(0)
             .defaultMinSize(minHeight = MIN_TOUCH_TARGET_DP.dp)
             .clickable { TripRecorderService.requestTelematicsRefresh() }
             .semantics { contentDescription = rangeDescription(soc, readout, live.batteryCharging) },
@@ -385,21 +392,22 @@ private fun ChargeMeter(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(m.gap / 3)
         ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
+            // A capsule on a soft track, filled to the charge level — no hard border and no
+            // terminal nub. The fill is itself a capsule, so a partial charge reads as a pill
+            // sliding along the rail rather than a bar clipped flat against a frame.
+            Box(
+                Modifier
+                    .width(m.gap * BATTERY_WIDTH_GAPS)
+                    .height(m.pad * BATTERY_HEIGHT_PADS)
+                    .clip(RoundedCornerShape(percent = 50))
+                    .background(palette.track)
+            ) {
                 Box(
                     Modifier
-                        .width(m.gap * BATTERY_WIDTH_GAPS)
-                        .height(m.pad * BATTERY_HEIGHT_PADS)
-                        .border(1.5.dp, stateColor, RoundedCornerShape(2.dp))
-                        .padding(1.dp)
-                ) {
-                    Box(Modifier.fillMaxHeight().fillMaxWidth(fill).background(stateColor))
-                }
-                Box(
-                    Modifier
-                        .width(3.dp)
-                        .height(m.pad * BATTERY_TERMINAL_PADS)
-                        .background(stateColor.copy(alpha = 0.9f), RoundedCornerShape(1.dp))
+                        .fillMaxHeight()
+                        .fillMaxWidth(fill)
+                        .clip(RoundedCornerShape(percent = 50))
+                        .background(stateColor)
                 )
             }
             Text(
@@ -424,12 +432,39 @@ private fun ChargeMeter(
 /** How long the fill and the state colour take to settle after a poll. */
 private const val CHARGE_ANIMATION_MS = 900
 
+/**
+ * A one-shot entrance: a reading block fades up into place the first time the screen composes.
+ *
+ * The box is powered by the car and only wakes when a drive begins, so this plays once — as the
+ * dashboard comes to life — and never mid-drive, where motion would only pull the eye off the
+ * road. Staggering by [delayMs] lets the blocks arrive in rank order (range, then the trip, then
+ * the reference strip) rather than all at once. It is a draw-time transform, so nothing about the
+ * layout moves; and it settles to a fully drawn state, so a still of the screen is unaffected.
+ */
+@Composable
+private fun Modifier.riseIn(delayMs: Int): Modifier {
+    var shown by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) { shown = true }
+    val progress by animateFloatAsState(
+        targetValue = if (shown) 1f else 0f,
+        animationSpec = tween(ENTRANCE_MS, delayMillis = delayMs, easing = FastOutSlowInEasing),
+        label = "riseIn"
+    )
+    return graphicsLayer {
+        alpha = progress
+        translationY = (1f - progress) * ENTRANCE_RISE_DP.dp.toPx()
+    }
+}
+
+/** How long a block's entrance runs once it starts, and how far below its place it begins. */
+private const val ENTRANCE_MS = 460
+private const val ENTRANCE_RISE_DP = 14
+
 /** Android's minimum comfortable touch target, and a moving car deserves no less. */
 private const val MIN_TOUCH_TARGET_DP = 48
 
 private const val BATTERY_WIDTH_GAPS = 4f
 private const val BATTERY_HEIGHT_PADS = 1.7f
-private const val BATTERY_TERMINAL_PADS = 0.85f
 
 /**
  * Charge state to colour, from the palette's state tokens rather than its accents.
