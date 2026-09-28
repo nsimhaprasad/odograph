@@ -1176,6 +1176,13 @@ class TripRecorderService : Service() {
             Fix(it.t, it.lat, it.lon, it.speedMps, it.accuracyM, it.interpolated, it.altitudeM)
         }
         track = LiveTrack().also { t -> fixes.forEach(t::add) }
+        // Reseed the moving-time counter from the combined track, or the screen keeps the tiny
+        // moving time of the live portion against the whole drive's distance — the very thing
+        // that made 30 km look like it cost too much because it seemed to happen in ten minutes.
+        // Distance follows the rebuilt track; elapsed follows the back-dated start; both on the
+        // next publish. The stored trip recomputes all three at close regardless.
+        val moved = TripStats.compute(fixes).movingS
+        _state.update { it.copy(movingS = moved) }
         lastFix?.let { publishLiveState(it, it.speedMps, moving = true) }
         return tripId
     }
