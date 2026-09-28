@@ -299,6 +299,24 @@ class TripRecorderService : Service() {
         }
 
         /**
+         * Bumped whenever the recorder changes stored history behind the UI's back — a merge, a
+         * trip ended by hand. A list screen observes it and reloads, so what it shows never lags
+         * what is on disk.
+         */
+        val dataChanged = MutableStateFlow(0)
+
+        /**
+         * Joins two drives into one, on the recorder's own thread so it cannot race the fix pump.
+         *
+         * Either drive may be the one being recorded right now: it is ended first, exactly as
+         * arrival would end it, and then merged — so "join this stop back onto the last drive"
+         * works while the car is still sitting in it. When the merge lands, [dataChanged] bumps.
+         */
+        fun requestMergeTrips(a: Long, b: Long) {
+            running?.let { svc -> svc.recorder.launch { svc.mergeTripsNow(a, b) } }
+        }
+
+        /**
          * After a Setup-page calibration the stored factor/baseline changed, but the live state was
          * computed at boot. Recompute the odometer against the current settings so the driver
          * screen shows the corrected reading immediately instead of after the next reboot.
@@ -1116,6 +1134,22 @@ class TripRecorderService : Service() {
      * not to have moved is discarded by that path rather than surfacing as a 0 km row.
      */
     /** The driver's own "this drive is over". Same close as arrival; the reason is what differs. */
+    private fun mergeTripsNow(a: Long, b: Long) {
+        val dao = OdographDb.get(this).dao()
+        // If either is the live drive, end it first so there are two closed drives to merge. A
+        // drive that never moved is deleted by the close and cannot be a merge target; guard for
+        // it so the merge simply does nothing rather than joining against a row that is gone.
+        if (a == tripId || b == tripId) {
+            if (tripId != NO_TRIP) closeTripOnArrival(dao)
+        }
+        val survivor = runCatching {
+            TripRecovery.mergeTrips(dao, a, b, settings.batteryCapacityKwh)
+        }.getOrNull()
+        Diagnostics.crumb("merge $a + $b -> ${survivor ?: "no change"}")
+        lastFix?.let { publishLiveState(it, 0f, moving = false) }
+        dataChanged.value = dataChanged.value + 1
+    }
+
     private fun endTripNow() {
         if (tripId == NO_TRIP) return
         val dao = OdographDb.get(this).dao()

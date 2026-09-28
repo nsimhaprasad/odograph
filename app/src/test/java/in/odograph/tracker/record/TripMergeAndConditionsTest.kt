@@ -114,4 +114,33 @@ class TripMergeAndConditionsTest {
         assertThat(TripRecovery.mergeTrips(dao, a, open, capacity)).isNull()
         assertThat(dao.tripById(a)).isNotNull()
     }
+
+    /**
+     * The open drive cannot be merged as-is — that is why the service ends it first. This pins the
+     * guard so the service's "end then merge" is provably necessary, not defensive habit.
+     */
+    @Test
+    fun `an open drive is refused, but merges once it is closed`() {
+        val closed = drive(1_000_000L, km = 5.0)                     // 5 km
+        // An open drive of 3 km, continuing from where the closed one ended (no endedAt).
+        val open = dao.startTrip(1_000_000L + 10 * 60_000L)
+        val openStart = 1_000_000L + 10 * 60_000L
+        val lat0 = 12.9700 + 5.0 / 111.32
+        (0 until 6).forEach { k ->
+            dao.appendPoint(PointEntity(0, open, openStart + k * 60_000L, lat0 + (3.0 / 111.32) * k / 5, 77.59, 12f, null, 900.0, 5f, false))
+        }
+
+        // While open (endedAt null) the merge is a no-op.
+        assertThat(TripRecovery.mergeTrips(dao, closed, open, capacity)).isNull()
+        assertThat(dao.tripById(open)).isNotNull()
+
+        // Close it as arrival would, then the same merge joins them.
+        TripRecovery.close(dao, open, capacity)
+        val survivor = TripRecovery.mergeTrips(dao, closed, open, capacity)
+
+        assertThat(survivor).isEqualTo(closed)
+        assertThat(dao.tripById(open)).isNull()
+        assertThat(dao.tripById(closed)!!.distanceM / 1000.0).isCloseTo(8.0, within(0.5))
+    }
+
 }

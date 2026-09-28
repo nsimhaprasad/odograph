@@ -23,7 +23,6 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -41,7 +40,6 @@ import `in`.odograph.tracker.core.BatteryMath
 import `in`.odograph.tracker.data.OdographDb
 import `in`.odograph.tracker.data.toSample
 import `in`.odograph.tracker.record.TripRecorderService
-import `in`.odograph.tracker.record.TripRecovery
 import `in`.odograph.tracker.data.TRIP_PAGE_SIZE
 import `in`.odograph.tracker.data.TripEntity
 import `in`.odograph.tracker.ui.map.BareRouteTrace
@@ -115,8 +113,8 @@ fun TripListScreen(showTiles: Boolean, palette: Palette) {
     // Drives picked by long-press, for joining. Two at most is the useful number; a set because
     // the second long-press on a chosen drive un-chooses it.
     var chosen by remember { mutableStateOf<Set<Long>>(emptySet()) }
+    var selectMode by remember { mutableStateOf(false) }
     var merging by remember { mutableStateOf(false) }
-    val scope = rememberCoroutineScope()
     val live by TripRecorderService.state.collectAsState()
 
     // The box has no SIM and therefore no NITZ, so its own timezone may be UTC. Render against
@@ -158,9 +156,19 @@ fun TripListScreen(showTiles: Boolean, palette: Palette) {
         loadingPage = false
     }
 
+    suspend fun reloadList() {
+        trips = emptyList(); loadedPages = 0; allLoaded = false
+        loadNextPage()
+    }
+
     LaunchedEffect(Unit) {
         loadNextPage()
         selected = trips.firstOrNull()
+    }
+    // The recorder bumps this when it changes history under us — a merge, a hand-ended trip.
+    val dataRev by TripRecorderService.dataChanged.collectAsState()
+    LaunchedEffect(dataRev) {
+        if (dataRev > 0) { reloadList(); selected = null; chosen = emptySet(); selectMode = false }
     }
     LaunchedEffect(selected?.id) {
         val id = selected?.id ?: return@LaunchedEffect
@@ -276,6 +284,42 @@ fun TripListScreen(showTiles: Boolean, palette: Palette) {
             ) {
                 Chip("RECENT", sort == TripSort.RECENT, palette, m) { sort = TripSort.RECENT }
                 Chip("KM", sort == TripSort.KM, palette, m) { sort = TripSort.KM }
+                // Enter a mode where tapping picks drives to join, instead of opening them. Far
+                // more findable than a long-press nobody discovers, and it lives right beside the
+                // list it acts on rather than in the far pane.
+                if (!selectMode) {
+                    Chip("SELECT TO JOIN", false, palette, m) {
+                        selectMode = true; chosen = emptySet()
+                    }
+                }
+            }
+            // The join bar: visible only in select mode, right above the list.
+            if (selectMode) {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(m.gap / 2),
+                    modifier = Modifier.padding(start = m.pad, bottom = m.gap)
+                ) {
+                    val n = chosen.size
+                    Chip(
+                        if (merging) "JOINING…" else if (n == 2) "JOIN THESE 2" else "PICK 2 ($n)",
+                        n == 2 && !merging, palette, m
+                    ) {
+                        if (merging || n != 2) return@Chip
+                        merging = true
+                        val (a, b) = chosen.toList()
+                        // Recorder-thread merge: it closes the live drive first if one was picked,
+                        // then joins. The list reloads when dataChanged fires.
+                        TripRecorderService.requestMergeTrips(a, b)
+                    }
+                    Chip("CANCEL", false, palette, m) {
+                        selectMode = false; chosen = emptySet(); merging = false
+                    }
+                }
+                Text(
+                    text = "Tap two drives to join — the current drive counts, so a stop can rejoin the last one.",
+                    color = palette.dim, fontSize = m.label,
+                    modifier = Modifier.padding(start = m.pad, bottom = m.gap / 2)
+                )
             }
             if (trips.isEmpty()) {
                 Text(
@@ -339,19 +383,23 @@ fun TripListScreen(showTiles: Boolean, palette: Palette) {
                                 )
                             }
                         }
-                        is TripRowItem.Drive -> TripRow(
-                            item.trip, item.trip.id == selected?.id, item.trip.id in chosen,
-                            palette, m, fmt,
-                            onClick = { selected = item.trip },
-                            onLongClick = {
-                                val id = item.trip.id
+                        is TripRowItem.Drive -> {
+                            val id = item.trip.id
+                            fun toggle() {
                                 chosen = when {
                                     id in chosen -> chosen - id
-                                    chosen.size >= 2 -> setOf(id)
+                                    chosen.size >= 2 -> chosen // already two; ignore extra taps
                                     else -> chosen + id
                                 }
                             }
-                        )
+                            TripRow(
+                                item.trip, item.trip.id == selected?.id, id in chosen,
+                                palette, m, fmt,
+                                onClick = { if (selectMode) toggle() else selected = item.trip },
+                                // Long-press still works as a shortcut into select mode.
+                                onLongClick = { selectMode = true; toggle() }
+                            )
+                        }
                     }
                 }
             }
@@ -369,33 +417,6 @@ fun TripListScreen(showTiles: Boolean, palette: Palette) {
                 // stillness; a driver who knows they have arrived does not.
                 if (live.tripId >= 0) {
                     Chip("END TRIP", false, palette, m) { TripRecorderService.requestTripEnd() }
-                }
-                // Two drives long-pressed become one, closed again from the combined track.
-                if (chosen.size == 2) {
-                    Chip(if (merging) "JOINING…" else "JOIN 2 DRIVES", merging, palette, m) {
-                        if (merging) return@Chip
-                        merging = true
-                        val (a, b) = chosen.toList()
-                        scope.launch {
-                            withContext(Dispatchers.IO) {
-                                runCatching {
-                                    TripRecovery.mergeTrips(
-                                        OdographDb.get(ctx).dao(), a, b, Settings(ctx).batteryCapacityKwh
-                                    )
-                                }
-                            }
-                            chosen = emptySet()
-                            selected = null
-                            trips = emptyList()
-                            loadedPages = 0
-                            allLoaded = false
-                            loadNextPage()
-                            merging = false
-                        }
-                    }
-                }
-                if (chosen.isNotEmpty() && !merging) {
-                    Chip("CLEAR", false, palette, m) { chosen = emptySet() }
                 }
             }
             when {
