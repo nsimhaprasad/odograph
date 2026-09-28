@@ -4,9 +4,14 @@ build/
 local.properties
 keystore.properties
 *.jks
+*.keystore
 .DS_Store
 .idea/
 
 # Intermediate build artefacts. dist/odograph.apk is the served one and stays tracked; the
 # per-version copies are ten megabytes each and would bloat the history for no benefit.
 dist/odograph-0.*.apk
+
+# The setup page bakes in the live sheet /exec URL, which is the write key to the
+# backup. It is generated per-deployment and must never be committed.
+dist/setup.html
