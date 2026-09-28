@@ -364,6 +364,12 @@ object DashboardServer {
                         val vin = params["tl_vin"]?.trim().orEmpty()
                         // Which protocol to speak to MG with. Unknown values fall back to today's.
                         params["tl_api"]?.trim()?.takeIf { it.isNotBlank() }?.let { settings.telematicsApi = it }
+                        // A verification code entered from the laptop instead of the car screen.
+                        params["tl_otp"]?.trim()?.takeIf { it.isNotBlank() }?.let {
+                            TripRecorderService.submitOtp(it)
+                        }
+                        // Forget the saved MG session, forcing a fresh sign-in next poll.
+                        if (params["tl_forget_session"] == "1") settings.telematicsSession = null
 
                         // "Try my connection" logs into the real account before anything is kept;
                         // only a successful round-trip stores the credentials. "Save" (or a plain

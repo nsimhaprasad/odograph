@@ -16,6 +16,10 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -245,6 +249,20 @@ fun OdographApp() {
                 )
             }
         }
+
+        // MG has asked for a verification code before it will sign the box in. Rare — password
+        // login is the norm — but when it happens a headless box cannot answer on its own, so the
+        // driver reads the SMS on their phone and types it here.
+        val otp = live.pendingOtp
+        if (otp != null) {
+            OtpDialog(
+                message = otp.message,
+                palette = palette,
+                m = m,
+                onSubmit = { code -> TripRecorderService.submitOtp(code) },
+                onDismiss = { TripRecorderService.clearOtpPrompt() }
+            )
+        }
       }
     }
 }
@@ -278,5 +296,49 @@ private fun TelematicsPill(connected: Boolean?, palette: Palette, m: Metrics) {
             letterSpacing = 1.2.sp,
             maxLines = 1
         )
+    }
+}
+
+/**
+ * The one-time verification prompt. Deliberately plain: a code field and two actions, over a dim
+ * scrim, so it reads the same on the driving glass as on the passenger screen. Submitting hands
+ * the code to the poller, which completes the sign-in and clears this on success.
+ */
+@Composable
+private fun OtpDialog(
+    message: String,
+    palette: `in`.odograph.tracker.ui.theme.Palette,
+    m: Metrics,
+    onSubmit: (String) -> Unit,
+    onDismiss: () -> Unit
+) {
+    Box(
+        Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.65f)),
+        contentAlignment = androidx.compose.ui.Alignment.Center
+    ) {
+        var code by remember { mutableStateOf("") }
+        Column(
+            Modifier
+                .background(palette.trackSoft, RoundedCornerShape(10.dp))
+                .padding(m.pad),
+            verticalArrangement = Arrangement.spacedBy(m.gap / 2)
+        ) {
+            Text("MG VERIFICATION", color = palette.label, fontSize = m.label, letterSpacing = 2.2.sp)
+            Text(message, color = palette.numeral, fontSize = m.body)
+            OutlinedTextField(
+                value = code,
+                onValueChange = { code = it.filter { c -> c.isDigit() }.take(8) },
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                colors = textFieldColors(palette),
+                modifier = Modifier.fillMaxWidth()
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(m.gap / 2)) {
+                Chip("SUBMIT", code.length >= 4, palette, m) {
+                    if (code.length >= 4) onSubmit(code)
+                }
+                Chip("DISMISS", false, palette, m) { onDismiss() }
+            }
+        }
     }
 }

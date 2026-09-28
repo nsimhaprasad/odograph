@@ -146,6 +146,12 @@ class TripRecorderService : Service() {
          */
         val pendingChargePrompt: ChargePrompt? = null,
         /**
+         * Set when MG has asked for a verification code before it will sign the box in. The driving
+         * screen shows a prompt; [submitOtp] carries the driver's answer back to the poller. Null
+         * whenever no code is being asked for, which is almost always.
+         */
+        val pendingOtp: OtpPrompt? = null,
+        /**
          * Where the car is, from the last fix. Carried on the live state so a screen can answer
          * "how far is that from here" without reaching into the recorder or re-reading the points
          * table. Null before the first fix.
@@ -153,6 +159,9 @@ class TripRecorderService : Service() {
         val lat: Double? = null,
         val lon: Double? = null
     )
+
+    /** MG wants a one-time verification code before it will sign in. */
+    data class OtpPrompt(val message: String)
 
     /** What the charger the driver just used expects to be paid. */
     data class ChargePrompt(
@@ -251,6 +260,9 @@ class TripRecorderService : Service() {
         /** A one-shot "go now" flag. Coalesced by the min-interval floor, so it can never burst. */
         private val telematicsRefresh = MutableStateFlow(false)
 
+        /** A verification code the driver typed, waiting for the poller to complete the sign-in with. */
+        private val telematicsOtpSubmit = MutableStateFlow<String?>(null)
+
         /** The driver screen is where the MG battery tile lives; being there justifies live data. */
         fun setTelematicsScreenVisible(visible: Boolean) {
             telematicsVisible.value = visible
@@ -259,6 +271,17 @@ class TripRecorderService : Service() {
         /** User-triggered freshness (e.g. tapping the battery tile). Honours the min-interval floor. */
         fun requestTelematicsRefresh() {
             telematicsRefresh.value = true
+        }
+
+        /** The code the driver read off their phone. The poller completes the challenged sign-in with it. */
+        fun submitOtp(code: String) {
+            telematicsOtpSubmit.value = code.trim()
+            telematicsRefresh.value = true
+        }
+
+        /** Dismiss the verification prompt without answering it. */
+        fun clearOtpPrompt() {
+            _state.update { it.copy(pendingOtp = null) }
         }
 
         /** The running service, for requests that must land on its own serialised recorder. */
@@ -653,9 +676,13 @@ class TripRecorderService : Service() {
             val want = listOf(phone, password, settings.telematicsVin, settings.telematicsApi)
             if (client == null || creds != want) {
                 val framesDir = RawFrames.directory(this)
-                val fresh = VehicleLink.create(
+                // Seed the saved session, so a box that restarts every drive does not sign in
+                // every drive. With a session the first status() below validates it; a sign-in
+                // happens only when there is none, or when the server rejects the token.
+                client = VehicleLink.create(
                     settings.telematicsApi,
                     phone, password, settings.telematicsVin.takeIf { it.isNotBlank() },
+                    savedSession = settings.telematicsSession,
                     onRawResponse = { label, hex ->
                         val kind = when (label) {
                             "Status" -> "status.raw"
@@ -665,19 +692,11 @@ class TripRecorderService : Service() {
                         RawFrames.record(framesDir, kind, hex)
                     },
                 )
-                client = fresh
                 creds = want
-                runCatching { fresh.login() }
-                    .onFailure {
-                        Diagnostics.crumb("telematics login failed: $it")
-                        _state.update { it.copy(telematicsConnected = false) }
-                    }
-                runCatching { fresh.vehicles() }
-                    .onFailure {
-                        Diagnostics.crumb("telematics vehicles() failed: $it")
-                        _state.update { it.copy(telematicsConnected = false) }
-                    }
+                if (settings.telematicsSession == null) signInTelematics(client!!, settings)
             }
+            // A code the driver just typed, whatever else is going on: complete the sign-in with it.
+            if (telematicsOtpSubmit.value != null) signInTelematics(client!!, settings)
             val c = client
 
             runCatching {
@@ -867,10 +886,51 @@ class TripRecorderService : Service() {
             }.onFailure {
                 Diagnostics.crumb("telematics poll failed: $it")
                 _state.update { it.copy(telematicsConnected = false) }
-                // A stale session is the usual culprit; the next round logs in again.
-                runCatching { c.login() }
+                // A stale token is the usual culprit: forget it and sign in afresh, which may in
+                // turn surface a verification prompt. Nothing else clears the saved session, so a
+                // token stays reused until the server itself rejects it.
+                c?.clearSession()
+                settings.telematicsSession = null
+                c?.let { signInTelematics(it, settings) }
             }
             lastCallElapsed = SystemClock.elapsedRealtime()
+        }
+    }
+
+    /**
+     * Signs the box in, using a verification code if the driver has just supplied one, and keeps
+     * the outcome where the rest of the loop can see it.
+     *
+     * On success the session is persisted, so the next restart skips signing in, and any
+     * verification prompt is cleared. On an [io.windsor.telematics.OtpRequiredException] the prompt
+     * is raised for the driving screen to show — this is the moment MG has started asking for a
+     * code, and a headless box cannot answer it on its own. Any other failure is an ordinary
+     * outage and left to the reminder.
+     */
+    private suspend fun signInTelematics(link: VehicleLink, settings: Settings) {
+        val submitted = telematicsOtpSubmit.value
+        val outcome = runCatching {
+            if (submitted != null) link.loginWithOtp(submitted) else link.login()
+        }
+        telematicsOtpSubmit.value = null
+        outcome.onSuccess {
+            settings.telematicsSession = link.session()
+            _state.update { it.copy(pendingOtp = null) }
+            Diagnostics.crumb("telematics: signed in" + if (submitted != null) " with a code" else "")
+        }.onFailure { e ->
+            _state.update { it.copy(telematicsConnected = false) }
+            if (e is io.windsor.telematics.OtpRequiredException) {
+                Diagnostics.crumb("telematics: MG asked for a verification code")
+                _state.update {
+                    it.copy(
+                        pendingOtp = OtpPrompt(
+                            e.message ?: "MG wants the verification code it texted to your phone."
+                        )
+                    )
+                }
+            } else {
+                Diagnostics.crumb("telematics sign-in failed: $e")
+            }
         }
     }
 

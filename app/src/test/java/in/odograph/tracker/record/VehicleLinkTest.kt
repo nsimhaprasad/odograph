@@ -35,4 +35,33 @@ class VehicleLinkTest {
             assertThat(VehicleLink.create(kind, "9876543210", "secret", "MYVIN").kind).isEqualTo(kind)
         }
     }
+
+    @Test
+    fun `a seeded session is exposed without a network call`() {
+        val saved = VehicleLink.SavedSession("uid-123", "token-abc")
+        val link = VehicleLink.create(VehicleLink.TAP_GATEWAY, "9876543210", "secret", "MYVIN", saved)
+
+        // create() seeds the client with the session, so session() returns it with no sign-in.
+        assertThat(link.session()).isEqualTo(saved)
+    }
+
+    @Test
+    fun `with no seed there is no session until a sign-in happens`() {
+        val link = VehicleLink.create(VehicleLink.TAP_GATEWAY, "9876543210", "secret", null)
+
+        assertThat(link.session()).isNull()
+    }
+
+    @Test
+    fun `clearing the session forgets it`() {
+        val link = VehicleLink.create(
+            VehicleLink.TAP_GATEWAY, "9876543210", "secret", null,
+            VehicleLink.SavedSession("u", "t")
+        )
+        assertThat(link.session()).isNotNull()
+
+        link.clearSession()
+
+        assertThat(link.session()).isNull()
+    }
 }

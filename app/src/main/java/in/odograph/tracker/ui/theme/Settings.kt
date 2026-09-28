@@ -130,6 +130,36 @@ class Settings(ctx: Context) {
         set(value) = prefs.edit().putString(KEY_TL_API, value.trim().lowercase()).apply()
 
     /**
+     * The signed-in MG session, kept so the box does not sign in on every drive.
+     *
+     * Bound to a fingerprint of the credentials it was issued for: change the phone, password, VIN
+     * or protocol and the fingerprint no longer matches, so the saved token is ignored and a fresh
+     * sign-in happens. That is what a verification-code challenge is designed to trip, so it is
+     * made rare on purpose — the token is reused until the server itself rejects it.
+     */
+    private fun credsFingerprint(): String =
+        (telematicsPhone + "|" + telematicsPassword + "|" + telematicsVin + "|" + telematicsApi).hashCode().toString()
+
+    var telematicsSession: `in`.odograph.tracker.record.VehicleLink.SavedSession?
+        get() {
+            if (prefs.getString(KEY_TL_SESS_FP, null) != credsFingerprint()) return null
+            val uid = prefs.getString(KEY_TL_SESS_UID, null) ?: return null
+            val token = prefs.getString(KEY_TL_SESS_TOKEN, null) ?: return null
+            return `in`.odograph.tracker.record.VehicleLink.SavedSession(uid, token)
+        }
+        set(value) {
+            prefs.edit().apply {
+                if (value == null) {
+                    remove(KEY_TL_SESS_UID); remove(KEY_TL_SESS_TOKEN); remove(KEY_TL_SESS_FP)
+                } else {
+                    putString(KEY_TL_SESS_UID, value.uid)
+                    putString(KEY_TL_SESS_TOKEN, value.token)
+                    putString(KEY_TL_SESS_FP, credsFingerprint())
+                }
+            }.apply()
+        }
+
+    /**
      * Whether live MG battery/charge data is shown at all. Off disables the poller entirely, so
      * no MG server calls happen, and the driving screen never asks about the battery.
      */
@@ -286,6 +316,9 @@ class Settings(ctx: Context) {
         const val KEY_TL_PASSWORD = "tl_password"
         const val KEY_TL_VIN = "tl_vin"
         const val KEY_TL_API = "tl_api"
+        const val KEY_TL_SESS_UID = "tl_sess_uid"
+        const val KEY_TL_SESS_TOKEN = "tl_sess_token"
+        const val KEY_TL_SESS_FP = "tl_sess_fp"
         const val KEY_TL_ENABLED = "tl_enabled"
         const val KEY_BATT_CAP = "battery_capacity_kwh"
         const val KEY_HOME_RATE = "home_rate_inr"
