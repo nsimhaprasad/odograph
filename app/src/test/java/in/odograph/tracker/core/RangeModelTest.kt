@@ -79,6 +79,21 @@ class RangeModelTest {
         assertThat(RangeModel.liveKwhPer100Km(0.53, 800.0)).isNull()
     }
 
+    /**
+     * The exact fault a driver caught: 4.7 km covered but only one whole-percent step of energy
+     * registered, so as distance grew against a frozen half-a-kilowatt-hour the figure had climbed
+     * from 350 km to 418 km — a quantisation sawtooth, not the car getting more efficient. Past
+     * the distance gate, but a single step is a ±50% measurement, so it must say nothing until
+     * enough steps have accrued to divide by.
+     */
+    @Test
+    fun `distance without enough energy is quantisation, not a measurement`() {
+        assertThat(RangeModel.liveKwhPer100Km(energyKwh = 0.5, distanceM = 4_690.0)).isNull()
+        // Three steps in it speaks: 1.6 kWh over 12 km is 13.3 kWh/100km.
+        assertThat(RangeModel.liveKwhPer100Km(energyKwh = 1.6, distanceM = 12_000.0)!!)
+            .isCloseTo(13.33, within(0.1))
+    }
+
     // ---------------------------------------------------------------- turning it into kilometres
 
     @Test

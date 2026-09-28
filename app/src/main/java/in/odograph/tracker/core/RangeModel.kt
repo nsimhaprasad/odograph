@@ -36,6 +36,18 @@ object RangeModel {
     const val MIN_LIVE_DISTANCE_M = BatteryMath.MIN_EFFICIENCY_DISTANCE_M
 
     /**
+     * Energy this drive must have drawn before its own figure is trusted, kW·h.
+     *
+     * The distance gate is not enough on its own. The car reports charge in whole percent — about
+     * half a kilowatt-hour a step — so a drive well past [MIN_LIVE_DISTANCE_M] can still have only
+     * a single step of energy against it, and one step is a ±50% measurement. Dividing a growing
+     * distance by that frozen half-a-kilowatt-hour makes the figure climb between ticks and drop
+     * at the next: a sawtooth the driver reads as the range "suddenly increasing". Three steps in,
+     * the quantisation is under a fifth and the figure is worth showing.
+     */
+    const val MIN_LIVE_ENERGY_KWH = 1.5
+
+    /**
      * What the car has really cost across every drive it has recorded.
      *
      * The median rather than the mean, for the same reason the buckets use one: consumption has a
@@ -60,9 +72,14 @@ object RangeModel {
      * allowed to be volatile, because a driver asking it has just changed something — joined a
      * motorway, switched the air conditioning on, started up a hill — and wants to see the
      * consequence rather than have it averaged away.
+     *
+     * It is volatile once it appears, but it does not appear until [MIN_LIVE_ENERGY_KWH] has
+     * actually been drawn. Below that the whole-percent energy reading is too coarse to divide by,
+     * and what looks like volatility is quantisation rather than driving.
      */
     fun liveKwhPer100Km(energyKwh: Double?, distanceM: Double): Double? {
         if (distanceM < MIN_LIVE_DISTANCE_M) return null
+        if (energyKwh == null || energyKwh < MIN_LIVE_ENERGY_KWH) return null
         return BatteryMath.kwhPer100Km(energyKwh, distanceM)
     }
 
