@@ -93,15 +93,15 @@ fun secondaryStats(live: TripRecorderService.LiveState): List<DriverStat> = buil
             add(DriverStat("~₹%.0f".format(live.estimatedTripCostInr), "COST EST"))
     }
     live.batteryMileageKmPerKwh?.let { add(DriverStat("%.1f".format(it), "KM/KWH")) }
+    // State of health, high in the order so the cap never drops it — a driver checks it rarely
+    // but wants it there when they look. Precise to a decimal; changes over months not minutes.
+    live.batterySohPercent?.let { add(DriverStat("%.1f%%".format(it), "BATTERY SOH")) }
     // The same charge read two other ways. They sit next to each other on purpose: where they
     // disagree is the information — a live figure well above the lifetime one is a gentle hour,
     // well below it is a hint to ease off — and neither means much without the other for scale.
     live.liveRangeKm?.let { add(DriverStat("%.0f".format(it), "KM THIS DRIVE")) }
     live.lifetimeRangeKm?.let { add(DriverStat("%.0f".format(it), "KM LIFETIME")) }
     live.batteryRangeAtFullKm?.let { add(DriverStat("%.0f".format(it), "KM AT FULL")) }
-    // The pack's health, precise to a decimal because the 100%-charge readings carry no
-    // division error. Changes over months, not minutes, so it sits with the slow figures.
-    live.batterySohPercent?.let { add(DriverStat("%.1f%%".format(it), "BATTERY SOH")) }
     if (live.elevGainM > 0 || live.elevLossM > 0) {
         add(DriverStat("↑%.0f ↓%.0f".format(live.elevGainM, live.elevLossM), "CLIMB M"))
     }

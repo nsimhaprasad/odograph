@@ -186,6 +186,7 @@ fun InsightsScreen(palette: Palette) {
                 }
             }
 
+            sohHeadline(ui, palette, m)
             costSection(ui, palette, m)
             rangeSection(ui, palette, m)
             conditionsSection(ui, palette, m)
@@ -371,10 +372,44 @@ private fun conditionsSection(ui: InsightsUi, palette: Palette, m: Metrics) {
 }
 
 /**
- * What the pack measures against what it was sold as.
+ * The pack's health, first thing on the screen and the size of a headline.
  *
- * The car never states its capacity, but near a full charge it reports the energy held and the
- * percentage that represents, and those two together are a direct measurement.
+ * State of health is the one number a driver asks about their battery and never had put plainly:
+ * it sat as a line inside a section three scrolls down. Here it is big, coloured by how healthy it
+ * is, with the measured capacity and how many readings it rests on beneath — the whole answer in
+ * one glance, and the detail still below for anyone who wants it.
+ */
+@Composable
+private fun sohHeadline(ui: InsightsUi, palette: Palette, m: Metrics) {
+    val health = ui.health ?: return
+    val soh = health.sohPercent ?: return
+    val colour = when {
+        !health.consistent -> palette.caution
+        soh >= 90.0 -> palette.good
+        soh >= 80.0 -> palette.caution
+        else -> palette.warn
+    }
+    Column(Modifier.padding(bottom = m.gap)) {
+        Text(
+            text = "BATTERY STATE OF HEALTH",
+            color = palette.label, fontSize = m.label, letterSpacing = 2.2.sp,
+            modifier = Modifier.padding(bottom = m.gap / 3)
+        )
+        Stat("%.1f%%".format(soh), "OF %.1f kWh NAMEPLATE".format(BatteryMath.DEFAULT_CAPACITY_KWH),
+            palette, m, contentColor = colour)
+        Text(
+            text = "measured %.1f kWh full, from %d near-full readings%s".format(
+                health.capacityKwh, health.readings,
+                if (health.consistent) "" else " — readings scattered, treat as rough"
+            ),
+            color = palette.dim, fontSize = m.label,
+            modifier = Modifier.padding(top = m.gap / 4)
+        )
+    }
+}
+
+/**
+ * What the pack measures against what it was sold as — the detail beneath the headline.
  */
 @Composable
 private fun healthSection(ui: InsightsUi, palette: Palette, m: Metrics) {
