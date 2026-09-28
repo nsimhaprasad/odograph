@@ -130,6 +130,18 @@ class Settings(ctx: Context) {
         set(value) = prefs.edit().putString(KEY_TL_API, value.trim().lowercase()).apply()
 
     /**
+     * How close a drive's endpoint must come to a *named* place to count as that place, metres.
+     *
+     * Auto-clusters stay tight (150 m) so the map does not smear, but a place you have named is a
+     * destination you care about, and arriving a street away from home is still arriving home. A
+     * wider capture for named places means a handful of labels collapse the dozens of near-identical
+     * auto-fragments a real neighbourhood produces. Default 1.2 km, the middle of "one or two".
+     */
+    var placeCaptureRadiusM: Double
+        get() = prefs.getFloat(KEY_PLACE_RADIUS, 1200f).toDouble()
+        set(value) = prefs.edit().putFloat(KEY_PLACE_RADIUS, value.toFloat().coerceIn(150f, 5000f)).apply()
+
+    /**
      * The signed-in MG session, kept so the box does not sign in on every drive.
      *
      * Bound to a fingerprint of the credentials it was issued for: change the phone, password, VIN
@@ -316,6 +328,7 @@ class Settings(ctx: Context) {
         const val KEY_TL_PASSWORD = "tl_password"
         const val KEY_TL_VIN = "tl_vin"
         const val KEY_TL_API = "tl_api"
+        const val KEY_PLACE_RADIUS = "place_capture_radius_m"
         const val KEY_TL_SESS_UID = "tl_sess_uid"
         const val KEY_TL_SESS_TOKEN = "tl_sess_token"
         const val KEY_TL_SESS_FP = "tl_sess_fp"

@@ -1203,7 +1203,7 @@ class TripRecorderService : Service() {
         val closed = tripId
         // Pricing is not passed in: a closing drive is billed from the fills that preceded it,
         // by driveCost, and the flat rates that used to travel here were read by nothing.
-        recovery = TripRecovery.close(dao, closed, capacityKwh = settings.batteryCapacityKwh)
+        recovery = TripRecovery.close(dao, closed, capacityKwh = settings.batteryCapacityKwh, placeCaptureRadiusM = settings.placeCaptureRadiusM)
         tripId = NO_TRIP
         startedAt = null
         pendingFixes.clear()
@@ -1456,7 +1456,7 @@ class TripRecorderService : Service() {
                 // happened and report the per-location kWh.
                 lastFix?.let { fix ->
                     if (fix.lat.isFinite() && fix.lon.isFinite()) {
-                        val placeId = PlaceResolver(dao).resolve(fix.lat, fix.lon)
+                        val placeId = PlaceResolver(dao, labeledRadiusM = settings.placeCaptureRadiusM).resolve(fix.lat, fix.lon)
                         dao.setChargePlace(e.id, placeId, fix.lat, fix.lon)
                     }
                 }

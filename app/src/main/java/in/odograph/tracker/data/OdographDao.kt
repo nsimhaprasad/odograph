@@ -470,6 +470,20 @@ interface OdographDao {
     @Query("UPDATE trips SET startPlaceId = :startId, endPlaceId = :endId WHERE id = :id")
     fun setTripPlaces(id: Long, startId: Long?, endId: Long?)
 
+    /** Re-points every trip that began or ended at [from] to [to]. For absorbing a place into a named one. */
+    @Query("UPDATE trips SET startPlaceId = :to WHERE startPlaceId = :from")
+    fun repointTripStarts(from: Long, to: Long)
+
+    @Query("UPDATE trips SET endPlaceId = :to WHERE endPlaceId = :from")
+    fun repointTripEnds(from: Long, to: Long)
+
+    /** Re-points charge sessions filed at a place too, so an absorbed place leaves nothing pointing at it. */
+    @Query("UPDATE charge_events SET placeId = :to WHERE placeId = :from")
+    fun repointChargePlaces(from: Long, to: Long)
+
+    @Query("DELETE FROM places WHERE id = :id")
+    fun deletePlace(id: Long)
+
     /**
      * Per-place charge totals for the locations section: how many sessions, and the kWh and cost
      * they carried, grouped by the place the session charged at. The join resolves the label the

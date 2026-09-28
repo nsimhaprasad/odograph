@@ -168,7 +168,8 @@ object TripRecovery {
     fun close(
         dao: OdographDao,
         tripId: Long,
-        capacityKwh: Double = BatteryMath.DEFAULT_CAPACITY_KWH
+        capacityKwh: Double = BatteryMath.DEFAULT_CAPACITY_KWH,
+        placeCaptureRadiusM: Double = 1200.0
     ): Recovery {
         val trip = dao.tripById(tripId) ?: return Recovery()
         val points = dao.pointsFor(tripId)
@@ -241,7 +242,7 @@ object TripRecovery {
 
         // Now that the trip has real endpoints, attach it to the places it ran between. This is
         // what makes "most visited route" answerable with a GROUP BY.
-        val places = PlaceResolver(dao)
+        val places = PlaceResolver(dao, labeledRadiusM = placeCaptureRadiusM)
         val fresh = dao.tripById(tripId)
         dao.setTripPlaces(
             id = tripId,

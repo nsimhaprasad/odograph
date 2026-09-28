@@ -317,9 +317,17 @@ fun PlacesScreen(palette: Palette) {
                                     scope.launch {
                                         withContext(Dispatchers.IO) {
                                             loaded {
-                                                dao.setPlaceLabel(
-                                                    place.id, renameText.trim().ifBlank { null }
-                                                )
+                                                val label = renameText.trim().ifBlank { null }
+                                                dao.setPlaceLabel(place.id, label)
+                                                // Naming a place folds its nearby unnamed
+                                                // fragments into it, so the map stops showing a
+                                                // dozen versions of the same neighbourhood.
+                                                if (label != null) {
+                                                    `in`.odograph.tracker.record.PlaceMerge.absorbNearby(
+                                                        dao, place.id,
+                                                        Settings(ctx).placeCaptureRadiusM
+                                                    )
+                                                }
                                             }
                                         }
                                         renamingId = null
@@ -335,9 +343,17 @@ fun PlacesScreen(palette: Palette) {
                                     scope.launch {
                                         withContext(Dispatchers.IO) {
                                             loaded {
-                                                dao.setPlaceLabel(
-                                                    place.id, renameText.trim().ifBlank { null }
-                                                )
+                                                val label = renameText.trim().ifBlank { null }
+                                                dao.setPlaceLabel(place.id, label)
+                                                // Naming a place folds its nearby unnamed
+                                                // fragments into it, so the map stops showing a
+                                                // dozen versions of the same neighbourhood.
+                                                if (label != null) {
+                                                    `in`.odograph.tracker.record.PlaceMerge.absorbNearby(
+                                                        dao, place.id,
+                                                        Settings(ctx).placeCaptureRadiusM
+                                                    )
+                                                }
                                             }
                                         }
                                         renamingId = null

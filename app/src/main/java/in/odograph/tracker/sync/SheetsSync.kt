@@ -172,7 +172,7 @@ object SheetsSync {
             json.optDouble("gstRatePct", Double.NaN).takeIf { !it.isNaN() }?.let {
                 settings.gstRatePct = it; applied++
             }
-            val named = applyPlaceLabels(OdographDb.get(ctx).dao(), json)
+            val named = applyPlaceLabels(OdographDb.get(ctx).dao(), json, settings.placeCaptureRadiusM)
             val message = "Imported $applied of 4 control values" +
                 (if (named > 0) " and named $named place${if (named == 1) "" else "s"} from the sheet." else ".")
             val nothingApplied = applied == 0 && named == 0
@@ -192,7 +192,7 @@ object SheetsSync {
     fun importPlaceLabels(ctx: Context, url: String): Int {
         if (url.isBlank() || Outbound.isSpreadsheetLink(url)) return 0
         return runCatching {
-            applyPlaceLabels(OdographDb.get(ctx).dao(), JSONObject(Outbound.getBody(url)))
+            applyPlaceLabels(OdographDb.get(ctx).dao(), JSONObject(Outbound.getBody(url)), Settings(ctx).placeCaptureRadiusM)
         }.getOrDefault(0)
     }
 
@@ -201,7 +201,11 @@ object SheetsSync {
      * input, so it wins; a blank cell is left alone rather than treated as "erase the name",
      * because a driver clears a field far less often than they leave one empty.
      */
-    internal fun applyPlaceLabels(dao: `in`.odograph.tracker.data.OdographDao, json: JSONObject): Int {
+    internal fun applyPlaceLabels(
+        dao: `in`.odograph.tracker.data.OdographDao,
+        json: JSONObject,
+        captureRadiusM: Double = 1200.0
+    ): Int {
         val arr = json.optJSONArray("placeLabels") ?: return 0
         var n = 0
         for (i in 0 until arr.length()) {
@@ -210,7 +214,13 @@ object SheetsSync {
             val label = o.optString("label").trim()
             if (id < 0 || label.isBlank()) continue
             val place = dao.placeById(id) ?: continue
-            if (place.label != label) { dao.setPlaceLabel(id, label); n++ }
+            if (place.label != label) {
+                dao.setPlaceLabel(id, label)
+                // A freshly named place swallows its unnamed neighbours, so naming one anchor in
+                // the sheet collapses the fragments a neighbourhood produced into it.
+                `in`.odograph.tracker.record.PlaceMerge.absorbNearby(dao, id, captureRadiusM)
+                n++
+            }
         }
         return n
     }

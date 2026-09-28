@@ -14,10 +14,27 @@ import `in`.odograph.tracker.data.PlaceEntity
  */
 class PlaceResolver(
     private val dao: OdographDao,
-    private val radiusM: Double = 150.0
+    private val radiusM: Double = 150.0,
+    private val labeledRadiusM: Double = 1200.0
 ) {
     fun resolve(lat: Double, lon: Double): Long {
-        val nearest = dao.allPlaces().minByOrNull {
+        val places = dao.allPlaces()
+
+        // A named place captures within the wide radius: arriving a street away from home is
+        // still arriving home. Nearest named place wins, and its centroid is left where the
+        // driver anchored it — only the visit is counted, never averaged away.
+        val labeled = places.filter { it.label != null }
+            .map { it to Geo.haversineMetres(it.lat, it.lon, lat, lon) }
+            .filter { it.second <= labeledRadiusM }
+            .minByOrNull { it.second }
+        if (labeled != null) {
+            val p = labeled.first
+            dao.updatePlacePosition(p.id, p.lat, p.lon, p.visits.coerceAtLeast(0) + 1)
+            return p.id
+        }
+
+        // Otherwise the tight auto-cluster rule, unchanged.
+        val nearest = places.minByOrNull {
             Geo.haversineMetres(it.lat, it.lon, lat, lon)
         }
         if (nearest != null &&
