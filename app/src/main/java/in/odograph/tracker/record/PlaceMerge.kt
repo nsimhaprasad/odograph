@@ -17,15 +17,27 @@ import `in`.odograph.tracker.data.OdographDao
  */
 object PlaceMerge {
 
-    /** Absorbs unnamed neighbours of [placeId] within [radiusM]. Returns how many were folded in. */
+    /**
+     * Absorbs unnamed neighbours of [placeId] within [radiusM]. Returns how many were folded in.
+     *
+     * A fragment is only taken if this named place is the *nearest* named place to it. Two named
+     * places a kilometre and a half apart — a house and a friend's house down the road — must each
+     * keep their own side, and a fragment that sits between them belongs to whichever it is closer
+     * to, not to whichever happened to be named first. Without this a fragment 700 m from one and
+     * 1.2 km from the other could be claimed by the wrong one purely by order.
+     */
     fun absorbNearby(dao: OdographDao, placeId: Long, radiusM: Double): Int {
         val target = dao.placeById(placeId) ?: return 0
         if (target.label == null) return 0
+        val named = dao.allPlaces().filter { it.label != null }
         var folded = 0
         var addedVisits = 0
         for (p in dao.allPlaces()) {
             if (p.id == placeId || p.label != null) continue
             if (Geo.haversineMetres(target.lat, target.lon, p.lat, p.lon) > radiusM) continue
+            // Whichever named place is nearest to this fragment claims it, so the sides never cross.
+            val nearest = named.minByOrNull { Geo.haversineMetres(it.lat, it.lon, p.lat, p.lon) }
+            if (nearest?.id != placeId) continue
             dao.repointTripStarts(p.id, placeId)
             dao.repointTripEnds(p.id, placeId)
             dao.repointChargePlaces(p.id, placeId)

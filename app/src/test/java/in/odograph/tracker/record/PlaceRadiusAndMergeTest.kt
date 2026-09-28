@@ -132,4 +132,45 @@ class PlaceRadiusAndMergeTest {
 
         assertThat(PlaceMerge.absorbNearby(dao, id, radiusM = 1200.0)).isZero()
     }
+
+    /**
+     * Two named places close together — a house and a friend's house down the road — each keep
+     * their own side. A fragment between them goes to whichever it is nearer to, whichever place
+     * was named first.
+     */
+    @Test
+    fun `two nearby named places split the fragments between them by nearness`() {
+        // ~1.5 km apart on the same road.
+        val houseA = dao.insertPlace(PlaceEntity(lat = home.first, lon = home.second, visits = 10, label = "House A"))
+        val houseB = dao.insertPlace(PlaceEntity(lat = home.first, lon = home.second + km(1.5) / 0.974, visits = 10, label = "House B"))
+        // A fragment 0.4 km from A (so ~1.1 km from B).
+        val nearA = dao.insertPlace(PlaceEntity(lat = home.first + km(0.4), lon = home.second, visits = 2))
+        // A fragment 0.4 km from B.
+        val nearB = dao.insertPlace(PlaceEntity(lat = home.first, lon = home.second + (km(1.5) - km(0.4)) / 0.974, visits = 2))
+
+        // Absorb from A first, then B — order must not decide the outcome.
+        PlaceMerge.absorbNearby(dao, houseA, radiusM = 1200.0)
+        PlaceMerge.absorbNearby(dao, houseB, radiusM = 1200.0)
+
+        // nearA folded into A, nearB into B — neither crossed over.
+        assertThat(dao.placeById(nearA)).isNull()
+        assertThat(dao.placeById(nearB)).isNull()
+        assertThat(dao.placeById(houseA)!!.visits).isEqualTo(12)   // 10 + nearA's 2
+        assertThat(dao.placeById(houseB)!!.visits).isEqualTo(12)   // 10 + nearB's 2
+    }
+
+    /** Order independence: absorbing B first gives the same split. */
+    @Test
+    fun `the split does not depend on which named place absorbs first`() {
+        val houseA = dao.insertPlace(PlaceEntity(lat = home.first, lon = home.second, visits = 10, label = "A"))
+        val houseB = dao.insertPlace(PlaceEntity(lat = home.first, lon = home.second + km(1.5) / 0.974, visits = 10, label = "B"))
+        val nearA = dao.insertPlace(PlaceEntity(lat = home.first + km(0.4), lon = home.second, visits = 2))
+
+        PlaceMerge.absorbNearby(dao, houseB, radiusM = 1200.0)   // B first
+        assertThat(dao.placeById(nearA)).`as`("B must not claim A's fragment").isNotNull()
+
+        PlaceMerge.absorbNearby(dao, houseA, radiusM = 1200.0)
+        assertThat(dao.placeById(nearA)).isNull()
+        assertThat(dao.placeById(houseA)!!.visits).isEqualTo(12)
+    }
 }
