@@ -109,4 +109,43 @@ class BatteryHealthTest {
     fun `a trend needs both ends`() {
         assertThat(BatteryHealth.trendPercent(null, null)).isNull()
     }
+
+    // ------------------------------------------------- SOH: precise, and against nameplate
+
+    /**
+     * State of health is against the nameplate the pack was sold with (52.9 kWh), not whatever
+     * usable figure is configured for range, so it reads at or below 100% as a health should — and
+     * to a decimal, because the readings support it.
+     */
+    @Test
+    fun `soh is measured against nameplate and carries a decimal`() {
+        // Ten clean 100% readings, each showing 52.2 kWh held.
+        val samples = (1..10).map { sample(it, soc = 100.0, energyKwh = 52.2) }
+
+        val h = BatteryHealth.measure(samples)!!
+
+        assertThat(h.capacityKwh).isCloseTo(52.2, within(0.01))
+        assertThat(h.sohPercent!!).isCloseTo(98.7, within(0.1))   // 52.2 / 52.9
+    }
+
+    /**
+     * A reading at a true 100% has no division error and must count for more than one at 90%. The
+     * effect is deliberately mild — 90% is still a good reading — but it leans the figure the
+     * right way.
+     */
+    @Test
+    fun `a full-charge reading outweighs a lower one`() {
+        // Two at 100% -> 52.0 kWh, one at 90% -> 50.2 kWh (45.18/0.9). Plain mean would be 51.4.
+        val samples = listOf(
+            sample(3, soc = 100.0, energyKwh = 52.0),
+            sample(2, soc = 100.0, energyKwh = 52.0),
+            sample(1, soc = 90.0, energyKwh = 45.18)
+        )
+
+        val h = BatteryHealth.measure(samples)!!
+
+        assertThat(h.capacityKwh).isGreaterThan(51.4)             // pulled above the plain mean
+        assertThat(h.capacityKwh).isLessThan(52.0)
+    }
+
 }

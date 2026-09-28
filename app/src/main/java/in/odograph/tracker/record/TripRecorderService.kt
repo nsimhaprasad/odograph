@@ -19,6 +19,7 @@ import `in`.odograph.tracker.core.Fix
 import `in`.odograph.tracker.data.OdographDao
 import `in`.odograph.tracker.core.LiveTrack
 import `in`.odograph.tracker.core.BatteryMath
+import `in`.odograph.tracker.core.BatteryHealth
 import `in`.odograph.tracker.data.OdographDb
 import `in`.odograph.tracker.data.BatteryEntity
 import `in`.odograph.tracker.data.PointEntity
@@ -68,6 +69,8 @@ class TripRecorderService : Service() {
         val overLimit: Boolean = false,
         val speedLimitKmh: Int = 0,
         val batterySocPercent: Double? = null,
+        /** Measured pack state of health, percent of nameplate. Slowly-changing, cached. */
+        val batterySohPercent: Double? = null,
         val batteryCharging: Boolean? = null,
         /**
          * The MG telematics link. True after a poll round-trip (login + status) succeeded, false
@@ -500,6 +503,9 @@ class TripRecorderService : Service() {
     /** The blended fill rate this drive would be billed at, ₹ per kW·h. Same cadence as above. */
     @Volatile private var blendedRateInr: Double? = null
 
+    /** The pack's state of health, measured from near-full frames. Refreshed off the poll's hot path. */
+    @Volatile private var cachedSohPercent: Double? = null
+
     /** What the last run left behind, held until there is a trip to attach it to. */
     private var recovery = TripRecovery.Recovery()
 
@@ -841,6 +847,7 @@ class TripRecorderService : Service() {
                         )
                         _state.value = state.copy(
                             batterySocPercent = soc,
+                            batterySohPercent = cachedSohPercent,
                             batteryCharging = ch.isCharging,
                             batteryMileageKmPerKwh = readout.kmPerKwh,
                             batteryRangeAtFullKm = readout.rangeAtFullKm,
@@ -1235,6 +1242,10 @@ class TripRecorderService : Service() {
             // The cost of one kilowatt-hour *is* the blended rate: asking the real billing
             // function for it keeps this from ever disagreeing with how a measured drive is priced.
             blendedRateInr = TripRecovery.driveCost(dao, 1.0, startedAt ?: System.currentTimeMillis())
+            // State of health, measured against nameplate from the near-full frames.
+            cachedSohPercent = BatteryHealth.measure(
+                dao.highSocBattery(BatteryHealth.MIN_SOC_PERCENT)
+            )?.sohPercent
         }
     }
 

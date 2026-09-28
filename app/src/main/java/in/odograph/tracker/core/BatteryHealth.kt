@@ -76,28 +76,50 @@ object BatteryHealth {
         }
 
     /**
-     * The pack's measured capacity, from the most recent readings.
+     * The pack's measured capacity, from the most recent readings, and its state of health.
      *
-     * The median again, for the same reason as everywhere else here: one frame decoded oddly, or
-     * caught mid-balance, should not move a figure that is meant to change over years.
+     * Two passes, one for robustness and one for precision. First a median finds the middle and
+     * anything more than [CONSISTENCY_KWH] from it — a frame decoded oddly, or caught mid-balance
+     * — is dropped, so one bad reading cannot move a figure meant to change over years. Then the
+     * survivors are combined by a mean weighted by the square of the charge level.
+     *
+     * The weighting is the whole reason the figure is precise to a decimal rather than a band. The
+     * reading is `energy ÷ charge`, and the charge arrives in whole percent, so a rounding of half
+     * a percent is a 0.5% error at 100% and a 0.6% error at 90% — the error grows as 1/charge, and
+     * inverse-variance weighting is therefore charge². A reading taken at a true 100% has no
+     * division error at all and is worth far more than one at 90%; the weighting says exactly that.
+     *
+     * [sohPercent] is against [nameplateKwh] — the capacity the car was sold with (52.9 kWh),
+     * *not* whatever usable figure is configured for range — so it answers "how much of the
+     * battery I paid for is still there", and reads at or below 100% as a state of health should.
      */
     fun measure(
         samples: List<BatteryEntity>,
-        nominalKwh: Double = BatteryMath.DEFAULT_CAPACITY_KWH,
-        window: Int = 20
+        nameplateKwh: Double = BatteryMath.DEFAULT_CAPACITY_KWH,
+        window: Int = 40
     ): Health? {
         val recent = readings(samples).sortedByDescending { it.at }.take(window)
         if (recent.size < MIN_READINGS) return null
 
-        val capacities = recent.map { it.capacityKwh }
-        val measured = median(capacities)
+        val med = median(recent.map { it.capacityKwh })
+        val clean = recent.filter { abs(it.capacityKwh - med) <= CONSISTENCY_KWH }.ifEmpty { recent }
+        val measured = weightedMean(
+            clean.map { it.capacityKwh },
+            clean.map { it.socPercent * it.socPercent }
+        )
         return Health(
             capacityKwh = measured,
-            readings = recent.size,
-            spreadKwh = abs(capacities.max() - capacities.min()),
+            readings = clean.size,
+            spreadKwh = abs(clean.maxOf { it.capacityKwh } - clean.minOf { it.capacityKwh }),
             newestAt = recent.first().at,
-            sohPercent = if (nominalKwh > 0.0) measured / nominalKwh * 100.0 else null
+            sohPercent = if (nameplateKwh > 0.0) measured / nameplateKwh * 100.0 else null
         )
+    }
+
+    private fun weightedMean(values: List<Double>, weights: List<Double>): Double {
+        val total = weights.sum()
+        return if (total <= 0.0) values.average()
+        else values.zip(weights).sumOf { it.first * it.second } / total
     }
 
     /**

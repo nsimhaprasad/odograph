@@ -131,7 +131,7 @@ fun InsightsScreen(palette: Palette) {
                     byTemperature = EfficiencyStats.byTemperature(samples),
                     byClimate = EfficiencyStats.byClimate(samples),
                     health = BatteryHealth.measure(
-                        dao.highSocBattery(BatteryHealth.MIN_SOC_PERCENT), capacity
+                        dao.highSocBattery(BatteryHealth.MIN_SOC_PERCENT)
                     ),
                     healthTrendPercent = run {
                         // The same measurement over the older and newer halves of the near-full
@@ -427,10 +427,15 @@ private fun healthSection(ui: InsightsUi, palette: Palette, m: Metrics) {
     // Scattered readings are quoted with a warning colour rather than silently, because a
     // capacity that will not sit still is a reason to distrust the figure, not to round it.
     DetailRow(
+        "STATE OF HEALTH",
+        health.sohPercent?.let { "%.1f%%".format(it) } ?: "—",
+        palette, m,
+        valueColor = if (health.consistent) palette.good else palette.caution,
+        valueWeight = FontWeight.Medium
+    )
+    DetailRow(
         "MEASURED AT FULL",
-        "%.1f kWh of %.1f  ·  %.0f%%".format(
-            health.capacityKwh, ui.capacityKwh, health.sohPercent ?: 0.0
-        ),
+        "%.1f kWh of %.1f nameplate".format(health.capacityKwh, BatteryMath.DEFAULT_CAPACITY_KWH),
         palette, m,
         valueColor = if (health.consistent) palette.numeral else palette.caution,
         valueWeight = FontWeight.Normal

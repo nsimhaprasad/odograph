@@ -99,6 +99,9 @@ fun secondaryStats(live: TripRecorderService.LiveState): List<DriverStat> = buil
     live.liveRangeKm?.let { add(DriverStat("%.0f".format(it), "KM THIS DRIVE")) }
     live.lifetimeRangeKm?.let { add(DriverStat("%.0f".format(it), "KM LIFETIME")) }
     live.batteryRangeAtFullKm?.let { add(DriverStat("%.0f".format(it), "KM AT FULL")) }
+    // The pack's health, precise to a decimal because the 100%-charge readings carry no
+    // division error. Changes over months, not minutes, so it sits with the slow figures.
+    live.batterySohPercent?.let { add(DriverStat("%.1f%%".format(it), "BATTERY SOH")) }
     if (live.elevGainM > 0 || live.elevLossM > 0) {
         add(DriverStat("↑%.0f ↓%.0f".format(live.elevGainM, live.elevLossM), "CLIMB M"))
     }
