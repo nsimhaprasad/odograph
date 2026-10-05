@@ -534,4 +534,44 @@ class BatteryMathTest {
         assertThat(w()).isNull()
         assertThat(w(500.0 to 0.1)).isNull()
     }
+
+    // ---- charging never bills a parked car for a drive ----
+
+    @Test
+    fun `a drive that ends on the charger is not billed for the charge`() {
+        // Trip 482: a 0.5 km hop, then the car parks and plugs in. The trailing charging frame
+        // must not be swept into the drive; without it there is no second reading to measure, so
+        // the drive is honestly unknown rather than a phantom 2.98 kWh.
+        val frames = listOf(
+            BatteryEntity(0, 1, 0, socPercent = 43.0, charging = false),
+            BatteryEntity(0, 2, 300_000, socPercent = 46.0, charging = true, chargingPowerKw = 40.0)
+        )
+        assertThat(BatteryMath.driveEnergyKwh(frames, capacity, distanceM = 500.0)).isNull()
+    }
+
+    @Test
+    fun `a genuine mid-journey charge stop is still accounted for`() {
+        // Charging between two driving stretches: only the ends are trimmed, so this is kept and
+        // the SOC swing plus the charge added back are billed over a real distance.
+        val frames = listOf(
+            BatteryEntity(0, 1, 0, socPercent = 90.0, charging = false),
+            BatteryEntity(0, 2, 60_000, socPercent = 85.0, charging = true, chargingPowerKw = 40.0),
+            BatteryEntity(0, 3, 120_000, socPercent = 80.0, charging = false)
+        )
+        assertThat(BatteryMath.driveEnergyKwh(frames, capacity, distanceM = 30_000.0)!!)
+            .isCloseTo(4.92 + 40.0 * 60.0 / 3600.0, within(0.01))
+    }
+
+    @Test
+    fun `a short trip still rejects absurd energy though km per kwh means nothing`() {
+        // 2.98 kWh over 0.5 km: under the 2 km floor the ratio is noise, but the energy is still
+        // impossible, so the guard now catches it and a repair can clear the stored value.
+        assertThat(BatteryMath.plausible(2.98, 500.0)).isFalse()
+        // A real short hop that just ticked a percent (about half a kWh) is fine.
+        assertThat(BatteryMath.plausible(0.5, 500.0)).isTrue()
+        // Negative energy (a net gain from regen or charge) is handled elsewhere, not here.
+        assertThat(BatteryMath.plausible(-1.0, 500.0)).isTrue()
+        // The long-trip rule is unchanged: a counter that barely moved is still implausible.
+        assertThat(BatteryMath.plausible(0.1, 13_800.0)).isFalse()
+    }
 }

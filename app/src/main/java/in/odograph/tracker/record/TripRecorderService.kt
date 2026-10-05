@@ -239,7 +239,7 @@ class TripRecorderService : Service() {
          * Bumped when a new correction is added, which reruns the pass over drives an earlier
          * revision already visited.
          */
-        private const val REPAIR_REVISION = 6
+        private const val REPAIR_REVISION = 7
 
         /** No trip is open. Battery frames recorded under it are parked readings, not a drive. */
         const val NO_TRIP = -1L

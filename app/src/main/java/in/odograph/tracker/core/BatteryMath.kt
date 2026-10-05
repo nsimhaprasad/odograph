@@ -175,15 +175,25 @@ object BatteryMath {
         // a drive whose frames all landed in the parked bucket threw from here and abandoned the
         // rest of that poll. Refusing empty input at the source covers every caller at once.
         if (frames.isEmpty()) return null
+        // Charging at the ends of the window is not part of the drive. A session that opens when
+        // the car parks and plugs in — or one still closing as it pulls away — gets swept into the
+        // trip when the boundary is loose, and consumedKwh then adds the charged energy back and
+        // bills a parked car for a drive it never made: a 0.5 km hop that ended on the charger
+        // measured 2.98 kWh and 24 rupees. Trimming only the ends leaves a genuine mid-journey
+        // charge stop (charging between two driving stretches) still accounted for.
+        val driving = frames
+            .dropWhile { it.charging == true }
+            .dropLastWhile { it.charging == true }
+        if (driving.isEmpty()) return null
         // A counter that barely moved over a real distance did not measure the drive; it missed
         // it. 0.1 kWh across 13.8 km was accepted here because 0.1 is more than zero, and the
         // drive went into the history at 138 km/kWh. The charge level is tried next, and if that
         // is just as impossible the drive is unknown — which the sweep will estimate honestly.
         val fromCar = counterDelta(
-            frames.first().powerUsageSinceLastChargeKwh,
-            frames.last().powerUsageSinceLastChargeKwh
+            driving.first().powerUsageSinceLastChargeKwh,
+            driving.last().powerUsageSinceLastChargeKwh
         )?.takeIf { it > 0.0 && plausible(it, distanceM) }
-        val energy = (fromCar ?: consumedKwh(frames, capacityKwh))?.takeIf { plausible(it, distanceM) }
+        val energy = (fromCar ?: consumedKwh(driving, capacityKwh))?.takeIf { plausible(it, distanceM) }
         return energy?.let { round2(it) }
     }
 
@@ -196,6 +206,23 @@ object BatteryMath {
      * charge level that did not move — and it must not reach the rolling mean the screen shows.
      */
     const val MAX_PLAUSIBLE_KM_PER_KWH = 12.0
+
+    /**
+     * The least distance a real drive covers per kW·h — the worst plausible consumption, flipped.
+     *
+     * Two kilometres per kW·h is fifty kW·h per hundred, which only a crawl in heavy traffic with
+     * the air conditioning at full against a hill approaches. Below a measurable distance the
+     * km/kWh ratio means nothing, but this still bounds how much energy a short hop can have drawn
+     * in absolute terms — the only thing that catches a parked car charged to a phantom drive.
+     */
+    const val MIN_PLAUSIBLE_KM_PER_KWH = 2.0
+
+    /**
+     * One charge-level step, kW·h, allowed on top of the short-trip bound for the quantisation
+     * that makes a short hop's energy imprecise in the first place. One percent of the pack is
+     * about half a kilowatt-hour; this leaves room for a little over that.
+     */
+    const val QUANTISATION_KWH = 0.6
 
     /**
      * The most the charge level may rise between two frames while the car is not charging.
@@ -228,10 +255,20 @@ object BatteryMath {
      * counter did not tick and the charge level did not move, and nothing was measured at all.
      */
     fun plausible(energyKwh: Double, distanceM: Double?): Boolean {
-        if (distanceM == null || distanceM < MIN_EFFICIENCY_DISTANCE_M) return true
         if (energyKwh < 0.0) return true
+        if (distanceM == null) return true
+        val km = distanceM / 1000.0
+        // Too short for km/kWh to mean anything, but not too short to be absurd. A crawl cannot
+        // draw more than the worst plausible rate over the distance, plus one charge-level step
+        // for the quantisation that makes the ratio meaningless. A 0.5 km hop reading 2.98 kWh was
+        // waved through here before, because anything under the distance floor was called fine.
+        // Zero energy is allowed below the floor (a hop that never ticked a percent) but not above
+        // it, exactly as before — only the upper bound on a short hop's energy is new.
+        if (distanceM < MIN_EFFICIENCY_DISTANCE_M) {
+            return energyKwh <= km / MIN_PLAUSIBLE_KM_PER_KWH + QUANTISATION_KWH
+        }
         if (energyKwh == 0.0) return false
-        return distanceM / 1000.0 / energyKwh <= MAX_PLAUSIBLE_KM_PER_KWH
+        return km / energyKwh <= MAX_PLAUSIBLE_KM_PER_KWH
     }
 
     /**
