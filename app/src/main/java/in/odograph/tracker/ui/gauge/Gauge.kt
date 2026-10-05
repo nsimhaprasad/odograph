@@ -45,6 +45,9 @@ fun Gauge(
             Direction.CHRONO -> drawChrono(c, r, t, p)
             Direction.VECTOR -> drawVector(c, r, t, p)
             Direction.AUDI -> drawAudi(c, r, t, p)
+            // The Horizon face renders its own linear layout and never routes through the dial,
+            // but the when must be total; ion is a harmless stand-in that is not reached.
+            Direction.HORIZON -> drawIon(c, r, t, p)
         }
         // The overspeed signal has to be structural, not chromatic. Recolouring the accent says
         // nothing on a theme whose accent is already red, so an extra ring is drawn instead: a

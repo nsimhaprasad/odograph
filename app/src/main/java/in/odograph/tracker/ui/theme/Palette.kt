@@ -2,7 +2,7 @@ package `in`.odograph.tracker.ui.theme
 
 import androidx.compose.ui.graphics.Color
 
-enum class Direction { ION, CHRONO, VECTOR, AUDI }
+enum class Direction { ION, CHRONO, VECTOR, AUDI, HORIZON }
 
 data class Palette(
     val ground: Color,
@@ -50,6 +50,12 @@ fun paletteFor(direction: Direction, night: Boolean): Palette {
         Direction.AUDI ->
             if (night) Color(0xFFE8112D) to Color(0xFFC2C8D0)
             else Color(0xFFB3000F) to Color(0xFF5A616B)
+        // Horizon is the linear face, and its accent carries the light. At night a soft,
+        // desaturated teal and indigo — low glare, soothing on a dark road. By day a deep,
+        // saturated teal and strong blue that hold their own against a bright cabin.
+        Direction.HORIZON ->
+            if (night) Color(0xFF5FD6C8) to Color(0xFF6E8BC9)
+            else Color(0xFF0A8F80) to Color(0xFF17539C)
     }
     return Palette(
         ground = if (night) NIGHT_GROUND else DAY_GROUND,

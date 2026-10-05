@@ -74,6 +74,12 @@ fun DriverScreen(
     direction: Direction,
     palette: Palette
 ) {
+    // The Horizon face is a different instrument, not a different dial, so it owns its whole
+    // screen rather than slotting into the gauge-plus-panels arrangement below.
+    if (direction == Direction.HORIZON) {
+        HorizonScreen(live, smoothedKmh, palette)
+        return
+    }
     BoxWithConstraints(Modifier.fillMaxSize().background(palette.ground)) {
         val m = rememberMetrics(maxWidth, maxHeight)
         val aspect = maxWidth.value / maxHeight.value.coerceAtLeast(1f)
@@ -473,7 +479,7 @@ private const val BATTERY_HEIGHT_PADS = 1.7f
  * literals this replaced — a mid-green and a mid-red written into the screen — washed out badly
  * against the day palette and sat too close to the ION accent at night.
  */
-private fun socColor(level: SocLevel, palette: Palette): Color = when (level) {
+internal fun socColor(level: SocLevel, palette: Palette): Color = when (level) {
     SocLevel.HEALTHY -> palette.good
     SocLevel.LOW -> palette.caution
     SocLevel.CRITICAL -> palette.warn
