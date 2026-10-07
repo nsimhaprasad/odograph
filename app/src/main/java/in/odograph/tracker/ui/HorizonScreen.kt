@@ -1,7 +1,12 @@
 package `in`.odograph.tracker.ui
 
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -25,6 +30,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -41,6 +47,8 @@ import androidx.compose.ui.unit.sp
 import `in`.odograph.tracker.record.TripRecorderService
 import `in`.odograph.tracker.ui.theme.Palette
 import kotlin.math.roundToInt
+import kotlin.math.sin
+import kotlin.random.Random
 
 /**
  * Horizon: the linear face.
@@ -346,7 +354,10 @@ private fun HzBattery(socFrac: Float, charging: Boolean, color: Color, palette: 
                     .fillMaxHeight(fill.coerceIn(0.045f, 1f))
                     .clip(RoundedCornerShape(w * 0.2f))
                     .background(color)
-            )
+            ) {
+                // Ions drifting up through the charge — a slow, soft rise, lighter than the fill.
+                HzIons(Modifier.fillMaxSize())
+            }
             if (charging) {
                 Text(
                     "⚡", color = palette.ground, fontSize = m.stat,
@@ -354,6 +365,44 @@ private fun HzBattery(socFrac: Float, charging: Boolean, color: Color, palette: 
                     modifier = Modifier.align(Alignment.Center)
                 )
             }
+        }
+    }
+}
+
+/** One rising ion: where across the width it sits, its phase offset, how fast it climbs, its size. */
+private class Ion(val x: Float, val phase0: Float, val speed: Float, val radius: Float)
+
+/**
+ * Charge drawn as ions drifting upward through the fill, like bubbles in water.
+ *
+ * A single looping phase moves every ion; each starts at its own offset and climbs at its own
+ * speed, drifting sideways on a sine as it goes, and fades in from the floor and out at the top so
+ * none pops. Decorative only — it reads the charge colour behind it and adds nothing a glance needs.
+ */
+@Composable
+private fun HzIons(modifier: Modifier) {
+    val ions = remember {
+        val r = Random(7)
+        List(9) { Ion(x = r.nextFloat(), phase0 = r.nextFloat(), speed = 0.55f + r.nextFloat() * 0.8f, radius = 0.05f + r.nextFloat() * 0.06f) }
+    }
+    val t = rememberInfiniteTransition(label = "ions")
+    val phase by t.animateFloat(
+        initialValue = 0f, targetValue = 1f,
+        animationSpec = infiniteRepeatable(tween(4600, easing = LinearEasing), RepeatMode.Restart),
+        label = "ionPhase"
+    )
+    Canvas(modifier) {
+        val w = size.width
+        val h = size.height
+        val unit = if (w < h) w else h
+        ions.forEach { ion ->
+            val y = (ion.phase0 + phase * ion.speed) % 1f           // 0 at floor, 1 at top
+            val cy = h * (1f - y)
+            val rad = unit * ion.radius
+            val drift = sin(((y + ion.phase0) * 6.2832f).toDouble()).toFloat() * w * 0.12f
+            val cx = (w * ion.x + drift).coerceIn(rad, w - rad)
+            val alpha = sin((y * 3.1416f).toDouble()).toFloat().coerceIn(0f, 1f) * 0.45f
+            if (alpha > 0.01f) drawCircle(Color.White.copy(alpha = alpha), rad, Offset(cx, cy))
         }
     }
 }

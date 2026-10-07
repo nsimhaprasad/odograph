@@ -179,6 +179,16 @@ class Settings(ctx: Context) {
         get() = prefs.getBoolean(KEY_TL_ENABLED, true)
         set(value) = prefs.edit().putBoolean(KEY_TL_ENABLED, value).apply()
 
+    /** Whether to prompt for the drive mode while driving. Cleared by the popup's "Don't ask". */
+    var askDriveMode: Boolean
+        get() = prefs.getBoolean(KEY_ASK_DRIVE_MODE, true)
+        set(value) = prefs.edit().putBoolean(KEY_ASK_DRIVE_MODE, value).apply()
+
+    /** The mode picked last, offered first next time so the common choice is one tap. */
+    var lastDriveMode: String?
+        get() = prefs.getString(KEY_LAST_DRIVE_MODE, null)
+        set(value) = prefs.edit().apply { if (value == null) remove(KEY_LAST_DRIVE_MODE) else putString(KEY_LAST_DRIVE_MODE, value) }.apply()
+
     /**
      * Usable battery capacity in kW·h, used to turn SOC deltas into energy and efficiency into
      * "range at 100%". Defaults to what the Windsor EV's own telematics reports.
@@ -324,6 +334,8 @@ class Settings(ctx: Context) {
         const val KEY_DOCS_CHARGE = "docs_charge_watermark"
         const val KEY_DOCS_DAY = "docs_day_watermark"
         const val KEY_DEVICE = "device_id"
+        const val KEY_ASK_DRIVE_MODE = "ask_drive_mode"
+        const val KEY_LAST_DRIVE_MODE = "last_drive_mode"
         const val KEY_TL_PHONE = "tl_phone"
         const val KEY_TL_PASSWORD = "tl_password"
         const val KEY_TL_VIN = "tl_vin"

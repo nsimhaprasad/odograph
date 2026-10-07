@@ -36,7 +36,12 @@ object BatteryFrame {
         distanceSinceLastChargeKm = ch.distanceSinceLastChargeKm,
         powerUsageSinceLastChargeKwh = ch.powerUsageSinceLastChargeKwh,
         exteriorTempC = status.exteriorTemperature,
-        climateRunning = status.climateRunning,
+        // The frame's own climate flag is remote pre-conditioning only (always off on a normal
+        // drive), so cooling is inferred from the cabin-to-outside gap, with the remote flag kept
+        // as a fallback when a temperature is missing.
+        climateRunning = BatteryMath.climateCooling(status.interiorTemperature, status.exteriorTemperature)
+            ?.let { it || status.climateRunning == true }
+            ?: status.climateRunning,
         interiorTempC = status.interiorTemperature,
         chargingType = ch.chargingType,
         pluggedIn = ch.isPluggedIn,

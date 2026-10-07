@@ -23,7 +23,7 @@
  * actually deployed" is one GET away instead of an inference from how the tabs look — a tab that
  * stays headerless after a redeploy means the redeploy did not take, and this says so directly.
  */
-var SCRIPT_VERSION = 5;
+var SCRIPT_VERSION = 6;
 
 /** Every tab this script owns, with the header it expects. Used by the export's self-check. */
 var TAB_HEADERS = {
@@ -33,7 +33,7 @@ var TAB_HEADERS = {
     'avg_temp_c','climate_share','car_energy_kwh','car_distance_km','cluster_id',
     'start_place_id','end_place_id',
     'estimated_energy_kwh','estimated_cost_inr','energy_source',
-      'min_temp_c','max_temp_c'],
+      'min_temp_c','max_temp_c','drive_mode'],
   Points: ['trip_id','t_ms','lat','lon','speed_mps','altitude_m','interpolated'],
   Charges: ['id','start','end','start_soc','end_soc','energy_kwh','peak_kw','kind','cost_inr',
     'delivered_kwh','place_id','samples_total','samples_above','reconstructed',
@@ -80,7 +80,7 @@ function doPost(e) {
       'avg_temp_c','climate_share','car_energy_kwh','car_distance_km','cluster_id',
       'start_place_id','end_place_id',
       'estimated_energy_kwh','estimated_cost_inr','energy_source',
-      'min_temp_c','max_temp_c'];
+      'min_temp_c','max_temp_c','drive_mode'];
     upsertRows(tripSheet, tripCols, trips.map(tripRow), 0);
 
     var pointSheet = tab(ss, 'Points');
@@ -356,7 +356,7 @@ function tripRow(t) {
     // Kept in their own columns, never merged into energy_kwh. That column is what the app's
     // efficiency model learns from, and a reckoned figure sitting in it would be trained on.
     n(t.estimatedEnergyKwh), n(t.estimatedCostInr), n(t.energySource),
-    n(t.minTempC), n(t.maxTempC)];
+    n(t.minTempC), n(t.maxTempC), n(t.driveMode)];
 }
 
 function pointRow(p) {

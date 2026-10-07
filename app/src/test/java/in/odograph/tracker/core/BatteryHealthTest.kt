@@ -76,6 +76,36 @@ class BatteryHealthTest {
         assertThat(BatteryHealth.measure(emptyList())).isNull()
     }
 
+    /**
+     * A DC fast charge holds the pack under load and often stops short of a true full, so its
+     * near-full energy is less settled than a home charge. Those frames are left out; a slow
+     * charge and a resting pack are kept.
+     */
+    @Test
+    fun `fast-charge frames are not used for health`() {
+        val fast = List(6) { i ->
+            BatteryEntity(
+                tripId = -1, t = 1_600_000_000_000L + i * 60_000L,
+                socPercent = 99.0, charging = true, chargingPowerKw = 50.0,
+                batteryEnergyKwh = 40.0 * 0.99
+            )
+        }
+        assertThat(BatteryHealth.readings(fast)).isEmpty()
+        assertThat(BatteryHealth.measure(fast)).isNull()
+    }
+
+    @Test
+    fun `a slow charge still counts for health`() {
+        val slow = List(6) { i ->
+            BatteryEntity(
+                tripId = -1, t = 1_600_000_000_000L + i * 60_000L,
+                socPercent = 97.0, charging = true, chargingPowerKw = 6.5,
+                batteryEnergyKwh = 52.9 * 0.97
+            )
+        }
+        assertThat(BatteryHealth.measure(slow)!!.capacityKwh).isEqualTo(52.9, within(0.3))
+    }
+
     @Test
     fun `frames missing either half of the sum are skipped`() {
         val partial = listOf(

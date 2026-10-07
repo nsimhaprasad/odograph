@@ -28,6 +28,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -103,6 +104,7 @@ private sealed interface TripRowItem {
 @Composable
 fun TripListScreen(showTiles: Boolean, palette: Palette) {
     val ctx = LocalContext.current
+    val editScope = rememberCoroutineScope()
     var trips by remember { mutableStateOf<List<TripEntity>>(emptyList()) }
     var selected by remember { mutableStateOf<TripEntity?>(null) }
     var route by remember { mutableStateOf<List<Pair<Double, Double>>>(emptyList()) }
@@ -426,7 +428,17 @@ fun TripListScreen(showTiles: Boolean, palette: Palette) {
                         detail = detail,
                         palette = palette,
                         m = m,
-                        fmt = fmt
+                        fmt = fmt,
+                        onSetMode = { id, mode ->
+                            editScope.launch {
+                                withContext(Dispatchers.IO) {
+                                    OdographDb.get(ctx).dao().setDriveMode(id, mode)
+                                    TripRecorderService.dataChanged.value =
+                                        TripRecorderService.dataChanged.value + 1
+                                }
+                            }
+                            if (selected?.id == id) selected = selected?.copy(driveMode = mode)
+                        }
                     )
                 }
                 route.isEmpty() -> {
@@ -550,7 +562,8 @@ private fun TripDetailPane(
     detail: TripDetail?,
     palette: Palette,
     m: Metrics,
-    fmt: SimpleDateFormat
+    fmt: SimpleDateFormat,
+    onSetMode: ((Long, String) -> Unit)? = null
 ) {
     val t = trip
     if (t == null || detail == null) {
@@ -585,6 +598,13 @@ private fun TripDetailPane(
             fontSize = m.body,
             modifier = Modifier.padding(top = m.gap / 3)
         )
+
+        // The drive mode is entered by hand (the car does not report it) and can be set or changed
+        // here at any time; the popup only asks when a mode is still blank.
+        onSetMode?.let { set ->
+            SectionLabel("DRIVE MODE", palette, m)
+            DriveModeRow(t.driveMode, palette, m) { set(t.id, it) }
+        }
 
         // Above the route, because it is the question the driver actually arrives with. Everything
         // below is what happened; this is whether we saw it coming.

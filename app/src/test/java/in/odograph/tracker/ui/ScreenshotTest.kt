@@ -1,6 +1,12 @@
 package `in`.odograph.tracker.ui
 
 import android.graphics.Bitmap
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
 import android.graphics.Canvas
 import android.view.View
 import androidx.activity.ComponentActivity
@@ -90,6 +96,32 @@ class ScreenshotTest {
         val bitmap = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
         view.draw(Canvas(bitmap))
 
+        val f = File(outDir, "$name.png")
+        f.outputStream().use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
+        assertThat(f.length()).`as`("$name.png should not be empty").isGreaterThan(1_000L)
+        println("SHOT ${f.absolutePath} ${w}x$h ${f.length()}b")
+    }
+
+    /**
+     * For a screen with a looping animation (the Horizon battery's ions): idle never arrives, so
+     * waitForIdle would hang. The caller sets mainClock.autoAdvance = false before setContent; this
+     * advances the clock a fixed amount — enough to settle the finite fill/colour animations and
+     * catch the ions mid-rise — and draws that frame without ever waiting for idle.
+     */
+    private fun shootStill(name: String) {
+        compose.mainClock.advanceTimeBy(1_200)
+        val view: View = compose.activity.window.decorView
+        val metrics = compose.activity.resources.displayMetrics
+        val w = metrics.widthPixels
+        val h = metrics.heightPixels
+        view.measure(
+            View.MeasureSpec.makeMeasureSpec(w, View.MeasureSpec.EXACTLY),
+            View.MeasureSpec.makeMeasureSpec(h, View.MeasureSpec.EXACTLY)
+        )
+        view.layout(0, 0, w, h)
+        compose.mainClock.advanceTimeBy(60)
+        val bitmap = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+        view.draw(Canvas(bitmap))
         val f = File(outDir, "$name.png")
         f.outputStream().use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
         assertThat(f.length()).`as`("$name.png should not be empty").isGreaterThan(1_000L)
@@ -520,61 +552,85 @@ class ScreenshotTest {
 
     @Test
     @Config(qualifiers = "w1291dp-h726dp-land")
+    fun `drive mode dialog`() {
+        val pal = paletteFor(Direction.HORIZON, night = true)
+        compose.setContent {
+            BoxWithConstraints(Modifier.fillMaxSize().background(pal.ground)) {
+                val m = rememberMetrics(maxWidth, maxHeight)
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    DriveModeDialog(
+                        current = null, lastMode = "ECO+", palette = pal, m = m,
+                        onPick = {}, onSnooze = {}, onDontAsk = {}
+                    )
+                }
+            }
+        }
+        shoot("46-drive-mode-dialog")
+    }
+
+    @Test
+    @Config(qualifiers = "w1291dp-h726dp-land")
     fun `horizon box night`() {
+        compose.mainClock.autoAdvance = false
         compose.setContent {
             DriverScreen(liveFull.copy(batterySohPercent = 98.3, exteriorTempC = 28), 88.6f, Direction.HORIZON, paletteFor(Direction.HORIZON, night = true))
         }
-        shoot("40-horizon-box-night")
+        shootStill("40-horizon-box-night")
     }
 
     @Test
     @Config(qualifiers = "w1291dp-h726dp-land")
     fun `horizon box day`() {
+        compose.mainClock.autoAdvance = false
         compose.setContent {
             DriverScreen(liveFull.copy(batterySohPercent = 98.3, exteriorTempC = 28), 88.6f, Direction.HORIZON, paletteFor(Direction.HORIZON, night = false))
         }
-        shoot("41-horizon-box-day")
+        shootStill("41-horizon-box-day")
     }
 
     @Test
     @Config(qualifiers = "w1291dp-h726dp-land")
     fun `horizon low charge`() {
+        compose.mainClock.autoAdvance = false
         compose.setContent {
             DriverScreen(
                 liveFull.copy(batterySocPercent = 19.0, batteryRangeKm = 41.0, mgBatteryRangeKm = 44.0, batterySohPercent = 98.3, exteriorTempC = 28),
                 108.4f, Direction.HORIZON, paletteFor(Direction.HORIZON, night = true)
             )
         }
-        shoot("42-horizon-low")
+        shootStill("42-horizon-low")
     }
 
     @Test
     @Config(qualifiers = "w1291dp-h726dp-land")
     fun `horizon charging`() {
+        compose.mainClock.autoAdvance = false
         compose.setContent {
             DriverScreen(
                 liveFull.copy(batteryCharging = true, batterySocPercent = 71.0, batteryRangeKm = 320.0, speedMps = 0f, batterySohPercent = 98.3, exteriorTempC = 28),
                 0f, Direction.HORIZON, paletteFor(Direction.HORIZON, night = true)
             )
         }
-        shoot("43-horizon-charging")
+        shootStill("43-horizon-charging")
     }
 
     @Test
     @Config(qualifiers = "w645dp-h726dp")
     fun `horizon split vertical`() {
+        compose.mainClock.autoAdvance = false
         compose.setContent {
             DriverScreen(liveFull.copy(batterySohPercent = 98.3, exteriorTempC = 28), 72f, Direction.HORIZON, paletteFor(Direction.HORIZON, night = true))
         }
-        shoot("44-horizon-split-vertical")
+        shootStill("44-horizon-split-vertical")
     }
 
     @Test
     @Config(qualifiers = "w1291dp-h242dp-land")
     fun `horizon band`() {
+        compose.mainClock.autoAdvance = false
         compose.setContent {
             DriverScreen(liveFull.copy(batterySohPercent = 98.3, exteriorTempC = 28), 88.6f, Direction.HORIZON, paletteFor(Direction.HORIZON, night = true))
         }
-        shoot("45-horizon-band")
+        shootStill("45-horizon-band")
     }
 }

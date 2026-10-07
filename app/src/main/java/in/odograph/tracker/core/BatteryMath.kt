@@ -38,6 +38,28 @@ object BatteryMath {
     const val FAST_CHARGE_KW = 10.0
 
     /**
+     * How far below the outside air the cabin must sit to count as actively cooled, degrees C.
+     *
+     * The MG frame reports only REMOTE climate — the pre-conditioning started from the phone — and
+     * never the air conditioning a driver switches on mid-drive, so that flag reads off on every
+     * normal trip. The one signal the frame does carry is the two temperatures, and in this climate
+     * the air conditioning is for cooling: a cabin several degrees below the air outside is being
+     * cooled. Heating is not inferred — a cabin warmer than outside is sun through the glass, not a
+     * heater. Three degrees is past the gap a shaded car holds on its own.
+     */
+    const val CLIMATE_COOLING_DELTA_C = 3
+
+    /**
+     * Whether the cabin is being actively cooled, inferred from the cabin-to-outside gap. Null when
+     * either temperature is missing, so a frame with no reading is left out of the share rather than
+     * counted as "off".
+     */
+    fun climateCooling(interiorC: Int?, exteriorC: Int?): Boolean? {
+        if (interiorC == null || exteriorC == null) return null
+        return exteriorC - interiorC >= CLIMATE_COOLING_DELTA_C
+    }
+
+    /**
      * Power readings below this many are not evidence of a sustained {FAST,SLOW} profile — a
      * 3-sample session cannot distinguish a lone spike from real fast charging, so classification
      * falls back to the peak/average rule instead.

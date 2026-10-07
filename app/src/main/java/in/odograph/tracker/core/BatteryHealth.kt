@@ -72,6 +72,13 @@ object BatteryHealth {
             val soc = sample.socPercent ?: return@mapNotNull null
             val energy = sample.batteryEnergyKwh ?: return@mapNotNull null
             if (soc < MIN_SOC_PERCENT || soc <= 0.0 || energy <= 0.0) return@mapNotNull null
+            // Frames taken during a fast charge are not trusted for health. A DC charger holds the
+            // pack under heavy current and often stops at 99 rather than a true 100, so the energy
+            // it reports near full is less settled than a home AC charge or a resting pack. A slow
+            // charge (and a car just sitting) still reports what it holds, so those are kept.
+            if (sample.charging == true &&
+                (sample.chargingPowerKw ?: 0.0) >= BatteryMath.FAST_CHARGE_KW
+            ) return@mapNotNull null
             Reading(sample.t, energy / soc * 100.0, soc)
         }
 

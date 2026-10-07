@@ -100,7 +100,10 @@ data class TripEntity(
      * carried a reading.
      */
     val minTempC: Double? = null,
-    val maxTempC: Double? = null
+    val maxTempC: Double? = null,
+    /** The drive mode the driver was in (ECO+, ECO, DRIVE, SPORT), entered by hand — the car does
+     *  not report it over telematics. Null until set; editable later. */
+    val driveMode: String? = null
 )
 
 @Entity(tableName = "points", indices = [Index(value = ["tripId", "t"])])

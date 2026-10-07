@@ -68,6 +68,20 @@ fun OdographApp() {
     var hour by remember { mutableStateOf(currentHour(settings.zone)) }
 
     val live by TripRecorderService.state.collectAsState()
+
+    // Drive mode is entered by hand (the telematics does not report it). The popup asks once a
+    // drive is open and the mode is still unset, unless it has been snoozed or switched off.
+    val modeTick by TripRecorderService.dataChanged.collectAsState()
+    var tripMode by remember { mutableStateOf<String?>(null) }
+    var modeSnoozeUntil by remember { mutableStateOf(0L) }
+    var askMode by remember { mutableStateOf(settings.askDriveMode) }
+    var modeNow by remember { mutableStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(live.tripId, modeTick) {
+        tripMode = if (live.tripId >= 0)
+            withContext(Dispatchers.IO) { OdographDb.get(ctx).dao().tripById(live.tripId)?.driveMode }
+        else null
+    }
+    LaunchedEffect(Unit) { while (true) { delay(15_000); modeNow = System.currentTimeMillis() } }
     val spring = remember { SpeedSpring() }
     var smoothed by remember { mutableFloatStateOf(0f) }
     var route by remember { mutableStateOf<List<Pair<Double, Double>>>(emptyList()) }
@@ -262,6 +276,34 @@ fun OdographApp() {
                 onSubmit = { code -> TripRecorderService.submitOtp(code) },
                 onDismiss = { TripRecorderService.clearOtpPrompt() }
             )
+        }
+
+        // Which mode is this drive in? Asked once a drive is open and the mode is still blank.
+        if (live.tripId >= 0 && tripMode == null && askMode && modeNow >= modeSnoozeUntil) {
+            Box(
+                Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.65f)),
+                contentAlignment = androidx.compose.ui.Alignment.Center
+            ) {
+                val tripId = live.tripId
+                DriveModeDialog(
+                    current = null,
+                    lastMode = settings.lastDriveMode,
+                    palette = palette,
+                    m = m,
+                    onPick = { mode ->
+                        tripMode = mode
+                        scope.launch {
+                            withContext(Dispatchers.IO) {
+                                OdographDb.get(ctx).dao().setDriveMode(tripId, mode)
+                                settings.lastDriveMode = mode
+                                TripRecorderService.dataChanged.value = TripRecorderService.dataChanged.value + 1
+                            }
+                        }
+                    },
+                    onSnooze = { modeSnoozeUntil = System.currentTimeMillis() + DRIVE_MODE_SNOOZE_MS },
+                    onDontAsk = { settings.askDriveMode = false; askMode = false }
+                )
+            }
         }
       }
     }

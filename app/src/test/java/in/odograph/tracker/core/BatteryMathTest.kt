@@ -535,6 +535,26 @@ class BatteryMathTest {
         assertThat(w(500.0 to 0.1)).isNull()
     }
 
+    // ---- climate cooling inferred from the cabin-to-outside gap ----
+
+    @Test
+    fun `a cabin well below outside reads as cooling`() {
+        assertThat(BatteryMath.climateCooling(interiorC = 24, exteriorC = 34)).isTrue()
+        assertThat(BatteryMath.climateCooling(interiorC = 27, exteriorC = 30)).isTrue()   // exactly 3
+    }
+
+    @Test
+    fun `a cabin near or above outside is not cooling`() {
+        assertThat(BatteryMath.climateCooling(interiorC = 28, exteriorC = 29)).isFalse()
+        assertThat(BatteryMath.climateCooling(interiorC = 34, exteriorC = 30)).isFalse()  // sun, not heat
+    }
+
+    @Test
+    fun `a missing temperature leaves cooling unknown`() {
+        assertThat(BatteryMath.climateCooling(null, 30)).isNull()
+        assertThat(BatteryMath.climateCooling(24, null)).isNull()
+    }
+
     // ---- charging never bills a parked car for a drive ----
 
     @Test

@@ -668,6 +668,9 @@ interface OdographDao {
     @Query("UPDATE trips SET climateShare = :share WHERE id = :id")
     fun setClimateShare(id: Long, share: Double?)
 
+    @Query("UPDATE trips SET driveMode = :mode WHERE id = :id")
+    fun setDriveMode(id: Long, mode: String?)
+
     /**
      * The car's own journey identifiers seen during a drive, oldest first.
      *
