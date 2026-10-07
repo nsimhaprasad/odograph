@@ -78,9 +78,13 @@ fun HorizonScreen(
             if (live.elapsedS > 0) add(DriverStat(startClock(live.elapsedS), "STARTED"))
             add(DriverStat(formatHhMm(live.elapsedS), "H:MM TIME"))
             live.odoKm?.let { add(DriverStat(odoValue(it), "KM ODO")) }
+            live.exteriorTempC?.let { add(DriverStat("$it°", "OUTSIDE")) }
         }
         val perRow = secondaryPerRow(m.spec, stripWidth)
-        val secondary = (core + secondaryStats(live)).take(horizonCapacity(m.spec, perRow))
+        val kept = secondaryStats(live).filterNot { it.label in HZ_DROP }
+        val soh = kept.filter { it.label == HZ_SOH_LABEL }
+        val rest = kept.filterNot { it.label == HZ_SOH_LABEL }
+        val secondary = (core + rest + soh).take(horizonCapacity(m.spec, perRow))
 
         when {
             aspect < HZ_TALL_ASPECT -> HzTall(live, smoothedKmh, palette, m, secondary, perRow)
@@ -101,6 +105,15 @@ private const val HZ_MAX_KMH = 160f
 
 /** State of health is read in months, not drives, so its chip is drawn small and dim. */
 private const val HZ_SOH_LABEL = "BATTERY SOH"
+
+/**
+ * Figures the dial faces carry that Horizon drops to make room for both range readings.
+ *
+ * Horizon folds the trip row into one chip strip, so it cannot show everything the dial faces do.
+ * Top speed, the two lifetime totals and the climb are the least glanced at in motion, and cutting
+ * them lets "KM THIS DRIVE" and "KM AT FULL" both stay on with a small state-of-health at the tail.
+ */
+private val HZ_DROP = setOf("KM/H MAX", "KM LIFETIME", "CLIMB M", "KWH LIFETIME")
 
 /**
  * How many chips Horizon shows. More than the dial faces allow: their strip shares the screen with

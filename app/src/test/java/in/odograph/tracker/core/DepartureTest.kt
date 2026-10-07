@@ -154,6 +154,28 @@ class DepartureTest {
         }
     }
 
+    /**
+     * The basement case: GPS underground returns a scatter of low-accuracy points that appear to
+     * jump around by more than the displacement threshold. None of them is accurate enough to
+     * trust, so it must not open a trip — this is exactly what made the 07:26 phantom reopen after
+     * every manual end.
+     */
+    @Test
+    fun `low-accuracy garage scatter is not a departure`() {
+        val scatter = List(30) { i ->
+            fix(i, speedMps = 0f, metresNorth = if (i % 2 == 0) 60.0 else -60.0)
+                .copy(accuracyM = 60f)
+        }
+        assertThat(Departure.departed(scatter)).isFalse()
+    }
+
+    /** A good-accuracy displacement still departs — the gate is on accuracy, not on moving slowly. */
+    @Test
+    fun `an accurate displacement still departs through the gate`() {
+        val fixes = parked(2) + fix(2, metresNorth = Departure.DISPLACEMENT_M + 5.0)
+        assertThat(Departure.departed(fixes)).isTrue()
+    }
+
     @Test
     fun `the two thresholds are the same number`() {
         assertThat(Departure.DISPLACEMENT_M).isEqualTo(50.0)

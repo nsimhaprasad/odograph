@@ -35,13 +35,34 @@ object Departure {
      * providers report no speed at all; when it is available it stands in for the per-fix speeds,
      * which would otherwise all read zero and never open a trip on such a device.
      */
+    /**
+     * How accurate a fix must be to count toward a departure, metres. The same gate
+     * [TripStats.moved] keeps a trip alive by, so the two agree.
+     *
+     * Underground and in deep garages GPS returns a scatter of low-accuracy points that look like
+     * fifty metres of travel and a couple of metres per second of speed. Counting them opens a
+     * trip the car never took; `moved` then applies this gate, correctly finds no movement, and
+     * the trip is deleted — only for the next scatter to reopen it. That is the phantom basement
+     * trip that could not be ended. Departure must trust only the fixes `moved` would.
+     */
+    const val ACCURACY_LIMIT_M = 25f
+
     fun departed(fixes: List<Fix>, derivedSpeedMps: Float = 0f): Boolean {
         if (fixes.size < CONFIRM_FIXES) return false
+        // The recorder's own derived speed is already drift-resistant: LiveTrack rejects the
+        // low-accuracy fixes before it ever computes a speed from them.
         if (derivedSpeedMps >= SPEED_MPS) return true
-        if (fixes.takeLast(CONFIRM_FIXES).all { it.speedMps >= SPEED_MPS }) return true
 
-        val origin = fixes.first()
-        return fixes.any {
+        // Everything else rests on fixes good enough to trust. A garage full of 60 m scatter is
+        // not a departure, however far its raw points appear to jump.
+        val good = fixes.filter {
+            it.lat.isFinite() && it.lon.isFinite() && it.accuracyM.isFinite() &&
+                it.accuracyM <= ACCURACY_LIMIT_M
+        }
+        if (good.size < CONFIRM_FIXES) return false
+        if (good.takeLast(CONFIRM_FIXES).all { it.speedMps >= SPEED_MPS }) return true
+        val origin = good.first()
+        return good.any {
             Geo.haversineMetres(origin.lat, origin.lon, it.lat, it.lon) >= DISPLACEMENT_M
         }
     }

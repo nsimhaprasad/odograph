@@ -522,7 +522,7 @@ class ScreenshotTest {
     @Config(qualifiers = "w1291dp-h726dp-land")
     fun `horizon box night`() {
         compose.setContent {
-            DriverScreen(liveFull.copy(batterySohPercent = 98.3), 88.6f, Direction.HORIZON, paletteFor(Direction.HORIZON, night = true))
+            DriverScreen(liveFull.copy(batterySohPercent = 98.3, exteriorTempC = 28), 88.6f, Direction.HORIZON, paletteFor(Direction.HORIZON, night = true))
         }
         shoot("40-horizon-box-night")
     }
@@ -531,7 +531,7 @@ class ScreenshotTest {
     @Config(qualifiers = "w1291dp-h726dp-land")
     fun `horizon box day`() {
         compose.setContent {
-            DriverScreen(liveFull.copy(batterySohPercent = 98.3), 88.6f, Direction.HORIZON, paletteFor(Direction.HORIZON, night = false))
+            DriverScreen(liveFull.copy(batterySohPercent = 98.3, exteriorTempC = 28), 88.6f, Direction.HORIZON, paletteFor(Direction.HORIZON, night = false))
         }
         shoot("41-horizon-box-day")
     }
@@ -541,7 +541,7 @@ class ScreenshotTest {
     fun `horizon low charge`() {
         compose.setContent {
             DriverScreen(
-                liveFull.copy(batterySocPercent = 19.0, batteryRangeKm = 41.0, mgBatteryRangeKm = 44.0, batterySohPercent = 98.3),
+                liveFull.copy(batterySocPercent = 19.0, batteryRangeKm = 41.0, mgBatteryRangeKm = 44.0, batterySohPercent = 98.3, exteriorTempC = 28),
                 108.4f, Direction.HORIZON, paletteFor(Direction.HORIZON, night = true)
             )
         }
@@ -553,7 +553,7 @@ class ScreenshotTest {
     fun `horizon charging`() {
         compose.setContent {
             DriverScreen(
-                liveFull.copy(batteryCharging = true, batterySocPercent = 71.0, batteryRangeKm = 320.0, speedMps = 0f, batterySohPercent = 98.3),
+                liveFull.copy(batteryCharging = true, batterySocPercent = 71.0, batteryRangeKm = 320.0, speedMps = 0f, batterySohPercent = 98.3, exteriorTempC = 28),
                 0f, Direction.HORIZON, paletteFor(Direction.HORIZON, night = true)
             )
         }
@@ -564,7 +564,7 @@ class ScreenshotTest {
     @Config(qualifiers = "w645dp-h726dp")
     fun `horizon split vertical`() {
         compose.setContent {
-            DriverScreen(liveFull.copy(batterySohPercent = 98.3), 72f, Direction.HORIZON, paletteFor(Direction.HORIZON, night = true))
+            DriverScreen(liveFull.copy(batterySohPercent = 98.3, exteriorTempC = 28), 72f, Direction.HORIZON, paletteFor(Direction.HORIZON, night = true))
         }
         shoot("44-horizon-split-vertical")
     }
@@ -573,7 +573,7 @@ class ScreenshotTest {
     @Config(qualifiers = "w1291dp-h242dp-land")
     fun `horizon band`() {
         compose.setContent {
-            DriverScreen(liveFull.copy(batterySohPercent = 98.3), 88.6f, Direction.HORIZON, paletteFor(Direction.HORIZON, night = true))
+            DriverScreen(liveFull.copy(batterySohPercent = 98.3, exteriorTempC = 28), 88.6f, Direction.HORIZON, paletteFor(Direction.HORIZON, night = true))
         }
         shoot("45-horizon-band")
     }

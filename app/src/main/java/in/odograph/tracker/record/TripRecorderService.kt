@@ -160,7 +160,9 @@ class TripRecorderService : Service() {
          * table. Null before the first fix.
          */
         val lat: Double? = null,
-        val lon: Double? = null
+        val lon: Double? = null,
+        /** Outside air temperature the car last reported, whole degrees C. */
+        val exteriorTempC: Int? = null
     )
 
     /** MG wants a one-time verification code before it will sign in. */
@@ -857,7 +859,8 @@ class TripRecorderService : Service() {
                             liveRangeKm = readout.liveRangeKm,
                             batteryTotalKwh = readout.totalKwh,
                             tripEnergyKwh = energy,
-                            tripCostInr = readout.tripCostInr
+                            tripCostInr = readout.tripCostInr,
+                            exteriorTempC = status.exteriorTemperature
                         )
                     } else {
                         // No drive open — parked, or the departure not yet confirmed — but the
@@ -878,7 +881,8 @@ class TripRecorderService : Service() {
                             batteryRangeKm = readout.smartRangeKm,
                             mgBatteryRangeKm = ch.rangeKm,
                             lifetimeRangeKm = readout.lifetimeRangeKm,
-                            liveRangeKm = null
+                            liveRangeKm = null,
+                            exteriorTempC = status.exteriorTemperature
                         )
                     }
                 } else {
