@@ -70,8 +70,17 @@ fun HorizonScreen(
             aspect > HZ_WIDE_ASPECT -> 0.42f
             else -> 0.52f
         }
+        // The dial faces carry distance, the drive's start and total time, and the odometer in a
+        // dedicated row; Horizon has only chips, so those lead the strip. MOVING (which
+        // secondaryStats carries) is not the total, and neither the total nor the start was shown.
+        val core = buildList {
+            add(DriverStat(formatKm(live.distanceM), "KM DISTANCE"))
+            if (live.elapsedS > 0) add(DriverStat(startClock(live.elapsedS), "STARTED"))
+            add(DriverStat(formatHhMm(live.elapsedS), "H:MM TIME"))
+            live.odoKm?.let { add(DriverStat(odoValue(it), "KM ODO")) }
+        }
         val perRow = secondaryPerRow(m.spec, stripWidth)
-        val secondary = secondaryStats(live).take(secondaryCapacity(m.spec, stripWidth))
+        val secondary = (core + secondaryStats(live)).take(horizonCapacity(m.spec, perRow))
 
         when {
             aspect < HZ_TALL_ASPECT -> HzTall(live, smoothedKmh, palette, m, secondary, perRow)
@@ -89,6 +98,27 @@ private const val HZ_WIDE_ASPECT = 3.0f
 
 /** The speed the limit line reads as full. Above a motorway's worst, so the bar never pins. */
 private const val HZ_MAX_KMH = 160f
+
+/** State of health is read in months, not drives, so its chip is drawn small and dim. */
+private const val HZ_SOH_LABEL = "BATTERY SOH"
+
+/**
+ * How many chips Horizon shows. More than the dial faces allow: their strip shares the screen with
+ * a dedicated trip row, so Horizon folds that row into the chips and has the height — up to three
+ * rows — to carry them. The cap still governs clutter; the [FlowRow] wrap still guarantees nothing
+ * clips.
+ */
+private fun horizonCapacity(spec: MetricSpec, perRow: Int): Int {
+    val rows = if (spec.veryCompact) 1 else 3
+    val ceiling = if (spec.compact) 8 else 14
+    return (perRow * rows).coerceAtMost(ceiling)
+}
+
+/** The wall-clock time a drive began, worked back from how long it has been running. */
+private fun startClock(elapsedS: Long): String {
+    val startMs = System.currentTimeMillis() - elapsedS * 1000L
+    return java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault()).format(java.util.Date(startMs))
+}
 
 @Composable
 private fun HzBalanced(
@@ -356,14 +386,20 @@ private fun HzChips(
 
 @Composable
 private fun HzChip(stat: DriverStat, palette: Palette, m: Metrics) {
+    // The health figure is deliberately the quiet one: a smaller, dimmer value, because it is
+    // checked across months and does not earn a driver's glance on every trip.
+    val minor = stat.label == HZ_SOH_LABEL
+    val valueSize = if (minor) m.body else m.read
     val shape = RoundedCornerShape(m.pad * 0.5f)
     Column(
         Modifier.clip(shape).background(palette.trackSoft).border(1.dp, palette.track, shape)
             .padding(horizontal = m.gap / 2, vertical = m.pad * 0.35f)
     ) {
         Text(
-            stat.value, color = palette.numeral, fontSize = m.read, lineHeight = m.read * 1.05f,
-            fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Clip
+            stat.value, color = if (minor) palette.dim else palette.numeral,
+            fontSize = valueSize, lineHeight = valueSize * 1.05f,
+            fontWeight = if (minor) FontWeight.SemiBold else FontWeight.Bold,
+            maxLines = 1, overflow = TextOverflow.Clip
         )
         Text(
             stat.label, color = palette.label, fontSize = m.label, letterSpacing = 1.1.sp,
