@@ -121,7 +121,8 @@ private const val HZ_SOH_LABEL = "BATTERY SOH"
  * Top speed, the two lifetime totals and the climb are the least glanced at in motion, and cutting
  * them lets "KM THIS DRIVE" and "KM AT FULL" both stay on with a small state-of-health at the tail.
  */
-private val HZ_DROP = setOf("KM/H MAX", "KM LIFETIME", "CLIMB M", "KWH LIFETIME")
+/** Nothing is dropped now — Horizon shows every figure the dial faces do; the cap wraps them. */
+private val HZ_DROP = emptySet<String>()
 
 /**
  * How many chips Horizon shows. More than the dial faces allow: their strip shares the screen with
@@ -130,8 +131,8 @@ private val HZ_DROP = setOf("KM/H MAX", "KM LIFETIME", "CLIMB M", "KWH LIFETIME"
  * clips.
  */
 private fun horizonCapacity(spec: MetricSpec, perRow: Int): Int {
-    val rows = if (spec.veryCompact) 1 else 3
-    val ceiling = if (spec.compact) 8 else 14
+    val rows = if (spec.veryCompact) 1 else 4
+    val ceiling = if (spec.compact) 10 else 16
     return (perRow * rows).coerceAtMost(ceiling)
 }
 
