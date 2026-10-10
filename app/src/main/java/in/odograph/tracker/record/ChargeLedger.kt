@@ -55,7 +55,7 @@ class ChargeLedger(
         data class Closed(val event: ChargeEventEntity) : Change
     }
 
-    fun observe(charging: Boolean?, socPercent: Double?, powerKw: Double?, now: Long): Change {
+    fun observe(charging: Boolean?, socPercent: Double?, powerKw: Double?, now: Long, lastKnownSoc: Double? = null): Change {
         var open = dao.openChargeEvent()
         val sampleAbove = powerKw != null && powerKw >= BatteryMath.FAST_CHARGE_KW
 
@@ -69,12 +69,22 @@ class ChargeLedger(
 
         if (charging == true) {
             if (open == null) {
+                // Anchor the start to the last charge level actually recorded, not to whatever the
+                // SOC had climbed to by the time the box woke. The box sleeps between trips, so a
+                // charge begun at 51% is first seen at 90%: the pre-wake 51 -> 90 is real charge and
+                // belongs to this session or it is lost. SOC only rises by charging, so a last-known
+                // level below the current one is where this fill began.
+                val start = if (socPercent != null && lastKnownSoc != null && lastKnownSoc < socPercent)
+                    lastKnownSoc else socPercent
+                val openEnergy = if (start != null && socPercent != null)
+                    BatteryMath.round2(BatteryMath.rechargeEnergyKwh(start, socPercent, capacityKwh))
+                else 0.0
                 val event = ChargeEventEntity(
                     startTime = now,
-                    startSoc = socPercent,
+                    startSoc = start,
                     endTime = now,
                     endSoc = socPercent,
-                    energyKwh = 0.0,
+                    energyKwh = openEnergy,
                     peakPowerKw = powerKw?.coerceAtLeast(0.0),
                     samplesTotal = if (powerKw != null) 1 else 0,
                     samplesAbove = if (sampleAbove) 1 else 0

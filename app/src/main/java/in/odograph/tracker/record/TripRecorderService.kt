@@ -241,7 +241,10 @@ class TripRecorderService : Service() {
          * Bumped when a new correction is added, which reruns the pass over drives an earlier
          * revision already visited.
          */
-        private const val REPAIR_REVISION = 7
+        private const val REPAIR_REVISION = 8
+
+        /** A single drive can never really run this long; past it the start is a clock-skew artefact. */
+        private const val MAX_OPEN_TRIP_MS = 48 * 3_600_000L
 
         /** No trip is open. Battery frames recorded under it are parked readings, not a drive. */
         const val NO_TRIP = -1L
@@ -775,7 +778,7 @@ class TripRecorderService : Service() {
                 // paid for. A slow session never prompts — the home rate stands.
                 val capacity = settings.batteryCapacityKwh
                 val ledger = ChargeLedger(dao, capacity, settings.homeRateInr, settings.outsideRateInr)
-                applyChargeChange(dao, ledger.observe(ch?.isCharging, ch?.soc, powerKw, now))
+                applyChargeChange(dao, ledger.observe(ch?.isCharging, ch?.soc, powerKw, now, socBeforeThisFrame?.socPercent))
 
                 // Then the same question from the other direction: does the ledger explain the
                 // pack? Almost all of this car's charging happens with the box switched off — it
@@ -1202,6 +1205,25 @@ class TripRecorderService : Service() {
         return tripId
     }
 
+    /**
+     * Moves an open drive's start past a leading clock-jump gap — the same rule the closed-trip
+     * repair applies when a drive ends, run live so a corrupt start does not reach the screen.
+     */
+    private fun reanchorLiveStart(dao: OdographDao) {
+        val id = tripId
+        if (id < 0) return
+        val points = dao.pointsFor(id)
+        if (points.size < 2) return
+        var i = 0
+        while (i < points.lastIndex && points[i + 1].t - points[i].t >= TripRepair.STALE_START_GAP_MS) i++
+        if (i == 0) return
+        val realStart = points[i].t
+        dao.deletePointsBefore(id, realStart)
+        dao.setStartedAt(id, realStart)
+        startedAt = realStart
+        Diagnostics.crumb("live start re-anchored past clock skew trip=$id")
+    }
+
     private fun endTripNow() {
         if (tripId == NO_TRIP) return
         val dao = OdographDb.get(this).dao()
@@ -1389,6 +1411,15 @@ class TripRecorderService : Service() {
                 accuracyM = fix.accuracyM, interpolated = fix.interpolated
             )
         )
+
+        // The box can boot with a wall clock months in the past and correct it once GPS answers,
+        // which back-dates the drive's start to a stale fix and blows the elapsed time up to
+        // thousands of hours. When this fix lands implausibly far after the recorded start, the
+        // start is that artefact — re-anchor past the leading gap so the time is right and the
+        // drive files under today rather than vanishing under a bad date.
+        if (tripId >= 0 && startedAt?.let { fix.t - it > MAX_OPEN_TRIP_MS } == true) {
+            reanchorLiveStart(dao)
+        }
 
         lastFixAtElapsed = SystemClock.elapsedRealtime()
         val effectiveSpeedMps = track.speedMps

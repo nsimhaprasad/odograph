@@ -5,6 +5,7 @@ import androidx.test.core.app.ApplicationProvider
 import `in`.odograph.tracker.core.BatteryMath
 import `in`.odograph.tracker.data.OdographDb
 import org.assertj.core.api.Assertions.assertThat
+import org.assertj.core.api.Assertions.within
 import org.junit.After
 import org.junit.Before
 import org.junit.Test
@@ -57,6 +58,32 @@ class ChargeLedgerTest {
         // SOC swing × home rate, both rounded to two decimals.
         val expectedCost = BatteryMath.round2(session.energyKwh * homeRate)
         assertThat(session.costInr).isCloseTo(expectedCost, within(1e-9))
+    }
+
+    @Test
+    fun `a charge the box wakes into mid-way starts from the last recorded level`() {
+        val led = ledger()
+        // Last trip ended at 51%. The box slept through the start of the charge and the first
+        // charging frame it sees is 90% — the pre-wake 51 -> 90 must still belong to this session.
+        led.observe(true, 90.0, 28.0, 0L, lastKnownSoc = 51.0)
+        led.observe(true, 98.0, 28.0, 10 * min, lastKnownSoc = 90.0)
+        led.observe(false, 98.0, 0.0, 11 * min)
+
+        val s = sessions().single()
+        assertThat(s.startSoc).isEqualTo(51.0)
+        assertThat(s.endSoc).isEqualTo(98.0)
+        assertThat(s.energyKwh!!).isCloseTo(
+            BatteryMath.rechargeEnergyKwh(51.0, 98.0, BatteryMath.DEFAULT_CAPACITY_KWH), within(0.02)
+        )
+    }
+
+    @Test
+    fun `a charge watched from the start ignores the last-known level`() {
+        val led = ledger()
+        led.observe(true, 51.0, 7.0, 0L, lastKnownSoc = 51.0)
+        led.observe(true, 70.0, 7.0, 60 * min, lastKnownSoc = 51.0)
+        led.observe(false, 70.0, 0.0, 61 * min)
+        assertThat(sessions().single().startSoc).isEqualTo(51.0)
     }
 
     @Test
