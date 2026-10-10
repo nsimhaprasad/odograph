@@ -30,6 +30,18 @@ class BootReceiver : BroadcastReceiver() {
             return
         }
 
+        // A location-typed foreground service started from boot is a background start, so on
+        // Android 10+ it needs background location to actually receive fixes — otherwise it runs,
+        // shows its notification, and silently records nothing. We still start (some head-units
+        // keep the app foregrounded regardless), but a missing grant is the first thing to suspect
+        // when a boot produces a notification but no track.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            val bg = ContextCompat.checkSelfPermission(
+                context, Manifest.permission.ACCESS_BACKGROUND_LOCATION
+            ) == PackageManager.PERMISSION_GRANTED
+            if (!bg) Diagnostics.crumb("boot: no background location — fixes may not arrive until the app is opened")
+        }
+
         Diagnostics.crumb("boot: auto-starting recorder")
         val svc = Intent(context, TripRecorderService::class.java)
         runCatching {

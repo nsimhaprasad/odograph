@@ -218,18 +218,121 @@ object TripRepair {
     const val STALE_START_GAP_MS = 60 * 60_000L
 
     /**
-     * Re-derives drives whose start is a stale cached fix.
+     * The longest a single drive can plausibly last, ms.
      *
-     * The location source used to hand over the system's "last known" position as a real fix.
-     * A network fix is stamped with the system clock, and on a box with no SIM that clock can be
-     * sitting at the Android image's build date at boot — so the cached fix carried a date from
-     * before the car existed. It became the origin of the next drive, and the drive was stored
-     * with a duration of three hundred and thirteen days — which also made its average speed
-     * nothing and its start date a lie in every list it appears in.
+     * Two days — the same ceiling the recorder puts on an open trip. A point sitting more than this
+     * before a drive's end cannot belong to that drive: nobody drives for two days without the
+     * arrival rule closing it. So such a point was stamped by a clock that had not yet corrected,
+     * not recorded two days into a journey, and this is the horizon that tells the two apart.
+     */
+    const val MAX_PLAUSIBLE_DRIVE_MS = 48 * 3_600_000L
+
+    /**
+     * The earliest wall-clock time the box could truthfully report, ms since the epoch.
      *
-     * The stale points are removed, the drive's start moves to its first real fix, and every
-     * figure derived from the track is worked out again from what remains. Nothing else about
-     * the drive changes: energy, cost and places were never a function of the stale point.
+     * The head-unit has no SIM and so no NTP; at boot its clock sits at the firmware image's build
+     * date — observed at 15 Nov 2025 — until GNSS corrects it, seconds into the first drive. Any
+     * reading before this floor is that uncorrected boot clock, not a real moment, and true time
+     * only ever climbs further past it.
+     */
+    const val MIN_PLAUSIBLE_WALL_MS = 1_767_225_600_000L // 2026-01-01T00:00:00Z
+
+    /** Whether [wallMs] is on a corrected clock rather than the firmware's boot-time default. */
+    fun clockSynced(wallMs: Long): Boolean = wallMs >= MIN_PLAUSIBLE_WALL_MS
+
+    /** Where a drive's stale opening ends and its real clock begins, and the shift between them. */
+    data class ClockSkew(
+        /** Index of the first point already on the corrected clock; everything before it is stale. */
+        val firstTrueIndex: Int,
+        /** Milliseconds to add to each stale point so its wrong time becomes its real one. */
+        val offsetMs: Long,
+        /** The last stale timestamp, so a shift can be scoped to exactly the stale block. */
+        val lastStaleT: Long
+    )
+
+    /**
+     * Detects a drive whose opening points were stamped by an uncorrected boot clock.
+     *
+     * The box wakes with the firmware's build date for a clock — no SIM, so no NTP — and corrects
+     * it the moment GNSS or NTP lands, often minutes into the first drive. That leaves the points
+     * in two blocks: an opening stretch on the stale clock (ticking normally, a second or two
+     * apart) and then one jump of weeks or months to the first corrected point and the rest of the
+     * drive. The jump is the only discontinuity; inside each block time runs true.
+     *
+     * [anchor] is a timestamp known to be on the corrected clock — a closed drive's end, or the
+     * live clock during one. Every stale point sits more than [MAX_PLAUSIBLE_DRIVE_MS] before it,
+     * so the first point within that horizon opens the corrected block. The shift that carries the
+     * stale block up to meet it is the jump itself, less one ordinary gap between fixes, so the two
+     * blocks join seamlessly and the pre-correction driving keeps the distance and time it took.
+     *
+     * Returns null when nothing before the anchor is stale — including a drive run entirely before
+     * the clock ever corrected (its end is stale too, so there is no corrected point to measure the
+     * jump against, and its own track cannot place it in time at all).
+     */
+    fun detectClockSkew(pointTimes: List<Long>, anchor: Long): ClockSkew? {
+        if (pointTimes.size < 2) return null
+        var firstTrue = 0
+        while (firstTrue < pointTimes.lastIndex &&
+            anchor - pointTimes[firstTrue] > MAX_PLAUSIBLE_DRIVE_MS
+        ) firstTrue++
+        if (firstTrue == 0) return null
+
+        val jump = pointTimes[firstTrue] - pointTimes[firstTrue - 1]
+        val spacing = medianSpacing(pointTimes, firstTrue)
+        val offset = (jump - spacing).coerceAtLeast(0L)
+        if (offset == 0L) return null
+        return ClockSkew(firstTrue, offset, pointTimes[firstTrue - 1])
+    }
+
+    /** The median gap between the stale opening points, or one second when there is only one. */
+    private fun medianSpacing(times: List<Long>, firstTrue: Int): Long {
+        if (firstTrue < 2) return 1_000L
+        val gaps = (1 until firstTrue).map { times[it] - times[it - 1] }.sorted()
+        return gaps[gaps.size / 2].coerceAtLeast(1L)
+    }
+
+    /** A drive's corrected start, and how far its clock had drifted, after [correctStaleOpening]. */
+    data class CorrectedStart(val startedAt: Long, val offsetMs: Long)
+
+    /**
+     * Corrects, in place, a drive whose opening was stamped by an uncorrected boot clock.
+     *
+     * One lone stale point is a cached "last known" position the drive was wrongly begun from — not
+     * part of this journey — and is dropped, exactly as the first version of this repair did. A
+     * stale *block* is real driving at the right place and the wrong time, and is carried bodily
+     * onto the corrected clock so none of its kilometres are lost. Either way the drive's true
+     * start is its first surviving point, returned for the caller to store.
+     *
+     * Shared by the live re-anchor and the closed-trip sweep so the glass and the archive fix the
+     * same corruption the same way. Returns null when there is nothing stale to correct.
+     */
+    fun correctStaleOpening(dao: OdographDao, tripId: Long, anchor: Long): CorrectedStart? {
+        val points = dao.pointsFor(tripId)
+        if (points.size < 2) return null
+        val skew = detectClockSkew(points.map { it.t }, anchor) ?: return null
+        if (skew.firstTrueIndex == 1) {
+            dao.deletePointsBefore(tripId, points[1].t)
+        } else {
+            dao.shiftPointTimes(tripId, skew.offsetMs, skew.lastStaleT)
+            // Any battery frames telematics wrote during the stale opening carry the same wrong
+            // clock; move them by the same jump so a drive's energy readings line up with its track.
+            dao.shiftBatteryTimes(tripId, skew.offsetMs, skew.lastStaleT)
+        }
+        val start = dao.pointsFor(tripId).firstOrNull()?.t ?: return null
+        return CorrectedStart(start, skew.offsetMs)
+    }
+
+    /**
+     * Re-derives every closed drive whose start was stamped by an uncorrected boot clock.
+     *
+     * The box has no SIM and so no NTP; at boot its clock sits at the Android image's build date
+     * and corrects only once GNSS or NTP lands, minutes into the first drive. A drive that opened
+     * before that correction was stored with a start from before the car existed and a duration of
+     * weeks — a lie in every list it appears in — and, when the whole opening was recorded stale,
+     * the earlier gap-based repair never caught it because its stale points were seconds apart, not
+     * an hour. [correctStaleOpening] fixes both shapes against the drive's own trustworthy end, and
+     * every figure derived from the track is worked out again from the corrected points. Nothing
+     * else changes: energy, cost and places were never a function of when the opening was stamped.
      */
     fun repairStaleStarts(dao: OdographDao): Reanchored {
         var examined = 0
@@ -240,29 +343,22 @@ object TripRepair {
             if (points.size < 2) continue
             examined++
 
-            // Walk forward past every point that is followed by a gap of an hour or more.
-            var firstReal = 0
-            while (firstReal < points.lastIndex &&
-                points[firstReal + 1].t - points[firstReal].t >= STALE_START_GAP_MS
-            ) firstReal++
-            if (firstReal == 0) continue
+            val anchor = trip.endedAt ?: points.last().t
+            val corrected = correctStaleOpening(dao, trip.id, anchor) ?: continue
+            if (corrected.offsetMs / 86_400_000.0 > worstDays) worstDays = corrected.offsetMs / 86_400_000.0
 
-            val stale = points[firstReal].t - points[0].t
-            if (stale / 86_400_000.0 > worstDays) worstDays = stale / 86_400_000.0
-
-            val kept = points.drop(firstReal)
-            val fixes = kept.map {
+            val fixes = dao.pointsFor(trip.id).map {
                 Fix(it.t, it.lat, it.lon, it.speedMps, it.accuracyM, it.interpolated, it.altitudeM)
             }
+            if (fixes.isEmpty()) continue
             val stats = TripStats.compute(fixes)
-            dao.deletePointsBefore(trip.id, kept.first().t)
-            dao.setStartedAt(trip.id, kept.first().t)
+            dao.setStartedAt(trip.id, fixes.first().t)
             dao.finishTrip(
-                trip.id, kept.last().t, stats.distanceM, stats.durationS,
+                trip.id, fixes.last().t, stats.distanceM, stats.durationS,
                 stats.movingS, stats.maxSpeedMps, stats.avgSpeedMps, stats.slowestKmSpeedMps,
                 stats.elevGainM, stats.elevLossM
             )
-            dao.setOrigin(trip.id, kept.first().lat, kept.first().lon)
+            dao.setOrigin(trip.id, fixes.first().lat, fixes.first().lon)
             reanchored++
         }
         return Reanchored(examined, reanchored, worstDays)

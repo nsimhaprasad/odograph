@@ -73,6 +73,17 @@ interface OdographDao {
     @Query("UPDATE battery SET tripId = :into WHERE tripId = :from")
     fun moveBatteryTo(from: Long, into: Long)
 
+    /**
+     * Carries a drive's early battery frames onto the corrected clock, the twin of [shiftPointTimes].
+     *
+     * A frame is stamped with the current fix's time, so when telematics connects before GNSS has
+     * corrected the boot clock — exactly what immediate-on-boot polling invites — its frames land
+     * in the same stale window the opening points did. The one offset the clock jump revealed moves
+     * them onto the true clock too, so a drive's energy readings line up in time with its track.
+     */
+    @Query("UPDATE battery SET t = t + :offsetMs WHERE tripId = :tripId AND t <= :throughMs")
+    fun shiftBatteryTimes(tripId: Long, offsetMs: Long, throughMs: Long)
+
     /** How many points a drive has, without reading a single one of them. */
     @Query("SELECT COUNT(*) FROM points WHERE tripId = :tripId")
     fun pointCountFor(tripId: Long): Int
@@ -121,6 +132,18 @@ interface OdographDao {
     /** Drops a drive's points from before [beforeMs]: the stale cached fix a drive was wrongly begun from. */
     @Query("DELETE FROM points WHERE tripId = :tripId AND t < :beforeMs")
     fun deletePointsBefore(tripId: Long, beforeMs: Long)
+
+    /**
+     * Carries a drive's stale opening points onto the corrected clock, through [throughMs].
+     *
+     * When the box wakes with the firmware's build date for a clock and GNSS or NTP corrects it
+     * mid-drive, every point stamped before the correction holds the right position at the wrong
+     * time. Adding the one offset the jump revealed to all of them keeps their real spacing — and
+     * so the drive's real distance and duration — while moving the whole opening onto the true
+     * clock. Scoped to `t <= throughMs` so it touches only the stale block, never the good tail.
+     */
+    @Query("UPDATE points SET t = t + :offsetMs WHERE tripId = :tripId AND t <= :throughMs")
+    fun shiftPointTimes(tripId: Long, offsetMs: Long, throughMs: Long)
 
     /** Removes exactly these points. Called in chunks: SQLite takes at most 999 bound values. */
     @Query("DELETE FROM points WHERE id IN (:ids)")

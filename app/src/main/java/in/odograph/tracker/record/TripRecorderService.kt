@@ -197,6 +197,15 @@ class TripRecorderService : Service() {
          * per sustained failure, never a bark on every failed poll.
          */
         private const val MG_LOST_NOTIFY_GAP_MS = 10 * 60_000L
+
+        /**
+         * How long the hotspot may be absent before the box says so, milliseconds.
+         *
+         * Two minutes. The box powers on with the car and the phone's hotspot takes a little while
+         * to associate and validate; warning "MG link is down" in that ordinary gap cried wolf on
+         * every single drive. A real outage lasts past this; the start-of-drive gap does not.
+         */
+        private const val MG_LOST_GRACE_MS = 2 * 60_000L
         private const val ACCURACY_LIMIT_M = 25f
         private const val SPEED_ACCURACY_LIMIT_M = 15f
         /**
@@ -529,6 +538,12 @@ class TripRecorderService : Service() {
     private var configuredLimit = -1
     /** When the "MG link is down" reminder last went out. Null means it never has. */
     private var lastMgLostNotifyAt: Long? = null
+    /**
+     * When the hotspot first went missing this stretch, on the monotonic clock. Null while it is
+     * present. Monotonic so a mid-boot clock correction cannot make a just-started outage look two
+     * days old and fire the warning early.
+     */
+    private var noNetworkSinceElapsed: Long? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -560,72 +575,81 @@ class TripRecorderService : Service() {
                 if (pendingInterruption) "a trip was left open; the first fix decides it"
                 else "recovery done, awaiting movement"
             )
-            // One-off, and only once: every drive recorded before the plausibility rules existed
-            // kept whatever the worst single fix claimed. The points are still on disk, so the
-            // honest figure can be worked out again. Guarded by a revision so a later correction
-            // can run over the same drives without a second flag, and so this does not walk the
-            // whole history on every boot.
-            if (settings.repairRevision < REPAIR_REVISION) {
-                val outcome = runCatching { TripRepair.repairMaxSpeeds(dao) }.getOrNull()
-                // Putting back together the drives a restarting recorder tore apart rides the
-                // same revision: both are one-off corrections of history, and neither should walk
-                // the table again on every boot for the rest of the box's life.
-                val stitched = runCatching { TripRepair.stitchShreddedDrives(dao) }.getOrNull()
-                // Energies the car cannot have produced, written before the ceiling existed.
-                // Cleared rather than corrected: the sweep reckons them from the distance next.
-                val cleared = runCatching { TripRepair.repairImplausibleEnergies(dao) }.getOrNull()
-                // Drives begun from the location source's stale cached fix — a start months
-                // before the drive, and a trip timer that read 7508:59.
-                val reanchored = runCatching { TripRepair.repairStaleStarts(dao) }.getOrNull()
-                // A fill booked twice: once watched by the ledger, once reconstructed from the
-                // charge level by a reconciler that ran on the frame that had just closed it.
-                val deduped = runCatching { TripRepair.repairDuplicateReconstructions(dao) }.getOrNull()
-                // Every old track down to one point per five seconds. The totals were measured
-                // from the full tracks when the drives closed; only the rows go.
-                val thinned = runCatching { TripRepair.thinAllTracks(dao) }.getOrNull()
-                if (outcome != null && stitched != null && cleared != null && reanchored != null && deduped != null && thinned != null) {
-                    settings.repairRevision = REPAIR_REVISION
-                    Diagnostics.crumb(
-                        "repair: thinned ${thinned.drives} tracks by ${thinned.pointsRemoved} points; " +
-                        "repair: removed ${deduped.removed} duplicate reconstructed fills; " +
-                        "repair: re-anchored ${reanchored.reanchored} drives begun from a stale fix " +
-                            "(worst %.0f days); ".format(reanchored.worstDays) +
-                            "cleared ${cleared.cleared} impossible energies of ${cleared.examined}; " +
-                            "examined ${outcome.examined} drives, corrected ${outcome.corrected}" +
-                            (if (outcome.corrected > 0)
-                                ", worst was %.0f km/h".format(outcome.worstBeforeMps * 3.6f)
-                            else "") +
-                            "; stitched ${stitched.fragmentsAbsorbed} fragments back into " +
-                            "${stitched.drivesRecovered} drives, recovering " +
-                            "%.1f km".format(stitched.metresRecovered / 1000.0)
-                    )
-                }
-            }
-
-            refreshRangeAccuracy(dao)
-
+            // The essentials for a cold boot, run before anything optional: the box powers on at
+            // the start of a drive, so recording must begin from the first fix and the car must be
+            // asked for its battery the instant the hotspot answers. The location listener and the
+            // telematics poller start here; everything slow is deferred below.
             odoBaseKm = `in`.odograph.tracker.core.Odometer.liveOdoKm(settings, dao.trackedDistanceM() / 1000.0)
             _state.value = LiveState(tripId = tripId, odoKm = odoBaseKm)
-            // A charge owed an answer is the first thing a boot should ask again.
-            raisePendingPriceReminder(dao)
             source.start { fix -> recorder.launch { record(fix) } }
-
-            // Everything below is best-effort and entirely optional. The hotspot is usually up,
-            // but recording must behave identically when it is not, so both are wrapped and
-            // neither is on the capture path.
-            Diagnostics.crumb("starting dashboard server")
-            runCatching { DashboardServer.start(this@TripRecorderService) }
-                .onFailure { Diagnostics.crumb("dashboard server FAILED: $it") }
-            Diagnostics.crumb("dashboard server step done")
-            // Give any new places a readable default name. Best-effort, rate-limited, and a
-            // user's own label always wins over whatever comes back.
-            runCatching { PlaceNamer.nameMissing(dao) }
-                .onFailure { Diagnostics.crumb("place naming failed: $it") }
-
+            io.launch { fixWatchdog() }
             // Whole-dataset export to the Google Docs link, on its own clock so it can never
             // hold up telematics or recording.
             io.launch { sheetsSyncLoop() }
-            io.launch { fixWatchdog() }
+
+            // Everything below is best-effort and deliberately off the critical path. A history
+            // backtest that grows with the archive, a one-off repair sweep, the local dashboard
+            // server, and a rate-limited geocoder all used to run inline ahead of the location
+            // listener and the poller — so a slow Nominatim call or a large history pushed the
+            // first fix and the first MG login minutes past boot. None of it gates recording now.
+            io.launch {
+                // One-off, and only once: every drive recorded before the plausibility rules existed
+                // kept whatever the worst single fix claimed. The points are still on disk, so the
+                // honest figure can be worked out again. Guarded by a revision so a later correction
+                // can run over the same drives without a second flag, and so this does not walk the
+                // whole history on every boot.
+                if (settings.repairRevision < REPAIR_REVISION) {
+                    val outcome = runCatching { TripRepair.repairMaxSpeeds(dao) }.getOrNull()
+                    // Putting back together the drives a restarting recorder tore apart rides the
+                    // same revision: both are one-off corrections of history, and neither should walk
+                    // the table again on every boot for the rest of the box's life.
+                    val stitched = runCatching { TripRepair.stitchShreddedDrives(dao) }.getOrNull()
+                    // Energies the car cannot have produced, written before the ceiling existed.
+                    // Cleared rather than corrected: the sweep reckons them from the distance next.
+                    val cleared = runCatching { TripRepair.repairImplausibleEnergies(dao) }.getOrNull()
+                    // Drives begun from the location source's stale cached fix — a start months
+                    // before the drive, and a trip timer that read 7508:59.
+                    val reanchored = runCatching { TripRepair.repairStaleStarts(dao) }.getOrNull()
+                    // A fill booked twice: once watched by the ledger, once reconstructed from the
+                    // charge level by a reconciler that ran on the frame that had just closed it.
+                    val deduped = runCatching { TripRepair.repairDuplicateReconstructions(dao) }.getOrNull()
+                    // Every old track down to one point per five seconds. The totals were measured
+                    // from the full tracks when the drives closed; only the rows go.
+                    val thinned = runCatching { TripRepair.thinAllTracks(dao) }.getOrNull()
+                    if (outcome != null && stitched != null && cleared != null && reanchored != null && deduped != null && thinned != null) {
+                        settings.repairRevision = REPAIR_REVISION
+                        Diagnostics.crumb(
+                            "repair: thinned ${thinned.drives} tracks by ${thinned.pointsRemoved} points; " +
+                            "repair: removed ${deduped.removed} duplicate reconstructed fills; " +
+                            "repair: re-anchored ${reanchored.reanchored} drives begun from a stale fix " +
+                                "(worst %.0f days); ".format(reanchored.worstDays) +
+                                "cleared ${cleared.cleared} impossible energies of ${cleared.examined}; " +
+                                "examined ${outcome.examined} drives, corrected ${outcome.corrected}" +
+                                (if (outcome.corrected > 0)
+                                    ", worst was %.0f km/h".format(outcome.worstBeforeMps * 3.6f)
+                                else "") +
+                                "; stitched ${stitched.fragmentsAbsorbed} fragments back into " +
+                                "${stitched.drivesRecovered} drives, recovering " +
+                                "%.1f km".format(stitched.metresRecovered / 1000.0)
+                        )
+                    }
+                }
+
+                // Range accuracy, learned efficiency, blended rate and SOH for the readout. After
+                // the repair, so it scores against the corrected history.
+                refreshRangeAccuracy(dao)
+                // A charge owed an answer is the first thing a boot should ask again.
+                raisePendingPriceReminder(dao)
+
+                Diagnostics.crumb("starting dashboard server")
+                runCatching { DashboardServer.start(this@TripRecorderService) }
+                    .onFailure { Diagnostics.crumb("dashboard server FAILED: $it") }
+                Diagnostics.crumb("dashboard server step done")
+                // Give any new places a readable default name. Best-effort, rate-limited, and a
+                // user's own label always wins over whatever comes back.
+                runCatching { PlaceNamer.nameMissing(dao) }
+                    .onFailure { Diagnostics.crumb("place naming failed: $it") }
+            }
 
             telematicsLoop()
         }
@@ -673,11 +697,6 @@ class TripRecorderService : Service() {
                 minIntervalMs = TELEMATICS_MIN_INTERVAL_MS
             )
             if (!shouldAttempt) continue
-            // Stamped here rather than after the call, so an attempt abandoned below — no
-            // credentials, no validated network — still counts against the retry floor and a box
-            // with no signal cannot spin once a second.
-            lastAttemptElapsed = nowElapsed
-            telematicsRefresh.value = false
 
             val settings = Settings(this)
             val phone = settings.telematicsPhone
@@ -690,18 +709,28 @@ class TripRecorderService : Service() {
                 _state.value = _state.value.copy(batterySocPercent = null, batteryCharging = null, telematicsConnected = null, odoDriftKm = null)
                 // Deliberately off is not an outage; drop any reminder so it cannot nag on.
                 clearMgLostNotification()
+                noNetworkSinceElapsed = null
                 continue
             }
             // No point calling a car server on a dead link, and it would cost us the account:
-            // a box blocked for hammering is a box with no range numbers at all. Skip the call,
-            // flag the connection down, and let the reminder nag — this is the one case the
-            // driver can actually do something about (switch the hotspot back on).
+            // a box blocked for hammering is a box with no range numbers at all. This is a local
+            // check with no server traffic, so it is NOT stamped against the retry floor — at a
+            // cold boot the hotspot takes seconds to associate, and holding the first real call
+            // back by the 30s floor every time it did was exactly the start-of-drive lag the box
+            // could least afford. Re-checked every wake instead, and the "link down" warning waits
+            // out a grace period so it never barks on the ordinary power-on gap.
             if (!hasValidatedNetwork()) {
+                if (noNetworkSinceElapsed == null) noNetworkSinceElapsed = nowElapsed
                 Diagnostics.crumb("mg: no validated network, poll skipped")
                 _state.update { it.copy(telematicsConnected = false) }
-                notifyMgLost()
+                if (nowElapsed - (noNetworkSinceElapsed ?: nowElapsed) >= MG_LOST_GRACE_MS) notifyMgLost()
                 continue
             }
+            noNetworkSinceElapsed = null
+            // Committing to a real round-trip now, so the retry floor applies from here: a genuine
+            // outage past this point cannot spin the loop against MG's servers once a second.
+            lastAttemptElapsed = nowElapsed
+            telematicsRefresh.value = false
             val want = listOf(phone, password, settings.telematicsVin, settings.telematicsApi)
             if (client == null || creds != want) {
                 val framesDir = RawFrames.directory(this)
@@ -735,6 +764,15 @@ class TripRecorderService : Service() {
                 status.charge?.let { RawFrames.record(framesDir, "charge.decoded", it.toString()) }
                 val ch = status.charge
                 val now = System.currentTimeMillis()
+                // The box boots with the firmware's build date for a clock and GNSS corrects it
+                // seconds into the drive. Charge bookkeeping is the one thing that must not run on
+                // the uncorrected clock: a frame stamped weeks ago opens a charge event weeks ago,
+                // and when the clock jumps mid-poll the session closes in the present — a row
+                // spanning months, or a negative duration. Hold that bookkeeping until the clock is
+                // trustworthy; nothing is lost, because reconcileWithSoc books any charge that
+                // completed in the gap the moment a real clock arrives, from the state of charge
+                // alone. The live readout below still runs, so the driver sees the battery at once.
+                val clockOk = TripRepair.clockSynced(now)
                 // What the car says about being shut down. Only the CAN bus: a locked car is not a
                 // parked one, because the doors lock themselves above walking pace.
                 val powerKw = Telematics.chargePowerKw(ch)
@@ -778,16 +816,18 @@ class TripRecorderService : Service() {
                 // paid for. A slow session never prompts — the home rate stands.
                 val capacity = settings.batteryCapacityKwh
                 val ledger = ChargeLedger(dao, capacity, settings.homeRateInr, settings.outsideRateInr)
-                applyChargeChange(dao, ledger.observe(ch?.isCharging, ch?.soc, powerKw, now, socBeforeThisFrame?.socPercent))
+                if (clockOk) {
+                    applyChargeChange(dao, ledger.observe(ch?.isCharging, ch?.soc, powerKw, now, socBeforeThisFrame?.socPercent))
+                }
 
                 // Then the same question from the other direction: does the ledger explain the
                 // pack? Almost all of this car's charging happens with the box switched off — it
                 // is powered by the vehicle, so it dies at the moment the vehicle is plugged in —
                 // and a fill nobody watched still has to appear in the history. Anything the
                 // sessions cannot account for is booked here from the state of charge itself.
-                val reconciled = runCatching {
+                val reconciled = if (clockOk) runCatching {
                     ledger.reconcileWithSoc(socBeforeThisFrame, ch?.soc, ch?.isCharging, now)
-                }.getOrElse { ChargeLedger.Change.None }
+                }.getOrElse { ChargeLedger.Change.None } else ChargeLedger.Change.None
                 // Both halves of the decision, whenever the pack moved. The trigger for this runs
                 // only against the real car — there is no way to produce a telematics frame on a
                 // desk — so the box has to be able to say for itself what it compared and what it
@@ -805,8 +845,9 @@ class TripRecorderService : Service() {
                 applyChargeChange(dao, reconciled)
 
                 // Coverage honesty: note that the poller ran at all, so the dashboard can show
-                // the days it did not.
-                recordDailyCoverage(dao, settings.zone, now)
+                // the days it did not. Only on a real clock — a stale one would mark 15 Nov 2025
+                // covered and leave today looking dark.
+                if (clockOk) recordDailyCoverage(dao, settings.zone, now)
 
                 // The car quotes its own odometer on telematics frames; the dash is ground truth,
                 // so adopt it as the odometer anchor. Existing trips are never rewritten — the gap
@@ -915,18 +956,39 @@ class TripRecorderService : Service() {
                         }
                     }
                     .onFailure { Diagnostics.crumb("energy sweep failed: $it") }
-            }.onFailure {
-                Diagnostics.crumb("telematics poll failed: $it")
+            }.onFailure { e ->
+                Diagnostics.crumb("telematics poll failed: $e")
                 _state.update { it.copy(telematicsConnected = false) }
-                // A stale token is the usual culprit: forget it and sign in afresh, which may in
-                // turn surface a verification prompt. Nothing else clears the saved session, so a
-                // token stays reused until the server itself rejects it.
-                c?.clearSession()
-                settings.telematicsSession = null
-                c?.let { signInTelematics(it, settings) }
+                // Re-authenticate only when the server actually refused the token. Clearing a valid
+                // session on any failure — which is what this did — threw the token away on every
+                // timeout or 5xx and signed in afresh, and it is repeated logins that make MG start
+                // demanding a verification code a headless box cannot answer. A passing outage keeps
+                // the session and simply retries on the next poll.
+                if (isSessionRejection(e)) {
+                    Diagnostics.crumb("telematics: session rejected, signing in afresh")
+                    c?.clearSession()
+                    settings.telematicsSession = null
+                    c?.let { signInTelematics(it, settings) }
+                }
             }
             lastCallElapsed = SystemClock.elapsedRealtime()
         }
+    }
+
+    /**
+     * Whether a poll failure means the saved session is no longer any good, as against a passing
+     * outage that the next poll will ride out.
+     *
+     * The telematics library surfaces a refused token only in the message — an invalid TAP session,
+     * or an HTTP 401/403 — plus the explicit [io.windsor.telematics.LoginRejectedException] the
+     * sign-in path throws. Everything else (connect/read timeouts, DNS, 5xx) is transport, and the
+     * token is still perfectly valid; forgetting it over those is what drove the repeated-login loop
+     * that MG answers with an OTP challenge.
+     */
+    private fun isSessionRejection(e: Throwable): Boolean {
+        if (e is io.windsor.telematics.LoginRejectedException) return true
+        val m = (e.message ?: "") + " | " + (e.cause?.message ?: "")
+        return "session is invalid" in m || "HTTP 401" in m || "HTTP 403" in m
     }
 
     /**
@@ -1206,22 +1268,31 @@ class TripRecorderService : Service() {
     }
 
     /**
-     * Moves an open drive's start past a leading clock-jump gap — the same rule the closed-trip
-     * repair applies when a drive ends, run live so a corrupt start does not reach the screen.
+     * Corrects an open drive's start the instant the box's clock does, without losing the opening.
+     *
+     * The box wakes with the firmware's build date for a clock and GNSS/NTP corrects it minutes
+     * into the drive; until then every fix is stamped weeks in the past, so the moment the clock
+     * jumps the screen would read a duration of weeks. This is the same correction the closed-trip
+     * repair applies ([TripRepair.correctStaleOpening]), run live against the just-corrected clock:
+     * the stale opening is carried bodily onto the true clock — its kilometres kept — and the start
+     * and in-memory track are rebuilt from the whole, correctly-timed drive.
      */
-    private fun reanchorLiveStart(dao: OdographDao) {
+    private fun reanchorLiveStart(dao: OdographDao, nowOnCorrectedClock: Long) {
         val id = tripId
         if (id < 0) return
-        val points = dao.pointsFor(id)
-        if (points.size < 2) return
-        var i = 0
-        while (i < points.lastIndex && points[i + 1].t - points[i].t >= TripRepair.STALE_START_GAP_MS) i++
-        if (i == 0) return
-        val realStart = points[i].t
-        dao.deletePointsBefore(id, realStart)
-        dao.setStartedAt(id, realStart)
-        startedAt = realStart
-        Diagnostics.crumb("live start re-anchored past clock skew trip=$id")
+        val corrected = TripRepair.correctStaleOpening(dao, id, nowOnCorrectedClock) ?: return
+        dao.setStartedAt(id, corrected.startedAt)
+        startedAt = corrected.startedAt
+        track = LiveTrack().also { t ->
+            dao.pointsFor(id).forEach { p ->
+                t.add(Fix(p.t, p.lat, p.lon, p.speedMps, p.accuracyM, p.interpolated, p.altitudeM))
+            }
+        }
+        // The stillness clock was ticking on the old timeline; left alone it would read the whole
+        // clock jump as time parked and close the drive on the spot. Pull it onto the corrected
+        // clock so arrival is judged from here, not from weeks ago.
+        if (lastMovedAt == Long.MIN_VALUE || lastMovedAt < corrected.startedAt) lastMovedAt = nowOnCorrectedClock
+        Diagnostics.crumb("live start re-anchored past clock skew trip=$id (%.0fd)".format(corrected.offsetMs / 86_400_000.0))
     }
 
     private fun endTripNow() {
@@ -1418,7 +1489,7 @@ class TripRecorderService : Service() {
         // start is that artefact — re-anchor past the leading gap so the time is right and the
         // drive files under today rather than vanishing under a bad date.
         if (tripId >= 0 && startedAt?.let { fix.t - it > MAX_OPEN_TRIP_MS } == true) {
-            reanchorLiveStart(dao)
+            reanchorLiveStart(dao, nowOnCorrectedClock = fix.t)
         }
 
         lastFixAtElapsed = SystemClock.elapsedRealtime()
