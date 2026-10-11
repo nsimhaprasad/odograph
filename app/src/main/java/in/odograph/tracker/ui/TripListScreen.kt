@@ -427,8 +427,10 @@ fun TripListScreen(showTiles: Boolean, palette: Palette) {
                 Chip("MAP", view == TripView.MAP, palette, m) { view = TripView.MAP }
                 Chip("DETAILS", view == TripView.DETAILS, palette, m) { view = TripView.DETAILS }
                 // The driver's own end to the drive. The arrival rule needs twelve minutes of
-                // stillness; a driver who knows they have arrived does not.
-                if (live.tripId >= 0) {
+                // stillness; a driver who knows they have arrived does not. Shown only while
+                // *viewing the live drive itself* — a past drive cannot be ended, and offering it
+                // there (just because some drive is in progress) only misleads.
+                if (live.tripId >= 0 && selected?.id == live.tripId) {
                     Chip("END TRIP", false, palette, m) { TripRecorderService.requestTripEnd() }
                 }
             }
