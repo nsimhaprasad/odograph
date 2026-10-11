@@ -1326,6 +1326,11 @@ class TripRecorderService : Service() {
         track = LiveTrack()
         refreshRangeAccuracy(dao)
         Diagnostics.crumb("trip closed on arrival trip=$closed")
+        // Tell any open list screen that history just changed, exactly as a merge does. Without
+        // this a hand-ended drive is written to disk but the detail pane keeps showing the drive's
+        // pre-close snapshot — no end time, stale distance and duration — until the driver leaves
+        // the screen and comes back.
+        dataChanged.value = dataChanged.value + 1
         // Back it up now rather than at the next scheduled hour. The drive has just become
         // exportable and the ignition may be seconds from cutting: on this box "later" is a
         // promise the hardware cannot keep.

@@ -179,9 +179,26 @@ fun TripListScreen(showTiles: Boolean, palette: Palette) {
     // The recorder bumps this when it changes history under us — a merge, a hand-ended trip.
     val dataRev by TripRecorderService.dataChanged.collectAsState()
     LaunchedEffect(dataRev) {
-        if (dataRev > 0) { reloadList(); selected = null; chosen = emptySet(); selectMode = false }
+        if (dataRev > 0) {
+            val keep = selected?.id
+            reloadList()
+            chosen = emptySet(); selectMode = false
+            // Keep the driver on the drive they were looking at — a hand-ended drive, a drive-mode
+            // edit — rather than dropping them to "Select a drive" and making them tap it again.
+            // Only a merge that folds the drive away (its id now gone) clears the selection. Fall
+            // back to a direct by-id read because the drive may sit below the first reloaded page.
+            selected = keep?.let { id ->
+                trips.firstOrNull { it.id == id }
+                    ?: withContext(Dispatchers.IO) {
+                        loaded { OdographDb.get(ctx).dao().tripById(id) }
+                    }.let { if (it is Loaded.Ready) it.value else null }
+            }
+        }
     }
-    LaunchedEffect(selected?.id) {
+    // Also keyed on dataRev so a change to the selected drive itself — a hand-ended close that
+    // writes its end time and stats, a drive-mode edit — reloads its route and detail even though
+    // its id has not changed.
+    LaunchedEffect(selected?.id, dataRev) {
         val id = selected?.id ?: return@LaunchedEffect
         // The route and the detail pane fail independently of the list and of each other: a drive
         // whose points cannot be read should still show its numbers, and one whose numbers cannot
