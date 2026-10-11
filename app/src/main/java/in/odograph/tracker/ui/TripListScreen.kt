@@ -7,11 +7,16 @@ import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.items
@@ -30,6 +35,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -38,6 +44,7 @@ import `in`.odograph.tracker.core.JourneyAgreement
 import `in`.odograph.tracker.core.RangeCalibration
 import `in`.odograph.tracker.core.EfficiencyStats
 import `in`.odograph.tracker.core.BatteryMath
+import `in`.odograph.tracker.core.TripSegments
 import `in`.odograph.tracker.data.OdographDb
 import `in`.odograph.tracker.data.toSample
 import `in`.odograph.tracker.record.TripRecorderService
@@ -77,6 +84,8 @@ private data class TripDetail(
     val impliedRateInr: Double?,
     /** How the range estimate did on this drive, or null when there was nothing to score. */
     val verdict: RangeCalibration.Verdict? = null,
+    /** The drive cut into consumption stretches, or null when too few frames to say. */
+    val segments: TripSegments.Breakdown? = null,
     val capacityKwh: Double = BatteryMath.DEFAULT_CAPACITY_KWH,
     /** Energy to show: measured where there is one, the indicative figure otherwise. */
     val shownEnergyKwh: Double? = null,
@@ -227,6 +236,8 @@ fun TripListScreen(showTiles: Boolean, palette: Palette) {
                         zone = Settings(ctx).zone
                     )
                 },
+                // The drive read as stretches, from the car's own odometer and energy counter.
+                segments = TripSegments.of(dao.batteryRangeFor(t.id), Settings(ctx).batteryCapacityKwh),
                 capacityKwh = Settings(ctx).batteryCapacityKwh,
                 // Read-only for now, on purpose. This records whether the car drew the same
                 // boundary the app inferred; it does not move the boundary. Acting on the
@@ -599,6 +610,19 @@ private fun TripDetailPane(
             modifier = Modifier.padding(top = m.gap / 3)
         )
 
+        // Route as one line under the date — the question "where was this?" answered first.
+        if (detail.startPlace != null || detail.endPlace != null) {
+            Text(
+                "${detail.startPlace ?: coords(t.startLat, t.startLon)}   →   ${detail.endPlace ?: coords(t.endLat, t.endLon)}",
+                color = palette.accent, fontSize = m.body, fontWeight = FontWeight.Medium,
+                modifier = Modifier.padding(top = m.gap / 2)
+            )
+        }
+
+        // The one number the drive is judged by, and whether it beat what the car expected.
+        TripHero(BatteryMath.kmPerKwh(detail.shownEnergyKwh, t.distanceM), detail.estimated, detail.verdict, palette, m)
+        StatStrip(t, detail, palette, m)
+
         // The drive mode is entered by hand (the car does not report it) and can be set or changed
         // here at any time; the popup only asks when a mode is still blank.
         onSetMode?.let { set ->
@@ -606,208 +630,97 @@ private fun TripDetailPane(
             DriveModeRow(t.driveMode, palette, m) { set(t.id, it) }
         }
 
-        // Above the route, because it is the question the driver actually arrives with. Everything
-        // below is what happened; this is whether we saw it coming.
-        detail.verdict?.let { v ->
-            val capacity = detail.capacityKwh
-            val predictedKm = v.predictedRangeAtFullKm(capacity)
-            val actualKm = v.actualRangeAtFullKm(capacity)
-            val off = kotlin.math.abs(v.errorPercent)
-            val close = off < RangeCalibration.CLOSE_ENOUGH_PERCENT
-
-            SectionLabel("PREDICTION", palette, m)
-            // Mileage first, because that is the unit a driver judges a car in and the one this
-            // comparison is for: a prediction is useful exactly to the degree that its km/kWh
-            // lands on what the drive actually returned. The consumption figure stays beside it
-            // because it is what the range is computed from.
-            DetailRow(
-                "We expected",
-                "%.2f km/kWh  ·  %.1f kWh/100km".format(
-                    100.0 / v.predictedKwhPer100Km, v.predictedKwhPer100Km
-                ),
-                palette, m
-            )
-            DetailRow(
-                "It actually did",
-                "%.2f km/kWh  ·  %.1f kWh/100km".format(
-                    100.0 / v.actualKwhPer100Km, v.actualKwhPer100Km
-                ),
-                palette, m
-            )
-            // The miss in the same unit, signed, so "how far out was it" needs no arithmetic.
-            DetailRow(
-                "Mileage error",
-                "%+.2f km/kWh (%+.0f%%)".format(
-                    100.0 / v.actualKwhPer100Km - 100.0 / v.predictedKwhPer100Km,
-                    (v.predictedKwhPer100Km / v.actualKwhPer100Km - 1.0) * 100.0
-                ),
-                palette, m,
-                valueColor = if (close) palette.good else palette.warn
-            )
-            DetailRow(
-                "Range from it",
-                "%.0f km expected  ·  %.0f km actual".format(predictedKm, actualKm),
-                palette, m
-            )
-            DetailRow(
-                "Verdict",
-                when {
-                    close -> "within %.0f%% — the estimate held".format(off)
-                    // Signed on purpose. "Out by 12%" leaves the driver to work out which way,
-                    // and only one of the two directions strands anybody.
-                    v.errorPercent > 0 -> "%.0f%% optimistic — %.0f km short of the promise"
-                        .format(off, predictedKm - actualKm)
-                    else -> "%.0f%% cautious — %.0f km further than promised"
-                        .format(off, actualKm - predictedKm)
-                },
-                palette, m,
-                valueColor = if (close) palette.good else palette.warn
-            )
-            DetailRow(
-                "Based on",
-                "%d earlier drives%s".format(
-                    v.basedOnDrives,
-                    if (v.corrected) ", bias-corrected" else ", uncorrected"
-                ),
-                palette, m
-            )
+        // The heart of the view: the drive read as stretches, so a long frugal opening and a
+        // thirsty highway leg are told apart instead of averaged into one flat figure.
+        detail.segments?.takeIf { it.segments.isNotEmpty() }?.let { bd ->
+            SectionLabel("CONSUMPTION BY STRETCH", palette, m)
+            ConsumptionSection(bd, palette, m)
         }
 
-        SectionLabel("ROUTE", palette, m)
-        DetailRow("Start", detail.startPlace ?: coords(t.startLat, t.startLon), palette, m)
-        DetailRow("End", detail.endPlace ?: coords(t.endLat, t.endLon), palette, m)
-        DetailRow("Track", "${formatKm(t.distanceM)} km  ·  ${detail.points} points", palette, m)
-        if (t.minTempC != null && t.maxTempC != null) {
-            DetailRow(
-                "Outside",
-                if (t.minTempC == t.maxTempC) "%.0f °C".format(t.minTempC)
-                else "%.0f – %.0f °C".format(t.minTempC, t.maxTempC) +
-                    (t.avgTempC?.let { "  ·  mean %.0f".format(it) } ?: ""),
-                palette, m
-            )
-        }
-        // Where this drive's start and end came from. Every boundary in this app is inferred from
-        // stillness, and the car is the only second opinion available — it numbers its own
-        // journeys, so a drive carrying two of its numbers is one the app ran together.
-        DetailRow(
-            "Boundary",
-            when (detail.boundary) {
-                JourneyAgreement.Verdict.AGREED ->
-                    "the car agrees this was one journey"
-                JourneyAgreement.Verdict.CAR_SPLIT_IT ->
-                    "the car counted more than one journey here"
-                JourneyAgreement.Verdict.UNKNOWN ->
-                    "the car did not say — no link during this drive"
-            },
-            palette, m,
-            valueColor = when (detail.boundary) {
-                JourneyAgreement.Verdict.AGREED -> palette.good
-                JourneyAgreement.Verdict.CAR_SPLIT_IT -> palette.caution
-                JourneyAgreement.Verdict.UNKNOWN -> palette.dim
-            }
+        SectionLabel("DETAILS", palette, m)
+        TripDetailsGrid(t, palette, m)
+        Spacer(Modifier.height(m.pad))
+    }
+}
+
+/** The hero: overall km/kWh, and — when the drive was scored — how it did against what was expected. */
+@Composable
+private fun TripHero(kmPerKwh: Double?, estimated: Boolean, verdict: RangeCalibration.Verdict?, palette: Palette, m: Metrics) {
+    Row(
+        Modifier.padding(top = m.gap),
+        verticalAlignment = Alignment.Bottom,
+        horizontalArrangement = Arrangement.spacedBy(m.gap)
+    ) {
+        Text(
+            kmPerKwh?.let { "%.1f".format(it) } ?: "—",
+            color = if (estimated) palette.caution else palette.numeral,
+            fontSize = m.hero, fontWeight = FontWeight.Bold
         )
-
-        SectionLabel("BATTERY", palette, m)
-        if (t.socStart != null && t.socEnd != null) {
-            DetailRow("Charge", "%.0f → %.0f %%".format(t.socStart, t.socEnd), palette, m)
-        }
-        // An estimated drive says so before it says anything else, because every number under
-        // this line is reckoned from its distance rather than watched, and a figure whose nature
-        // is disclosed two rows later has already been read as a measurement.
-        if (detail.estimated) {
-            DetailRow(
-                "These figures",
-                "indicative — no car link during this drive",
-                palette, m,
-                valueColor = palette.caution
+        Column(Modifier.padding(bottom = m.gap / 2)) {
+            Text("km / kWh", color = palette.dim, fontSize = m.body, fontWeight = FontWeight.Medium)
+            Text(
+                if (estimated) "estimated — no link" else "overall efficiency",
+                color = palette.dim, fontSize = m.label, letterSpacing = 1.sp
             )
-        }
-        detail.shownEnergyKwh?.let {
-            DetailRow(
-                if (detail.estimated) "Energy (est.)" else "Energy",
-                "%.2f kWh".format(it),
-                palette, m,
-                valueColor = if (detail.estimated) palette.caution else palette.numeral
-            )
-        }
-        BatteryMath.kmPerKwh(detail.shownEnergyKwh, t.distanceM)?.let {
-            DetailRow(
-                if (detail.estimated) "Mileage (est.)" else "Mileage",
-                "%.2f km/kWh".format(it),
-                palette, m,
-                valueColor = if (detail.estimated) palette.caution else palette.numeral
-            )
-        }
-        detail.kwhPer100?.let { DetailRow("Consumption", "%.2f kWh/100km".format(it), palette, m) }
-        detail.rangeAtFullKm?.let { DetailRow("Range at 100%", "%.0f km".format(it), palette, m) }
-        detail.shownCostInr?.let {
-            DetailRow(
-                if (detail.estimated) "Cost (est.)" else "Cost",
-                "₹ %.2f".format(it),
-                palette, m,
-                valueColor = if (detail.estimated) palette.caution else palette.numeral
-            )
-        }
-        // A drive the link was down for, whose energy was recovered afterwards from the car's own
-        // running counters. Measured, not guessed — but worth saying, because the driver knows
-        // perfectly well there was no signal and would otherwise wonder where the number came from.
-        if (detail.energySource == "backfill") {
-            DetailRow(
-                "Recovered",
-                "from the car's counters after the drive",
-                palette, m,
-                valueColor = palette.good
-            )
-        }
-        detail.impliedRateInr?.let {
-            DetailRow("Effective rate", "₹ %.2f /kWh".format(it), palette, m)
-        }
-
-        // Where this drive's energy figure came from, and what the other source would have said.
-        // The two are not equals: whole-percent state of charge can only express energy in steps
-        // of 0.53 kWh on this pack, so a short errand is mostly quantisation, while the car's own
-        // counter resolves to a tenth. The counter wins when it can answer at all.
-        val carEnergy = t.carEnergyKwh
-        val carDistance = t.carDistanceKm
-        val socEnergy = BatteryMath.consumedFromSoc(t.socStart, t.socEnd, detail.capacityKwh)
-        if (carEnergy != null || carDistance != null || socEnergy != null) {
-            SectionLabel("WHERE THE ENERGY CAME FROM", palette, m)
-            val usedCar = carEnergy != null && carEnergy > 0.0 &&
-                t.energyKwh != null && kotlin.math.abs(t.energyKwh - carEnergy) < 0.011
-            DetailRow(
-                "Source",
-                if (usedCar) "the car's own counter" else "charge level (0.53 kWh steps)",
-                palette, m,
-                valueColor = if (usedCar) palette.good else palette.dim
-            )
-            carEnergy?.let { DetailRow("Car's counter", "%.2f kWh".format(it), palette, m) }
-            socEnergy?.let { DetailRow("From charge level", "%.2f kWh".format(it), palette, m) }
-            carDistance?.let { DetailRow("Car's distance", "%.1f km".format(it), palette, m) }
-            if (carEnergy != null && carEnergy > 0 && socEnergy != null && socEnergy > 0) {
-                val gap = (socEnergy / carEnergy - 1.0) * 100.0
-                DetailRow(
-                    "Charge level was",
-                    if (kotlin.math.abs(gap) < 1) "the same"
-                    else "%+.0f%% against the counter".format(gap),
-                    palette, m,
-                    valueColor = if (kotlin.math.abs(gap) < 15) palette.good else palette.warn
+            verdict?.let { v ->
+                val projected = 100.0 / v.predictedKwhPer100Km
+                val deltaPct = (v.predictedKwhPer100Km / v.actualKwhPer100Km - 1.0) * 100.0
+                val up = deltaPct >= 0
+                Text(
+                    "${if (up) "▲" else "▼"} %.0f%% ${if (up) "over" else "under"} your usual %.1f".format(kotlin.math.abs(deltaPct), projected),
+                    color = if (up) palette.good else palette.warn,
+                    fontSize = m.body, fontWeight = FontWeight.Medium,
+                    modifier = Modifier.padding(top = m.gap / 4)
                 )
             }
         }
+    }
+}
 
-        SectionLabel("SPEED", palette, m)
-        DetailRow("Max", "${mpsToKmh(t.maxSpeedMps).toInt()} km/h", palette, m)
-        DetailRow("Average", "${mpsToKmh(t.avgSpeedMps.toFloat()).toInt()} km/h", palette, m)
-        DetailRow("Moving", formatHhMm(t.movingS), palette, m)
-        DetailRow("Stationary", formatHhMm((t.durationS - t.movingS).coerceAtLeast(0L)), palette, m)
-        if (t.slowestKmMps > 0f) {
-            DetailRow("Slowest km", "${mpsToKmh(t.slowestKmMps.toFloat()).toInt()} km/h", palette, m)
+/** The supporting figures, as a wrapping strip of small label/value pairs. */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun StatStrip(t: TripEntity, detail: TripDetail, palette: Palette, m: Metrics) {
+    FlowRow(
+        Modifier.fillMaxWidth().padding(top = m.gap),
+        horizontalArrangement = Arrangement.spacedBy(m.pad),
+        verticalArrangement = Arrangement.spacedBy(m.gap / 2)
+    ) {
+        MiniStat("DISTANCE", "${formatKm(t.distanceM)} km", palette, m)
+        MiniStat("TIME", formatHhMm(t.durationS), palette, m)
+        detail.shownEnergyKwh?.let { MiniStat(if (detail.estimated) "ENERGY EST" else "ENERGY", "%.1f kWh".format(it), palette, m) }
+        detail.shownCostInr?.let { MiniStat("COST", "₹%.0f".format(it), palette, m) }
+        MiniStat("AVG SPEED", "${mpsToKmh(t.avgSpeedMps.toFloat()).toInt()} km/h", palette, m)
+    }
+}
+
+/** The secondary facts, demoted to one quiet wrapping grid instead of a page of rows. */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun TripDetailsGrid(t: TripEntity, palette: Palette, m: Metrics) {
+    FlowRow(
+        Modifier.fillMaxWidth().padding(top = m.gap / 2),
+        horizontalArrangement = Arrangement.spacedBy(m.pad),
+        verticalArrangement = Arrangement.spacedBy(m.gap / 2)
+    ) {
+        if (t.socStart != null && t.socEnd != null) MiniStat("CHARGE", "%.0f→%.0f%%".format(t.socStart, t.socEnd), palette, m)
+        MiniStat("TOP SPEED", "${mpsToKmh(t.maxSpeedMps).toInt()} km/h", palette, m)
+        if (t.minTempC != null && t.maxTempC != null) {
+            MiniStat("OUTSIDE", if (t.minTempC == t.maxTempC) "%.0f°".format(t.minTempC) else "%.0f–%.0f°".format(t.minTempC, t.maxTempC), palette, m)
         }
-
-        SectionLabel("TERRAIN", palette, m)
         if (t.elevGainM > 0 || t.elevLossM > 0) {
-            DetailRow("Climb / descend", "↑%.0f m  ·  ↓%.0f m".format(t.elevGainM, t.elevLossM), palette, m)
+            MiniStat("CLIMB", "↑%.0f m".format(t.elevGainM), palette, m)
+            MiniStat("DESCENT", "↓%.0f m".format(t.elevLossM), palette, m)
         }
+        t.driveMode?.let { MiniStat("MODE", it, palette, m) }
+    }
+}
+
+@Composable
+private fun MiniStat(label: String, value: String, palette: Palette, m: Metrics) {
+    Column {
+        Text(value, color = palette.numeral, fontSize = m.read, fontWeight = FontWeight.SemiBold)
+        Text(label, color = palette.dim, fontSize = m.label, letterSpacing = 1.sp)
     }
 }
 
