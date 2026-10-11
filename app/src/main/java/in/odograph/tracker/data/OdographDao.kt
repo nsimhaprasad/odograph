@@ -192,6 +192,20 @@ interface OdographDao {
     @Query("DELETE FROM battery WHERE tripId = -1 AND t < :olderThanMs")
     fun pruneParkedFrames(olderThanMs: Long)
 
+    /**
+     * Re-files parked frames stamped at [fromMs] or later onto [tripId], returning how many moved.
+     *
+     * A drive opens only once movement is confirmed — a short window of fixes after the wheels
+     * first turned. A telematics frame that lands in that window is written while no trip is open
+     * yet, so it carries the parked bucket (-1) though the car is plainly driving. Left there it is
+     * lost to the drive: the opening frame, the fullest one, missing from the energy sum, and it
+     * quietly inflates the overnight-drain reading on top. When the trip opens it claims back every
+     * parked frame from the window's first fix onward — frames from the genuine park before the
+     * drive are older than that and stay put.
+     */
+    @Query("UPDATE battery SET tripId = :tripId WHERE tripId = -1 AND t >= :fromMs")
+    fun claimParkedFramesSince(tripId: Long, fromMs: Long): Int
+
     // ---- price reminders ----
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)

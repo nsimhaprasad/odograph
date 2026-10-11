@@ -869,7 +869,11 @@ class TripRecorderService : Service() {
                 // driving is recorded above as evidence, but the readout, the trip's charge
                 // summary and every range figure carry on from the previous level instead.
                 val soc = BatteryMath.plausibleLiveSoc(
-                    ch?.soc, socBeforeThisFrame?.socPercent, ch?.isCharging
+                    ch?.soc, socBeforeThisFrame?.socPercent, ch?.isCharging,
+                    // How long since the reading we are comparing against. A wide gap means the car
+                    // was parked — possibly on charge — between the two, so a big rise is real and
+                    // the guard must not clamp the first post-charge frame back to last night.
+                    gapMs = socBeforeThisFrame?.let { now - it.at } ?: 0L
                 )
                 if (soc != null && ch != null) {
                     val state = _state.value
@@ -1190,7 +1194,15 @@ class TripRecorderService : Service() {
         refreshRangeAccuracy(dao)
         recovery = TripRecovery.Recovery()
         startedAt = first.t
-        Diagnostics.crumb("trip opened on movement trip=$tripId")
+        // Any telematics frame that arrived in the open-on-movement window was written before this
+        // trip existed and so carries the parked bucket though the car was already driving. Claim
+        // those frames onto the drive now — otherwise its opening, the fullest frame where the
+        // energy count should begin, stays lost in the parked pile. See claimParkedFramesSince.
+        val claimedFrames = dao.claimParkedFramesSince(tripId, first.t)
+        Diagnostics.crumb(
+            "trip opened on movement trip=$tripId" +
+                if (claimedFrames > 0) " (claimed $claimedFrames opening frame(s))" else ""
+        )
 
         // All but the last: the caller writes that one itself, and a point written twice would
         // put a zero-length segment into the middle of the departure.

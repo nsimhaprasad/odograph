@@ -486,6 +486,26 @@ class BatteryMathTest {
         assertThat(BatteryMath.plausibleLiveSoc(100.0, 63.0, charging = true)).isEqualTo(100.0)
     }
 
+    /**
+     * The box is powered only while driving, so an overnight charge happens with nothing watching.
+     * The next drive's first frame reports a full pack against last night's level, charging already
+     * finished — a large rise the guard would otherwise clamp to last night. Across such a gap the
+     * car was plainly parked, possibly plugged in, so the jump is real and stands.
+     */
+    @Test
+    fun `a rise across a long gap is believed as a charge the box did not see`() {
+        val gap = BatteryMath.MAX_GUARDED_SOC_GAP_MS + 1
+        assertThat(BatteryMath.plausibleLiveSoc(100.0, 45.0, charging = false, gapMs = gap))
+            .isEqualTo(100.0)
+    }
+
+    /** The same jump seconds apart is the spurious mid-drive frame again, and still clamped. */
+    @Test
+    fun `the same jump within one drive is still not believed`() {
+        assertThat(BatteryMath.plausibleLiveSoc(100.0, 45.0, charging = false, gapMs = 30_000L))
+            .isEqualTo(45.0)
+    }
+
     @Test
     fun `with nothing to compare against the frame stands`() {
         assertThat(BatteryMath.plausibleLiveSoc(100.0, null, false)).isEqualTo(100.0)

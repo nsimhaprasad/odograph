@@ -187,11 +187,21 @@ object TripRecovery {
             return Recovery()
         }
 
-        val stats = TripStats.compute(fixes)
+        // The drive ended when the car last moved, not when the arrival rule finally fired twelve
+        // minutes later. Every fix past the last moving one is that dwell — the engine idling at
+        // the destination while the timer ran down, or the stretch a power cut left before the next
+        // boot closed the row — and it is neither distance nor driving. So the end time and the
+        // duration are measured to the arrival (the first fix at rest), while the resting position
+        // stays the last fix, which is where the car actually came to rest.
+        val lastMovingIndex = fixes.indexOfLast { it.speedMps >= Arrival.STILL_SPEED_MPS }
+        val arrivalIndex = if (lastMovingIndex in 0 until fixes.lastIndex) lastMovingIndex + 1 else fixes.lastIndex
+        val driveFixes = fixes.subList(0, arrivalIndex + 1)
+
+        val stats = TripStats.compute(driveFixes)
         val first = points.first()
         val last = points.last()
         dao.finishTrip(
-            tripId, last.t, stats.distanceM, stats.durationS,
+            tripId, points[arrivalIndex].t, stats.distanceM, stats.durationS,
             stats.movingS, stats.maxSpeedMps, stats.avgSpeedMps, stats.slowestKmSpeedMps,
             stats.elevGainM, stats.elevLossM
         )

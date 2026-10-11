@@ -50,6 +50,30 @@ class TripRecoveryTest {
         assertThat(ended.seedLat).`as`("the next trip starts from here").isEqualTo(12.9800)
     }
 
+    /**
+     * A drive ends when the car last moved, not twelve minutes later when the arrival rule finally
+     * fires. The fixes recorded while it sat at the destination are the dwell, not the drive, so
+     * the end time and duration are measured to the arrival — while the destination stays where it
+     * actually parked, the last fix.
+     */
+    @Test
+    fun `the parked dwell before arrival is not counted in the end time or duration`() {
+        val dao = db.dao()
+        val id = dao.startTrip(1_000_000L)
+        dao.appendPoint(PointEntity(0, id, 1_000_000L, 12.9700, 77.5900, 10f, null, 900.0, 5f, false))
+        dao.appendPoint(PointEntity(0, id, 1_060_000L, 12.9800, 77.5900, 10f, null, 905.0, 5f, false))
+        // Came to rest here, then sat still for twelve minutes while the engine kept recording.
+        dao.appendPoint(PointEntity(0, id, 1_120_000L, 12.9800, 77.5900, 0f, null, 905.0, 5f, false))
+        dao.appendPoint(PointEntity(0, id, 1_840_000L, 12.9800, 77.5900, 0f, null, 905.0, 5f, false))
+
+        TripRecovery.close(dao, id)
+
+        val trip = dao.tripById(id)!!
+        assertThat(trip.endedAt).`as`("ended at the arrival, not the end of the dwell").isEqualTo(1_120_000L)
+        assertThat(trip.durationS).`as`("two minutes of driving, not fourteen").isEqualTo(120L)
+        assertThat(trip.endLat).`as`("destination is still where it parked").isEqualTo(12.9800)
+    }
+
     @Test
     fun `closing a trip that never moved discards it rather than writing a zero km drive`() {
         val dao = db.dao()

@@ -115,6 +115,24 @@ class OdographDbTest {
     }
 
     @Test
+    fun `a trip opening on movement claims the parked frames since its first fix`() {
+        val dao = db.dao()
+        // A genuine parked frame from before the drive, then two written in the open-on-movement
+        // window — bucketed -1 because no trip existed yet, though the car was already driving.
+        dao.insertBattery(BatteryEntity(tripId = -1, t = 1_000L, socPercent = 100.0, charging = false))
+        dao.insertBattery(BatteryEntity(tripId = -1, t = 5_000L, socPercent = 99.0, charging = false))
+        dao.insertBattery(BatteryEntity(tripId = -1, t = 6_000L, socPercent = 98.0, charging = false))
+
+        val trip = dao.startTrip(5_000L)
+        val claimed = dao.claimParkedFramesSince(trip, fromMs = 5_000L)
+
+        assertThat(claimed).`as`("the two opening frames are claimed").isEqualTo(2)
+        assertThat(dao.batteryRangeFor(trip).map { it.t }).containsExactly(5_000L, 6_000L)
+        // The earlier genuine park frame predates the window and stays put.
+        assertThat(dao.parkedBatteryFrames().map { it.t }).containsExactly(1_000L)
+    }
+
+    @Test
     fun `period cost and charge buckets sum only the asked window`() {
         val dao = db.dao()
         val t1 = dao.startTrip(1_000L)

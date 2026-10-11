@@ -257,14 +257,33 @@ object BatteryMath {
     const val MAX_SOC_RISE_WHILE_DRIVING = 5.0
 
     /**
-     * The charge level to show live: [reported], unless it has jumped up while driving.
+     * The longest gap between two charge-level readings over which the rise-guard still applies,
+     * milliseconds.
      *
-     * A frame that says the battery filled itself is kept on disk — it is evidence — but the
-     * readout carries on from [previous] instead. Charging passes untouched: a rising level is
-     * the whole point of it. With nothing to compare against, [reported] stands.
+     * The guard below is for a spurious frame mid-drive — one that says the pack filled itself
+     * seconds after a neighbour that did not. Within a drive the readings are at most a couple of
+     * minutes apart, so a gap longer than this is not two frames of one drive at all: it is the
+     * first frame of the drive *after* a stop, and on a box powered only while driving a stop can
+     * mean the car was plugged in overnight with nothing watching. A real charge then shows up as a
+     * large rise with charging already finished — the exact shape the guard was about to reject and
+     * clamp back to last night's level — so past this gap the reading is believed. Ten minutes is
+     * the same stillness past which a frame is already filed as parked rather than driven.
      */
-    fun plausibleLiveSoc(reported: Double?, previous: Double?, charging: Boolean?): Double? {
+    const val MAX_GUARDED_SOC_GAP_MS = 10 * 60_000L
+
+    /**
+     * The charge level to show live: [reported], unless it has jumped up within a single drive.
+     *
+     * A frame that says the battery filled itself mid-drive is kept on disk — it is evidence — but
+     * the readout carries on from [previous] instead. Charging passes untouched: a rising level is
+     * the whole point of it. A rise across a [gapMs] longer than [MAX_GUARDED_SOC_GAP_MS] passes
+     * too: that is a drive's first frame after a charge the box never saw, where the jump from last
+     * night's level to a full tank is real, not a glitch. With nothing to compare against, or when
+     * the readings are too far apart to be one drive, [reported] stands.
+     */
+    fun plausibleLiveSoc(reported: Double?, previous: Double?, charging: Boolean?, gapMs: Long = 0L): Double? {
         if (reported == null || previous == null || charging == true) return reported
+        if (gapMs > MAX_GUARDED_SOC_GAP_MS) return reported
         return if (reported - previous > MAX_SOC_RISE_WHILE_DRIVING) previous else reported
     }
 
